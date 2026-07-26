@@ -48,6 +48,7 @@ def verify():
 
             print("STDOUT:", result.stdout)
             print("STDERR:", result.stderr)
+            print("RETURN CODE:", result.returncode)
 
             output = result.stdout.strip()
 
