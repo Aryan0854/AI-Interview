@@ -46,7 +46,17 @@ def verify():
                 timeout=120
             )
 
+            print("STDOUT:", result.stdout)
+            print("STDERR:", result.stderr)
+
             output = result.stdout.strip()
+
+            if not output:
+                return jsonify({
+                    "matched": False,
+                    "confidence": 0,
+                    "reason": result.stderr or "No output returned from compare_images.py"
+                }), 500
 
             return output, 200, {
                 "Content-Type": "application/json"
@@ -58,7 +68,6 @@ def verify():
 
             if os.path.exists(selfie_path):
                 os.remove(selfie_path)
-
     except Exception as e:
         return jsonify({
             "matched": False,
