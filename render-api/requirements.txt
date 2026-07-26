@@ -1,2 +1,8 @@
 flask
 gunicorn
+numpy
+pillow
+opencv-python-headless
+facenet-pytorch
+torch
+torchvision
