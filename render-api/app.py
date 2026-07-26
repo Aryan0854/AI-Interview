@@ -43,7 +43,7 @@ def verify():
                 ],
                 capture_output=True,
                 text=True,
-                timeout=120
+                timeout=300
             )
 
             print("STDOUT:", result.stdout)
