@@ -36,6 +36,7 @@ export function DashboardInner() {
   const router = useRouter();
   const [analytics, setAnalytics] = useState<any>(null);
   const [results, setResults]     = useState<any[]>([]);
+  const [assignedTest, setAssignedTest] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr]       = useState<string | null>(null);
   const [tab, setTab]       = useState<"analytics" | "tests">("analytics");
@@ -46,12 +47,14 @@ export function DashboardInner() {
     if (!token) { setErr("Please sign in to access the dashboard."); setLoading(false); return; }
     (async () => {
       try {
-        const [a, r] = await Promise.all([
+        const [a, r, assigned] = await Promise.all([
           fetchAnalytics(token),
           fetchResults(token),
+          fetchAssignedTest(token),
         ]);
         if (cancelled) return;
         setAnalytics(a); setResults(r);
+        if (assigned?.test_id) setAssignedTest(assigned);
       } catch (e: any) { if (!cancelled) setErr(e.message); }
       finally { if (!cancelled) setLoading(false); }
     })();
@@ -228,6 +231,26 @@ export function DashboardInner() {
 
       <main className="max-w-full mx-auto px-6 md:px-12 -mt-6 pb-14 space-y-6 relative z-10">
 
+        {assignedTest && (
+          <Card className="p-6 bg-card border border-indigo-200 dark:border-indigo-900 shadow-soft">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-primary">Assigned Product Assessment</p>
+                <h2 className="mt-1 text-xl font-bold text-foreground">{assignedTest.topic_title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {assignedTest.total_questions} questions · {assignedTest.status === "completed" ? "Completed" : "Ready to start"}
+                </p>
+              </div>
+              <Button
+                className="rounded-xl"
+                onClick={() => router.push(`/employee/tests/${assignedTest.test_id}`)}
+              >
+                {assignedTest.status === "completed" ? "Review Assessment" : "Start Assessment"}
+              </Button>
+            </div>
+          </Card>
+        )}
+
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
         <div className="flex gap-1 rounded-xl bg-card p-1 w-fit shadow-soft border border-border transition-colors duration-300">
           {([
@@ -386,6 +409,15 @@ async function fetchResults(token: string): Promise<any[]> {
   });
   if (!r.ok) throw new Error("Failed to load results");
   return r.json();
+}
+
+async function fetchAssignedTest(token: string): Promise<any | null> {
+  const r = await fetch("/api/employee/assigned-test", {
+    headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  return data?.test_id ? data : null;
 }
 
 // ---------------------------------------------------------------------------

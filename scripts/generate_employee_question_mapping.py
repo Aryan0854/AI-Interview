@@ -97,7 +97,7 @@ def get_question_pool_for_product(emp_product):
 
 # 2. Read Master Employee File
 print("Loading Master Employee File...")
-master_filepath = "Resource details less tahn 3.5 rating.xlsx"
+master_filepath = "Resource details less then 3.5 rating (1).xlsx"
 wb_emp = openpyxl.load_workbook(master_filepath)
 sheet_emp = wb_emp.active
 
@@ -174,7 +174,7 @@ for r_idx, row in enumerate(emp_rows[1:], start=2):
     new_row = row_values + assigned_questions + [remark]
     sheet_out.append(new_row)
 
-output_filename = "Employee_Question_Mapping.xlsx"
+output_filename = "Resource_Question_Mapping.xlsx"
 wb_out.save(output_filename)
 print(f"Saved mapping output to {output_filename}")
 print(f"Successfully mapped {mapped_count} employees.")

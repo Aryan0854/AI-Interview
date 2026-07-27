@@ -6,6 +6,7 @@ export interface PortalSettings {
   showEffectivenessTab: boolean;
   showManagerConsoleTab: boolean;
   portalFeaturesEnabled: boolean;
+  showSystemLogsViewer: boolean;
 }
 
 export class SettingsService {
@@ -47,6 +48,7 @@ export class SettingsService {
           showEffectivenessTab: parsed.showEffectivenessTab !== false,
           showManagerConsoleTab: parsed.showManagerConsoleTab !== false,
           portalFeaturesEnabled: parsed.portalFeaturesEnabled !== false,
+          showSystemLogsViewer: parsed.showSystemLogsViewer !== false,
         };
       }
     } catch (dbErr) {
@@ -61,12 +63,14 @@ export class SettingsService {
         showEffectivenessTab: parsed.showEffectivenessTab !== false,
         showManagerConsoleTab: parsed.showManagerConsoleTab !== false,
         portalFeaturesEnabled: parsed.portalFeaturesEnabled !== false,
+        showSystemLogsViewer: parsed.showSystemLogsViewer !== false,
       };
     } catch (e: any) {
       return {
         showEffectivenessTab: true,
         showManagerConsoleTab: true,
         portalFeaturesEnabled: true,
+        showSystemLogsViewer: true,
       };
     }
   }

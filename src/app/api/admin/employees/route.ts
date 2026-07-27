@@ -16,6 +16,11 @@ const getEmployeesJsonPath = () => {
 };
 
 import { cacheStore } from '@/lib/cache-store';
+import {
+  loadResourceQuestionMapping,
+  loadEmployeeTestManifest,
+  mergeResourcePortalData,
+} from '@/services/resource-mapping-service';
 
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -130,6 +135,7 @@ export async function GET(request: NextRequest) {
         if (!empId) return;
 
         const attInfo = attemptsMap.get(test.id);
+        const answeredCount = attInfo?.total ?? 0;
         const score = attInfo && attInfo.total > 0 ? Math.round((attInfo.correct / attInfo.total) * 100) : 0;
 
         const list = testResultsMap.get(empId) || [];
@@ -155,6 +161,7 @@ export async function GET(request: NextRequest) {
           difficulty: test.difficulty,
           totalQuestions: test.total_questions,
           status: test.status,
+          answeredCount,
           score,
           startedAt: test.started_at,
           completedAt: test.completed_at
@@ -182,6 +189,7 @@ export async function GET(request: NextRequest) {
         if (!empId) return;
 
         const attInfo = localAttemptsMap.get(test.id);
+        const answeredCount = attInfo?.total ?? 0;
         const score = attInfo && attInfo.total > 0 ? Math.round((attInfo.correct / attInfo.total) * 100) : 0;
 
         const list = testResultsMap.get(empId) || [];
@@ -208,6 +216,7 @@ export async function GET(request: NextRequest) {
             difficulty: test.difficulty,
             totalQuestions: test.total_questions,
             status: test.status,
+            answeredCount,
             score,
             startedAt: test.started_at,
             completedAt: test.completed_at
@@ -263,7 +272,19 @@ export async function GET(request: NextRequest) {
   }
 
   if (!isExport) {
-    cacheStore.set("employees", { employees, allTestResults }, activeJdId);
+    let resourcePortalEmployees: any[] = [];
+    try {
+      const [mappingRows, manifest] = await Promise.all([
+        loadResourceQuestionMapping(),
+        loadEmployeeTestManifest(),
+      ]);
+      resourcePortalEmployees = mergeResourcePortalData(mappingRows, allTestResults, manifest);
+    } catch (mappingErr) {
+      console.warn("Failed to load Resource_Question_Mapping.xlsx:", mappingErr);
+    }
+
+    cacheStore.set("employees", { employees, allTestResults, resourcePortalEmployees }, activeJdId);
+    return NextResponse.json({ employees, allTestResults, resourcePortalEmployees });
   }
 
   return NextResponse.json({ employees, allTestResults });
