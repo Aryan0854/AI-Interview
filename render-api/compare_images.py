@@ -6,6 +6,11 @@ import numpy as np
 from PIL import Image
 from facenet_pytorch import MTCNN, InceptionResnetV1, fixed_image_standardization
 import cv2
+device = torch.device('cpu')
+        
+        # Initialize models
+mtcnn = MTCNN(keep_all=False, device=device)
+resnet = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 
 def get_face_embedding(resnet, face_pil, device):
     face_tensor = torch.tensor(np.array(face_pil), dtype=torch.float32).permute(2, 0, 1)
@@ -21,6 +26,7 @@ def detect_and_extract_face(img_path, mtcnn, resnet, device):
     img = Image.open(img_path)
     if img.mode != 'RGB':
         img = img.convert('RGB')
+    img.thumbnail((800, 800))
         
     # Guard against tiny images that cause MTCNN internals to throw torch.cat() errors
     width, height = img.size
@@ -28,7 +34,7 @@ def detect_and_extract_face(img_path, mtcnn, resnet, device):
         return None
 
     # Try original and rotated configurations (0, 90, 180, 270 degrees)
-    rotations = [None, Image.ROTATE_90, Image.ROTATE_180, Image.ROTATE_270]
+    rotations = [None]
 
     for rotation in rotations:
         rotated_img = img
@@ -85,11 +91,7 @@ def main():
     selfie_path = sys.argv[2]
 
     try:
-        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         
-        # Initialize models
-        mtcnn = MTCNN(keep_all=False, device=device)
-        resnet = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 
         # Extract embeddings
         id_embedding = detect_and_extract_face(id_path, mtcnn, resnet, device)
