@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequest, isAssessmentOnlyEmployee, isProductQbEmployee, PRODUCT_ASSESSMENT_TOPIC_ID } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import { writeLog } from "@/lib/structured-logger";
 
@@ -20,6 +20,15 @@ async function getEmployeeUuid(employeeId: string): Promise<string> {
   return employeeId;
 }
 
+function normalizeEmployeeId(value: string | null | undefined): string {
+  return String(value ?? "").trim();
+}
+
+function employeeOwnsTest(test: { employee_id?: string | null }, employeeId: string, employeeUuid: string): boolean {
+  const testOwner = normalizeEmployeeId(test.employee_id);
+  return testOwner === normalizeEmployeeId(employeeId) || testOwner === normalizeEmployeeId(employeeUuid);
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
@@ -31,33 +40,52 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     let testRow: any = null;
     let questions: any[] = [];
 
-    try {
-      const { data, error } = await supabase
-        .from("tests")
-        .select("*")
-        .eq("id", id)
-        .eq("employee_id", employeeUuid)
-        .single();
-
-      if (error || !data) {
-        throw error || new Error("Test not found in Supabase");
-      }
-      testRow = data;
-
-      const { data: qData } = await supabase
-        .from("test_questions")
-        .select("*")
-        .eq("test_id", id)
-        .order("question_index");
-      questions = qData ?? [];
-    } catch (dbErr) {
-      console.warn("Supabase load failed. Falling back to local file-based database.", dbErr);
-      const localTest = await localTestsDb.getTestById(id);
-      if (!localTest || localTest.employee_id !== auth.employeeId) {
-        return NextResponse.json({ error: "Not found" }, { status: 404 });
-      }
+    const localTest = await localTestsDb.getTestById(id);
+    if (localTest && employeeOwnsTest(localTest, auth.employeeId, employeeUuid)) {
       testRow = localTest;
       questions = await localTestsDb.getQuestions(id);
+    } else {
+      try {
+        const { data, error } = await supabase
+          .from("tests")
+          .select("*")
+          .eq("id", id)
+          .eq("employee_id", employeeUuid)
+          .single();
+
+        if (error || !data) {
+          throw error || new Error("Test not found in Supabase");
+        }
+        testRow = data;
+
+        const { data: qData } = await supabase
+          .from("test_questions")
+          .select("*")
+          .eq("test_id", id)
+          .order("question_index");
+        questions = qData ?? [];
+      } catch (dbErr) {
+        console.warn("Supabase load failed. Falling back to local file-based database.", dbErr);
+        if (!localTest || !employeeOwnsTest(localTest, auth.employeeId, employeeUuid)) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        testRow = localTest;
+        questions = await localTestsDb.getQuestions(id);
+      }
+    }
+
+    if (
+      testRow.topic_id === PRODUCT_ASSESSMENT_TOPIC_ID &&
+      !isProductQbEmployee(auth.employee)
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    if (
+      isAssessmentOnlyEmployee(auth.employee) &&
+      testRow.topic_id !== PRODUCT_ASSESSMENT_TOPIC_ID
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     return NextResponse.json({ test: testRow, questions });

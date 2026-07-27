@@ -1,49 +1,46 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
+import {
+  authenticateRequest,
+  isProductQbEmployee,
+  PRODUCT_ASSESSMENT_TOPIC_ID,
+} from "@/lib/employee-auth";
+import { buildLearningTopicsForEmployee } from "@/data/learning-subjects";
+import { localTestsDb } from "@/services/local-tests-db";
 import { supabase } from "@/lib/db";
 
 /**
  * GET /api/employee/subjects
- * Returns all active learning_subjects for the employee portal home page.
+ * Returns learning subject cards for the employee portal home page.
+ * Question Banks / auto-imported Supabase subjects are never exposed here.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    // Hardcoded subjects for now; replaced with DB query after employee schema is provisioned
-    const subjects = [
-      {
-        id: "ai", title: "Artificial Intelligence",
-        description: "Learn the fundamentals of AI, including search algorithms, logic, and expert systems.",
-        icon: "Brain", color: "#3b82f6",
-      },
-      {
-        id: "ml", title: "Machine Learning",
-        description: "Master supervised, unsupervised, and reinforcement learning techniques.",
-        icon: "Activity", color: "#8b5cf6",
-      },
-      {
-        id: "python", title: "Python Programming",
-        description: "Build strong Python skills from fundamentals to advanced data structures.",
-        icon: "Code", color: "#06b6d4",
-      },
-      {
-        id: "sql", title: "SQL & Databases",
-        description: "Learn database design, queries, and optimization for data analysis.",
-        icon: "Database", color: "#14b8a6",
-      },
-      {
-        id: "cloud", title: "Cloud Computing",
-        description: "Explore AWS, GCP, and Azure cloud platforms and architectures.",
-        icon: "Cloud", color: "#f59e0b",
-      },
-      {
-        id: "mlops", title: "MLOps & Deployment",
-        description: "Deploy and manage machine learning models in production environments.",
-        icon: "Zap", color: "#ef4444",
-      },
-    ];
+    const auth = authenticateRequest(request);
+    if (!auth) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    return NextResponse.json(subjects);
+    const topics = buildLearningTopicsForEmployee({
+      productQbEligible: isProductQbEmployee(auth.employee),
+      product: auth.employee.product,
+    });
+
+    if (isProductQbEmployee(auth.employee)) {
+      const localTest = await localTestsDb.getTest(auth.employeeId, PRODUCT_ASSESSMENT_TOPIC_ID);
+      const testId = localTest?.id ?? null;
+
+      const qbIndex = topics.findIndex((topic) => topic.id === PRODUCT_ASSESSMENT_TOPIC_ID);
+      if (qbIndex >= 0 && testId) {
+        topics[qbIndex] = {
+          ...topics[qbIndex],
+          href: `/employee/tests/${testId}`,
+        };
+      }
+    }
+
+    return NextResponse.json(topics);
   } catch (e: any) {
     console.error("GET /api/employee/subjects error:", e);
     return NextResponse.json({ error: e.message ?? "Internal error" }, { status: 500 });

@@ -1,7 +1,6 @@
-import { join } from "path";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import crypto from "crypto";
 import { supabase } from "@/lib/db";
+import { readPersistedJson, writePersistedJson } from "@/lib/runtime-data";
 
 export interface LocalTest {
   id: string;
@@ -19,6 +18,12 @@ export interface LocalTest {
   created_at: string;
   topic_title?: string;
   subject_title?: string;
+  session_recording_url?: string;
+  proctoring?: {
+    warningCount: number;
+    violations: Array<{ type: string; timestamp: string }>;
+    autoSubmitted: boolean;
+  };
 }
 
 export interface LocalTestQuestion {
@@ -134,35 +139,24 @@ export class LocalTestsDb {
     };
   }
 
-  private getStoragePath() {
-    const root = process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-    return join(root, "local_tests_db.json");
-  }
-
-  private async ensureStorageDirectory() {
-    const root = process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-    await mkdir(root, { recursive: true });
-  }
-
   async loadDB(): Promise<LocalDB> {
     if (this.dbCache) {
       return this.dbCache;
     }
-    const path = this.getStoragePath();
     try {
-      const raw = await readFile(path, "utf8");
-      const db = JSON.parse(raw);
-      this.dbCache = {
-        tests: Array.isArray(db.tests) ? db.tests : [],
-        test_questions: Array.isArray(db.test_questions) ? db.test_questions : [],
-        test_attempts: Array.isArray(db.test_attempts) ? db.test_attempts : [],
-      };
-      return this.dbCache;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        this.dbCache = { tests: [], test_questions: [], test_attempts: [] };
+      const raw = await readPersistedJson("local_tests_db.json");
+      if (raw) {
+        const db = JSON.parse(raw);
+        this.dbCache = {
+          tests: Array.isArray(db.tests) ? db.tests : [],
+          test_questions: Array.isArray(db.test_questions) ? db.test_questions : [],
+          test_attempts: Array.isArray(db.test_attempts) ? db.test_attempts : [],
+        };
         return this.dbCache;
       }
+      this.dbCache = { tests: [], test_questions: [], test_attempts: [] };
+      return this.dbCache;
+    } catch (error: any) {
       console.error("Failed to load local tests DB:", error);
       this.dbCache = { tests: [], test_questions: [], test_attempts: [] };
       return this.dbCache;
@@ -171,11 +165,32 @@ export class LocalTestsDb {
 
   private async saveDB(db: LocalDB) {
     this.dbCache = db;
-    await this.ensureStorageDirectory();
-    await writeFile(this.getStoragePath(), JSON.stringify(db, null, 2), "utf8");
+    await writePersistedJson("local_tests_db.json", JSON.stringify(db, null, 2));
   }
 
   async getTest(employeeId: string, topicId: string): Promise<LocalTest | null> {
+    const db = await this.loadDB();
+    const findLocal = () => {
+      const active = db.tests.find(
+        (t) =>
+          t.employee_id === employeeId &&
+          t.topic_id === topicId &&
+          (t.status === "in_progress" || t.status === "pending")
+      );
+      if (active) return active;
+
+      const sorted = db.tests
+        .filter((t) => t.employee_id === employeeId && t.topic_id === topicId)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return sorted[0] ?? null;
+    };
+
+    // Imported product QB tests live in the local JSON store.
+    if (topicId === "resource-product-assessment") {
+      const localTest = findLocal();
+      if (localTest) return localTest;
+    }
+
     try {
       const empUuid = await this.resolveEmployeeUuid(employeeId);
       const { data, error } = await supabase
@@ -185,7 +200,7 @@ export class LocalTestsDb {
         .eq("topic_id", topicId);
 
       if (error) throw error;
-      if (!data || data.length === 0) return null;
+      if (!data || data.length === 0) return findLocal();
 
       const active = data.find(t => t.status === "in_progress" || t.status === "pending");
       if (active) return this.mapRowToTest(active);
@@ -196,20 +211,15 @@ export class LocalTestsDb {
       return this.mapRowToTest(sorted[0]);
     } catch (dbErr) {
       console.warn("LocalTestsDb.getTest failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      const active = db.tests.find(
-        (t) => t.employee_id === employeeId && t.topic_id === topicId && (t.status === "in_progress" || t.status === "pending")
-      );
-      if (active) return active;
-
-      const completed = db.tests
-        .filter((t) => t.employee_id === employeeId && t.topic_id === topicId && t.status === "completed")
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return completed[0] ?? null;
+      return findLocal();
     }
   }
 
   async getTestById(testId: string): Promise<LocalTest | null> {
+    const db = await this.loadDB();
+    const localTest = db.tests.find((t) => t.id === testId) ?? null;
+    if (localTest) return localTest;
+
     try {
       const { data, error } = await supabase
         .from("tests")
@@ -221,7 +231,6 @@ export class LocalTestsDb {
       return data ? this.mapRowToTest(data) : null;
     } catch (dbErr) {
       console.warn("LocalTestsDb.getTestById failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
       return db.tests.find((t) => t.id === testId) ?? null;
     }
   }
@@ -294,6 +303,12 @@ export class LocalTestsDb {
   }
 
   async getQuestions(testId: string): Promise<LocalTestQuestion[]> {
+    const db = await this.loadDB();
+    const localQuestions = db.test_questions
+      .filter((q) => q.test_id === testId)
+      .sort((a, b) => a.question_index - b.question_index);
+    if (localQuestions.length > 0) return localQuestions;
+
     try {
       const { data, error } = await supabase
         .from("test_questions")
@@ -305,10 +320,7 @@ export class LocalTestsDb {
       return (data || []).map(q => this.mapRowToQuestion(q));
     } catch (dbErr) {
       console.warn("LocalTestsDb.getQuestions failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      return db.test_questions
-        .filter((q) => q.test_id === testId)
-        .sort((a, b) => a.question_index - b.question_index);
+      return localQuestions;
     }
   }
 

@@ -17,9 +17,8 @@ const getEmployeesJsonPath = () => {
 
 import { cacheStore } from '@/lib/cache-store';
 import {
-  loadResourceQuestionMapping,
+  buildResourcePortalEmployees,
   loadEmployeeTestManifest,
-  mergeResourcePortalData,
 } from '@/services/resource-mapping-service';
 
 export async function GET(request: NextRequest) {
@@ -190,13 +189,19 @@ export async function GET(request: NextRequest) {
 
         const attInfo = localAttemptsMap.get(test.id);
         const answeredCount = attInfo?.total ?? 0;
-        const score = attInfo && attInfo.total > 0 ? Math.round((attInfo.correct / attInfo.total) * 100) : 0;
+        const correctCount = attInfo?.correct ?? 0;
+        const totalQs = test.total_questions ?? 25;
+        const score = correctCount;
+        const scorePercent =
+          attInfo && attInfo.total > 0
+            ? Math.round((attInfo.correct / Math.max(1, totalQs)) * 100)
+            : 0;
 
         const list = testResultsMap.get(empId) || [];
         if (!list.some(t => t.completedAt === test.completed_at)) {
           list.push({
             status: test.status,
-            score,
+            score: scorePercent,
             completedAt: test.completed_at
           });
           testResultsMap.set(empId, list);
@@ -214,10 +219,14 @@ export async function GET(request: NextRequest) {
             subjectId: test.subject_id,
             subjectTitle: test.subject_title || "Unknown Subject",
             difficulty: test.difficulty,
-            totalQuestions: test.total_questions,
+            totalQuestions: totalQs,
             status: test.status,
             answeredCount,
+            correctCount,
             score,
+            scorePercent,
+            videoUrl: test.session_recording_url || null,
+            proctoring: test.proctoring || null,
             startedAt: test.started_at,
             completedAt: test.completed_at
           });
@@ -274,13 +283,10 @@ export async function GET(request: NextRequest) {
   if (!isExport) {
     let resourcePortalEmployees: any[] = [];
     try {
-      const [mappingRows, manifest] = await Promise.all([
-        loadResourceQuestionMapping(),
-        loadEmployeeTestManifest(),
-      ]);
-      resourcePortalEmployees = mergeResourcePortalData(mappingRows, allTestResults, manifest);
+      const manifest = await loadEmployeeTestManifest();
+      resourcePortalEmployees = await buildResourcePortalEmployees(allTestResults, manifest);
     } catch (mappingErr) {
-      console.warn("Failed to load Resource_Question_Mapping.xlsx:", mappingErr);
+      console.warn("Failed to load employee portal mapping:", mappingErr);
     }
 
     cacheStore.set("employees", { employees, allTestResults, resourcePortalEmployees }, activeJdId);

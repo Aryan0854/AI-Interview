@@ -113,7 +113,8 @@ export async function POST(
 
     // ---- compute accuracy ----
     const correct  = attempts.filter((a: any) => a.is_correct).length;
-    const accuracy = round((correct / Math.max(1, attempts.length)) * 100);
+    const totalQuestions = testRow?.total_questions ?? attempts.length;
+    const accuracy = round((correct / Math.max(1, totalQuestions)) * 100);
 
     // ---- AI analysis (Gemini) ----
     const wrongQuestions = answers
@@ -150,7 +151,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       testId: id,
-      total:   attempts.length,
+      total: totalQuestions,
       correct,
       accuracy,
       ai_analysis: aiAnalysis,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequest, isProductQbEmployee } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import { supabase } from "@/lib/db";
 
@@ -29,6 +29,10 @@ export async function GET(request: NextRequest) {
     const auth = authenticateRequest(request);
     if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!isProductQbEmployee(auth.employee)) {
+      return NextResponse.json({ test: null });
     }
 
     const topicId = "resource-product-assessment";

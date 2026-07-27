@@ -17,6 +17,25 @@ export interface EmployeeAccount {
   streak_days?: number;
   skill_level?: string;
   ai_readiness_score?: number;
+  product?: string;
+  /** Employee is in the resources / QB credentials cohort. */
+  product_qb_eligible?: boolean;
+  /** When true, employee may only access their pre-assigned product Q bank test. */
+  assessment_only?: boolean;
+}
+
+export const PRODUCT_ASSESSMENT_TOPIC_ID = "resource-product-assessment";
+
+export function isProductQbEmployee(
+  employee: Pick<EmployeeAccount, "product_qb_eligible" | "role">
+): boolean {
+  if (employee.role === "admin") return false;
+  return employee.product_qb_eligible === true;
+}
+
+export function isAssessmentOnlyEmployee(employee: Pick<EmployeeAccount, "assessment_only" | "role">): boolean {
+  if (employee.role === "admin") return false;
+  return employee.assessment_only === true;
 }
 
 interface AccountStore {

@@ -55,14 +55,21 @@ def load_credentials():
             "email": str(row[col["Nokia Email ID"]] or "").strip(),
             "role": str(row[col["Role"]] or "employee").strip() or "employee",
             "department": str(row[col["Domain"]] or row[col["Product"]] or "SDM").strip() or "SDM",
+            "product": str(row[col["Product"]] or "").strip(),
+            "assessment_only": False,
+            "product_qb_eligible": True,
         }
-    return list(users_by_id.values())
+    return list(users_by_id.values()), set(users_by_id.keys())
 
 
 def main():
+    if not CREDENTIALS_FILE.exists():
+        print(f"ERROR: Missing {CREDENTIALS_FILE.name}")
+        sys.exit(1)
+
     print("Loading credentials from Excel...")
-    credentials = load_credentials()
-    print(f"Found {len(credentials)} credential rows.")
+    credentials, qb_employee_ids = load_credentials()
+    print(f"Found {len(credentials)} resources credential rows.")
 
     store = {"employees": []}
     if ACCOUNTS_FILE.exists():
@@ -78,6 +85,8 @@ def main():
     updated_password = 0
     updated_profile = 0
     already_valid = 0
+    full_portal_enabled = 0
+    full_portal_restored = 0
 
     for user in credentials:
         norm_id = normalize_id(user["employee_id"])
@@ -91,6 +100,9 @@ def main():
                 "email": user["email"],
                 "department": user["department"],
                 "role": user["role"],
+                "product": user.get("product", ""),
+                "assessment_only": False,
+                "product_qb_eligible": True,
                 "is_first_login": True,
                 "password_hash": password_hash,
                 "password_salt": password_salt,
@@ -100,6 +112,7 @@ def main():
                 "ai_readiness_score": 0,
             }
             created += 1
+            full_portal_enabled += 1
             continue
 
         changed = False
@@ -115,6 +128,16 @@ def main():
         if user["department"] and existing.get("department") != user["department"]:
             existing["department"] = user["department"]
             changed = True
+        if user.get("product") is not None and existing.get("product") != user["product"]:
+            existing["product"] = user["product"]
+            changed = True
+        if existing.get("product_qb_eligible") is not True:
+            existing["product_qb_eligible"] = True
+            changed = True
+        if existing.get("assessment_only") is not False:
+            existing["assessment_only"] = False
+            changed = True
+            full_portal_enabled += 1
 
         has_hash = bool(existing.get("password_hash") and existing.get("password_salt"))
         password_ok = (
@@ -139,11 +162,20 @@ def main():
         else:
             already_valid += 1
 
-        if not has_hash and password_ok:
-            # unreachable, but keep account login-ready
-            pass
-
         account_map[norm_id] = existing
+
+    qb_disabled = 0
+    for norm_id, existing in account_map.items():
+        if norm_id in qb_employee_ids:
+            continue
+        if existing.get("role") == "admin":
+            continue
+        if existing.get("assessment_only") is True:
+            existing["assessment_only"] = False
+            full_portal_restored += 1
+        if existing.get("product_qb_eligible") is not False:
+            existing["product_qb_eligible"] = False
+            qb_disabled += 1
 
     updated_store = {"employees": list(account_map.values())}
     ACCOUNTS_FILE.write_text(json.dumps(updated_store, indent=2), encoding="utf-8")
@@ -152,10 +184,11 @@ def main():
     print(f"Updated password/hash: {updated_password}")
     print(f"Updated profile only: {updated_profile}")
     print(f"Already valid: {already_valid}")
+    print(f"Full portal enabled (resources cohort): {full_portal_enabled}")
+    print(f"QB access disabled (non-resources): {qb_disabled}")
     print(f"Total accounts in store: {len(updated_store['employees'])}")
     print(f"Saved to {ACCOUNTS_FILE}")
 
-    # Verify every Excel user can authenticate with listed password
     verify_store = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
     verify_map = {
         normalize_id(acc.get("employee_id")): acc
@@ -171,6 +204,9 @@ def main():
         if not acc.get("password_hash") or not acc.get("password_salt"):
             failures.append((user["employee_id"], "missing password hash"))
             continue
+        if acc.get("product_qb_eligible") is not True:
+            failures.append((user["employee_id"], "product_qb_eligible not enabled"))
+            continue
         if not verify_password(
             user["password"],
             acc.get("password_salt", ""),
@@ -184,7 +220,7 @@ def main():
             print(" ", item)
         sys.exit(1)
 
-    print(f"VERIFIED: All {len(credentials)} Excel credentials are active for login.")
+    print(f"VERIFIED: All {len(credentials)} resources credentials have full portal access.")
 
 
 if __name__ == "__main__":

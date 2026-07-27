@@ -94,7 +94,7 @@ export async function POST(
     let testId: string;
     let isResume = false;
     let totalQuestions = 10;
-    let timeLimitSeconds = 900;
+    let timeLimitSeconds = 1800;
     let startedAt = new Date().toISOString();
 
     if (usingFallback) {

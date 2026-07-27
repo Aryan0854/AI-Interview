@@ -40,8 +40,8 @@ function ResultsView(props: {
       >
         <div className="absolute top-0 right-0 w-24 h-24 bg-white rounded-full -translate-y-1/2 translate-x-1/3 blur-2xl opacity-10 pointer-events-none" />
         <p className="text-indigo-200 uppercase tracking-[0.2em] text-[10px] font-bold mb-2">Your Score</p>
-        <p className={`text-6xl font-extrabold ${accent}`}>{pct}%</p>
-        <p className="text-indigo-200 text-sm mt-1.5">{correct} / {total} correct answers</p>
+        <p className={`text-6xl font-extrabold ${accent}`}>{correct} / {total}</p>
+        <p className="text-indigo-200 text-sm mt-1.5">{pct}% accuracy</p>
       </motion.div>
 
       {/* ── analysis ── */}

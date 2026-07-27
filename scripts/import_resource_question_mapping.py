@@ -24,7 +24,7 @@ MANIFEST_FILE = ROOT / "uploads" / "employee_test_manifest.json"
 TOPIC_ID = "resource-product-assessment"
 SUBJECT_ID = "resource-subject"
 SUBJECT_TITLE = "Product Assessment"
-TIME_LIMIT_SECONDS = 900
+TIME_LIMIT_SECONDS = 1800
 
 
 def clean_str(val):

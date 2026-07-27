@@ -54,6 +54,36 @@ import {
   type PortalTestStatusFilter,
 } from "@/lib/portal-test-status";
 
+function portalEmployeeName(account: { full_name?: string | null; employee_id?: string | null }): string {
+  const name = account.full_name?.trim();
+  if (name) return name;
+  return account.employee_id?.trim() || "—";
+}
+
+function portalEmployeeId(account: { employee_id?: string | null }): string {
+  return account.employee_id?.trim() || "—";
+}
+
+function portalVideoTest(account: {
+  test_id?: string | null;
+  tests?: Array<{ id: string; videoUrl?: string | null }>;
+}): { testId: string; hasVideo: boolean } | null {
+  const withVideo = account.tests?.find((t) => t.videoUrl);
+  if (withVideo) return { testId: withVideo.id, hasVideo: true };
+  if (account.test_id) return { testId: account.test_id, hasVideo: false };
+  return null;
+}
+
+function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
+  if (score === null || score === undefined) return "—";
+  return `${score}/${scoreMax}`;
+}
+
+function portalScorePercent(score: number | null | undefined, scoreMax = 25): number {
+  if (score === null || score === undefined || scoreMax <= 0) return 0;
+  return Math.round((score / scoreMax) * 100);
+}
+
 function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
   const headersObj: Record<string, string> = {};
@@ -292,6 +322,11 @@ export default function AdminResumeDashboard() {
   const [allTestResults, setAllTestResults] = useState<any[]>([]);
   const [resourcePortalEmployees, setResourcePortalEmployees] = useState<any[]>([]);
   const [resettingTestId, setResettingTestId] = useState<string | null>(null);
+  const [resetTargetEmployee, setResetTargetEmployee] = useState<{
+    testId: string;
+    employeeId: string;
+    employeeName: string;
+  } | null>(null);
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [testStatusFilter, setTestStatusFilter] = useState<PortalTestStatusFilter>("all");
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
@@ -638,19 +673,27 @@ export default function AdminResumeDashboard() {
         scored.length > 0
           ? Math.round(scored.reduce((acc, curr) => acc + (curr.score || 0), 0) / scored.length)
           : 0,
+      scoreMax: 25,
     };
   }, [resourcePortalEmployees]);
 
-  const handleResetEmployeeTest = async (testId: string | null, employeeId: string) => {
+  const handleResetEmployeeTestClick = (
+    testId: string | null,
+    employeeId: string,
+    employeeName: string
+  ) => {
     if (!testId) {
       setActionError("No assigned test found for this employee.");
       return;
     }
+    setResetTargetEmployee({ testId, employeeId, employeeName });
+  };
 
-    if (!window.confirm(`Reset the assigned test for employee ${employeeId}? Their previous answers will be cleared.`)) {
-      return;
-    }
+  const handleConfirmResetEmployeeTest = async () => {
+    if (!resetTargetEmployee) return;
 
+    const { testId, employeeId } = resetTargetEmployee;
+    setResetTargetEmployee(null);
     setResettingTestId(testId);
     setActionError(null);
     try {
@@ -672,28 +715,48 @@ export default function AdminResumeDashboard() {
     }
   };
 
+  const handleDownloadTestVideo = async (testId: string, employeeId: string) => {
+    try {
+      const res = await adminFetch(`/api/admin/employee-tests/${testId}/video`);
+      if (!res.ok) throw new Error("Recording not available yet.");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${employeeId.replace(/\s+/g, "_")}.webm`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to download test recording");
+    }
+  };
+
   const handleExportPortalData = async () => {
     try {
       const ExcelJS = await import('exceljs');
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet('Employee Portal Results');
 
-      // Define columns
-      worksheet.columns = [
-        { header: 'Employee Name', key: 'name', width: 25 },
-        { header: 'Employee ID', key: 'empId', width: 15 },
-        { header: 'Role', key: 'role', width: 18 },
-        { header: 'Domain', key: 'domain', width: 14 },
-        { header: 'Product', key: 'product', width: 22 },
-        { header: 'Email', key: 'email', width: 28 },
-        { header: 'DDH', key: 'ddh', width: 16 },
-        { header: 'Emp Status', key: 'empStatus', width: 14 },
-        { header: 'Assigned Questions', key: 'assignedQuestions', width: 18 },
-        { header: 'Test Status', key: 'testStatus', width: 14 },
-        { header: 'Average Score', key: 'avgScore', width: 15 },
-        { header: 'Remarks', key: 'remarks', width: 30 },
-        { header: 'Detailed Test Attempts', key: 'testDetails', width: 50 }
+      const exportHeaders = [
+        'Employee Name',
+        'Employee ID',
+        'Role',
+        'Domain',
+        'Product',
+        'Email',
+        'DDH',
+        'Test Status',
+        'Average Score',
+        'Remarks',
       ];
+
+      worksheet.columns = exportHeaders.map((header, index) => ({
+        header,
+        key: `col${index}`,
+        width: header === 'Email' ? 28 : header === 'Remarks' ? 30 : header === 'Product' ? 22 : header === 'Employee Name' ? 25 : 16,
+      }));
 
       // Format header row (Row 1)
       const headerRow = worksheet.getRow(1);
@@ -706,56 +769,50 @@ export default function AdminResumeDashboard() {
       headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
       headerRow.height = 25;
 
-      const accounts = (resourcePortalEmployees.length > 0 ? resourcePortalEmployees : Array.from(new Set(allTestResults.map(t => t.employeeId)))
-        .map(empId => {
-          const mapped = typeof empId === "string"
-            ? resourcePortalEmployees.find(e => e.employee_id === empId)
-            : empId;
-          if (mapped && typeof mapped === "object" && mapped.employee_id) {
-            return {
-              name: mapped.full_name,
-              empId: mapped.employee_id,
-              role: mapped.role,
-              domain: mapped.domain,
-              product: mapped.product,
-              email: mapped.email,
-              ddh: mapped.ddh,
-              empStatus: mapped.emp_status,
-              assignedQuestions: mapped.assigned_question_count,
-              testStatus: mapped.test_status,
-              avgScore: mapped.score !== null ? `${mapped.score}%` : "—",
-              remarks: mapped.remarks || "—",
-              testDetails: (mapped.tests || []).map((t: any) => `${t.topicTitle} (${t.status === 'completed' ? t.score + '%' : t.status})`).join("; ")
-            };
-          }
+      const portalRows =
+        resourcePortalEmployees.length > 0
+          ? resourcePortalEmployees
+          : Array.from(new Set(allTestResults.map((t) => t.employeeId))).map((employeeId) => {
+              const mapped = resourcePortalEmployees.find((e) => e.employee_id === employeeId);
+              if (mapped) return mapped;
 
-          const empTests = allTestResults.filter(t => t.employeeId === empId);
-          const matchingEmp = employees.find(e => e.employee_id === empId);
-          const completedTests = empTests.filter(t => t.status === "completed");
-          const avgScore = completedTests.length > 0
-            ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
-            : null;
+              const empTests = allTestResults.filter((t) => t.employeeId === employeeId);
+              const matchingEmp = employees.find((e) => e.employee_id === employeeId);
+              const completedTests = empTests.filter((t) => t.status === "completed");
+              const avgScore =
+                completedTests.length > 0
+                  ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
+                  : null;
 
-          return {
-            name: matchingEmp?.full_name || empTests[0]?.employeeName || empId,
-            empId,
-            role: matchingEmp?.designation || "—",
-            domain: matchingEmp?.department || "—",
-            product: "—",
-            email: matchingEmp?.email || "—",
-            ddh: "—",
-            empStatus: matchingEmp?.status || "Registered",
-            assignedQuestions: 0,
-            testStatus: empTests[0]?.status || "—",
-            avgScore: avgScore !== null ? `${avgScore}%` : "—",
-            remarks: "—",
-            testDetails: empTests.map(t => `${t.topicTitle} (${t.status === 'completed' ? t.score + '%' : t.status})`).join("; ")
-          };
-        }));
+              return {
+                employee_id: employeeId,
+                full_name: matchingEmp?.full_name || empTests[0]?.employeeName || employeeId,
+                role: matchingEmp?.designation || "",
+                domain: matchingEmp?.department || "",
+                product: "",
+                email: matchingEmp?.email || "",
+                ddh: "",
+                test_status: empTests[0]?.status || null,
+                score: avgScore,
+                remarks: "",
+              };
+            });
 
-      // Add rows to worksheet
-      accounts.forEach(acc => {
-        worksheet.addRow(acc);
+      portalRows.forEach((account) => {
+        worksheet.addRow([
+          portalEmployeeName(account),
+          portalEmployeeId(account),
+          account.role || "—",
+          account.domain || "—",
+          account.product || "—",
+          account.email || "—",
+          account.ddh || "—",
+          getPortalTestStatusLabel(account.test_status),
+          account.score !== null && account.score !== undefined
+            ? formatPortalScore(account.score, account.score_max ?? 25)
+            : "—",
+          account.remarks?.trim() ? account.remarks : "—",
+        ]);
       });
 
       // Add styling and borders to data cells
@@ -3262,9 +3319,9 @@ export default function AdminResumeDashboard() {
                         </span>
                       </div>
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Global Avg Score</span>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Global Avg Score (/25)</span>
                         <span className="text-xl md:text-2xl font-black text-primary">
-                          {portalDashboardStats.globalAvgScore}%
+                          {formatPortalScore(portalDashboardStats.globalAvgScore, portalDashboardStats.scoreMax)}
                         </span>
                       </div>
                     </div>
@@ -3341,6 +3398,7 @@ export default function AdminResumeDashboard() {
                               .map(account => {
                                 const isExpanded = !!expandedEmployees[account.employee_id];
                                 const statusLabel = getPortalTestStatusLabel(account.test_status);
+                                const videoTest = portalVideoTest(account);
 
                                 return (
                                   <React.Fragment key={account.employee_id}>
@@ -3359,10 +3417,12 @@ export default function AdminResumeDashboard() {
                                         </button>
                                       </td>
                                       <td className="p-3">
-                                        <div className="font-semibold text-slate-800 dark:text-slate-150">{account.full_name}</div>
-                                        <div className="text-[10px] text-slate-400 font-medium">DDH: {account.ddh || "—"}</div>
+                                        <div className="font-semibold text-slate-800 dark:text-slate-200">{portalEmployeeName(account)}</div>
+                                        {account.ddh ? (
+                                          <div className="text-[10px] text-slate-400 font-medium">DDH: {account.ddh}</div>
+                                        ) : null}
                                       </td>
-                                      <td className="p-3 font-bold text-slate-500">{account.employee_id}</td>
+                                      <td className="p-3 font-bold text-slate-700 dark:text-slate-300">{portalEmployeeId(account)}</td>
                                       <td className="p-3 font-medium text-slate-600 dark:text-slate-400">{account.role || "—"}</td>
                                       <td className="p-3 font-medium text-slate-500">{account.domain || "—"}</td>
                                       <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={account.product}>{account.product || "—"}</td>
@@ -3385,29 +3445,62 @@ export default function AdminResumeDashboard() {
                                       <td className="p-3">
                                         <span className={`font-black text-sm ${
                                           account.score !== null
-                                            ? (account.score >= 70 ? "text-emerald-600 dark:text-emerald-400" : (account.score >= 40 ? "text-amber-500" : "text-rose-500"))
+                                            ? (portalScorePercent(account.score, account.score_max ?? 25) >= 70
+                                              ? "text-emerald-600 dark:text-emerald-400"
+                                              : (portalScorePercent(account.score, account.score_max ?? 25) >= 40
+                                                ? "text-amber-500"
+                                                : "text-rose-500"))
                                             : "text-slate-400"
                                         }`}>
-                                          {account.score !== null ? `${account.score}%` : "—"}
+                                          {formatPortalScore(account.score, account.score_max ?? 25)}
                                         </span>
                                       </td>
                                       <td className="p-3">
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          disabled={!account.test_id || resettingTestId === account.test_id}
-                                          onClick={() => handleResetEmployeeTest(account.test_id, account.employee_id)}
-                                          className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
-                                        >
-                                          {resettingTestId === account.test_id ? (
-                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                          ) : (
-                                            <>
-                                              <RefreshCcw className="w-3.5 h-3.5 mr-1" />
-                                              Reset Test
-                                            </>
-                                          )}
-                                        </Button>
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={!videoTest?.hasVideo}
+                                            title={
+                                              videoTest?.hasVideo
+                                                ? "Download test recording"
+                                                : "Recording available after test submission"
+                                            }
+                                            onClick={() =>
+                                              videoTest &&
+                                              handleDownloadTestVideo(
+                                                videoTest.testId,
+                                                portalEmployeeId(account)
+                                              )
+                                            }
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
+                                          >
+                                            <Download className="w-3.5 h-3.5 mr-1" />
+                                            Video
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={!account.test_id || resettingTestId === account.test_id}
+                                            onClick={() =>
+                                              handleResetEmployeeTestClick(
+                                                account.test_id,
+                                                account.employee_id,
+                                                portalEmployeeName(account)
+                                              )
+                                            }
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
+                                          >
+                                            {resettingTestId === account.test_id ? (
+                                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                              <>
+                                                <RefreshCcw className="w-3.5 h-3.5 mr-1" />
+                                                Reset Test
+                                              </>
+                                            )}
+                                          </Button>
+                                        </div>
                                       </td>
                                     </tr>
                                     {isExpanded && (
@@ -3438,6 +3531,7 @@ export default function AdminResumeDashboard() {
                                                       <th className="p-2.5">Difficulty</th>
                                                       <th className="p-2.5">Questions</th>
                                                       <th className="p-2.5">Score</th>
+                                                      <th className="p-2.5">Recording</th>
                                                       <th className="p-2.5">Status</th>
                                                       <th className="p-2.5">Date / Time</th>
                                                     </tr>
@@ -3452,9 +3546,36 @@ export default function AdminResumeDashboard() {
                                                         <td className="p-2.5 capitalize text-slate-600 dark:text-slate-400 font-medium">{test.difficulty}</td>
                                                         <td className="p-2.5 text-slate-500 font-medium">{test.totalQuestions} Qs</td>
                                                         <td className="p-2.5">
-                                                          <span className={`font-black ${test.score >= 70 ? "text-emerald-600" : (test.score >= 40 ? "text-amber-500" : "text-rose-500")}`}>
-                                                            {test.status === "completed" ? `${test.score}%` : "—"}
+                                                          <span className={`font-black ${portalScorePercent(test.score, test.scoreMax ?? 25) >= 70 ? "text-emerald-600" : (portalScorePercent(test.score, test.scoreMax ?? 25) >= 40 ? "text-amber-500" : "text-rose-500")}`}>
+                                                            {test.status === "completed"
+                                                              ? formatPortalScore(test.score, test.scoreMax ?? 25)
+                                                              : "—"}
                                                           </span>
+                                                          {test.proctoring?.warningCount ? (
+                                                            <div className="text-[9px] text-amber-600 font-bold mt-0.5">
+                                                              {test.proctoring.warningCount} proctor warnings
+                                                            </div>
+                                                          ) : null}
+                                                        </td>
+                                                        <td className="p-2.5">
+                                                          {test.videoUrl ? (
+                                                            <Button
+                                                              size="sm"
+                                                              variant="outline"
+                                                              className="h-7 px-2 text-[9px] font-bold"
+                                                              onClick={() =>
+                                                                handleDownloadTestVideo(
+                                                                  test.id,
+                                                                  portalEmployeeId(account)
+                                                                )
+                                                              }
+                                                            >
+                                                              <Download className="w-3 h-3 mr-1" />
+                                                              Download
+                                                            </Button>
+                                                          ) : (
+                                                            <span className="text-[9px] text-slate-400">—</span>
+                                                          )}
                                                         </td>
                                                         <td className="p-2.5">
                                                           <Badge className={`border-0 text-[9px] px-1.5 py-0.5 font-bold ${getPortalTestStatusBadgeClass(mapBackendTestStatus(test.status))}`}>
@@ -4686,6 +4807,51 @@ export default function AdminResumeDashboard() {
                 className="bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-md shadow-red-500/20 text-xs"
               >
                 Clear History
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {resetTargetEmployee && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in text-foreground">
+          <Card className="w-full max-w-md bg-card border border-indigo-150 dark:border-slate-800 shadow-2xl rounded-3xl overflow-hidden animate-scale-up">
+            <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCcw className="w-5 h-5 text-white" />
+                <span className="font-bold text-sm tracking-wide">Reset Employee Test</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetTargetEmployee(null)}
+                className="text-white/80 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-605 dark:text-slate-300 leading-relaxed font-semibold">
+                Reset the assigned test for{" "}
+                <span className="text-primary font-bold">{resetTargetEmployee.employeeName}</span>{" "}
+                (Emp ID: <span className="text-primary font-bold">{resetTargetEmployee.employeeId}</span>)?
+                Their previous answers and test progress will be cleared so they can start again.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-950/20 border-t border-slate-100 dark:border-slate-800 px-6 py-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setResetTargetEmployee(null)}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmResetEmployeeTest}
+                className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold shadow-md shadow-amber-500/20 text-xs"
+              >
+                Confirm Reset
               </Button>
             </div>
           </Card>

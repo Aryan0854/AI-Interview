@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
 import { authenticateRequest } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
+import { computeReadinessScore, computeSkillLevel } from "@/lib/dashboard-analytics";
 
 export async function GET(request: NextRequest) {
   const auth = authenticateRequest(request);
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
     }
 
     const userUuid = empRow.id;
-    const { department, xp_points, streak_days, ai_readiness_score, skill_level } = empRow as any;
+    const { xp_points, streak_days } = empRow as any;
 
     const { count: totalTests, error: countErr } = await supabase
       .from("tests")
@@ -104,12 +105,26 @@ export async function GET(request: NextRequest) {
       weeklyMap[key].mins += ((test.total_questions as number) * 2);
     });
 
-    const weeklyActivity = Object.entries(weeklyMap).map(([week_start, values]) => ({
-      week_start,
-      tests_taken: values.tests,
-      hours_spent: round(values.mins / 60),
-      avg_score: 0,
-    }));
+    const weeklyActivity = Object.entries(weeklyMap).map(([week_start, values]) => {
+      const weekTests = completedTests.filter((test) => {
+        const date = new Date(test.completed_at as string);
+        const day = date.getDay();
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - ((day + 6) % 7));
+        return weekStart.toISOString().split("T")[0] === week_start;
+      });
+      const weekTestIds = weekTests.map((t: any) => t.id);
+      const weekAttempts = attempts.filter((a: any) => weekTestIds.includes(a.test_id));
+      const weekCorrect = weekAttempts.filter((a: any) => a.is_correct).length;
+      const avg_score = weekAttempts.length ? round((weekCorrect / weekAttempts.length) * 100) : 0;
+
+      return {
+        week_start,
+        tests_taken: values.tests,
+        hours_spent: round(values.mins / 60),
+        avg_score,
+      };
+    });
 
     const { data: rt, error: rtErr } = await supabase
       .from("tests")
@@ -161,12 +176,20 @@ export async function GET(request: NextRequest) {
       ? { subject_id: sorted[sorted.length - 1].subject_id, subject_title: sorted[sorted.length - 1].subject_title, average_pct: sorted[sorted.length - 1].average_pct }
       : undefined;
 
+    const computedReadiness = computeReadinessScore({
+      averageScore,
+      totalTestsTaken: totalTests ?? 0,
+      subjectBreakdown,
+      testScores: recentResults.map((item) => item.accuracy_pct),
+    });
+    const computedSkillLevel = computeSkillLevel(computedReadiness);
+
     return NextResponse.json({
       total_tests_taken: totalTests ?? 0,
       average_score: averageScore,
       total_learning_hours: totalLearningHours,
-      ai_readiness_score: ai_readiness_score,
-      skill_level: skill_level,
+      ai_readiness_score: computedReadiness,
+      skill_level: computedSkillLevel,
       strongest_subject,
       weakest_subject,
       score_history: recentResults.map((item) => ({ date: item.completed_at, score: item.accuracy_pct })),
@@ -193,9 +216,6 @@ export async function GET(request: NextRequest) {
       
       const totalLearningMins = completedTests.reduce((sum, test) => sum + (test.total_questions * 2), 0);
       const totalLearningHours = round(totalLearningMins / 60);
-
-      const ai_readiness_score = averageScore > 0 ? averageScore : (localEmp.ai_readiness_score || 0);
-      const skill_level = ai_readiness_score >= 80 ? "advanced" : ai_readiness_score >= 60 ? "intermediate" : "beginner";
 
       const subjects = [
         { id: "2", title: "AI / ML" },
@@ -243,12 +263,26 @@ export async function GET(request: NextRequest) {
         weeklyMap[key].mins += (test.total_questions * 2);
       });
 
-      const weeklyActivity = Object.entries(weeklyMap).map(([week_start, values]) => ({
-        week_start,
-        tests_taken: values.tests,
-        hours_spent: round(values.mins / 60),
-        avg_score: 0,
-      }));
+      const weeklyActivity = Object.entries(weeklyMap).map(([week_start, values]) => {
+        const weekTests = completedTests.filter((test) => {
+          const date = new Date(test.completed_at || test.created_at);
+          const day = date.getDay();
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - ((day + 6) % 7));
+          return weekStart.toISOString().split("T")[0] === week_start;
+        });
+        const weekTestIds = weekTests.map((t) => t.id);
+        const weekAttempts = allAttempts.filter((a) => weekTestIds.includes(a.test_id));
+        const weekCorrect = weekAttempts.filter((a) => a.is_correct).length;
+        const avg_score = weekAttempts.length ? round((weekCorrect / weekAttempts.length) * 100) : 0;
+
+        return {
+          week_start,
+          tests_taken: values.tests,
+          hours_spent: round(values.mins / 60),
+          avg_score,
+        };
+      });
 
       const sortedCompleted = [...completedTests]
         .sort((a, b) => new Date(b.completed_at || b.created_at).getTime() - new Date(a.completed_at || a.created_at).getTime())
@@ -285,6 +319,14 @@ export async function GET(request: NextRequest) {
       const weakest_subject = sorted[sorted.length - 1]?.topic_count > 0
         ? { subject_id: sorted[sorted.length - 1].subject_id, subject_title: sorted[sorted.length - 1].subject_title, average_pct: sorted[sorted.length - 1].average_pct }
         : undefined;
+
+      const ai_readiness_score = computeReadinessScore({
+        averageScore,
+        totalTestsTaken: totalTests,
+        subjectBreakdown,
+        testScores: recentResults.map((item) => item.accuracy_pct),
+      });
+      const skill_level = computeSkillLevel(ai_readiness_score);
 
       return NextResponse.json({
         total_tests_taken: totalTests,

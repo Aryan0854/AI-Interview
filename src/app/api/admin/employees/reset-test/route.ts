@@ -4,6 +4,7 @@ import { localTestsDb } from "@/services/local-tests-db";
 import { supabase } from "@/lib/db";
 import { writeLog } from "@/lib/structured-logger";
 import { cacheStore } from "@/lib/cache-store";
+import { deleteEmployeeTestVideo } from "@/lib/employee-test-video";
 
 /**
  * POST /api/admin/employees/reset-test
@@ -96,8 +97,11 @@ export async function POST(request: NextRequest) {
         current_question_index: 0,
         started_at: null,
         completed_at: null,
+        session_recording_url: null as any,
+        proctoring: null as any,
       });
       await localTestsDb.deleteAttempts(resolvedTestId);
+      await deleteEmployeeTestVideo(resolvedTestId);
     }
 
     cacheStore.invalidate("employees");

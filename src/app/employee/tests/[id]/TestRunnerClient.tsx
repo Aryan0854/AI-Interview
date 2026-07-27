@@ -13,11 +13,40 @@ import type { Test, TestQuestion } from "@/types/learning";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const durationToLabel = (d: number): string => {
+const DEFAULT_TIME_LIMIT_SECONDS = 1800;
+
+function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
+  if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
+  const mimeTypes = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ];
+  for (const type of mimeTypes) {
+    if (MediaRecorder.isTypeSupported?.(type)) {
+      return new MediaRecorder(stream, { mimeType: type });
+    }
+  }
+  try {
+    return new MediaRecorder(stream);
+  } catch {
+    return null;
+  }
+}
+
+function isFullscreenActive(): boolean {
+  return !!(
+    document.fullscreenElement ||
+    (document as any).webkitFullscreenElement ||
+    (document as any).mozFullScreenElement
+  );
+}
+
+function durationToLabel(d: number): string {
   const m = Math.floor(d / 60);
   const s = d % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-};
+}
 
 function countdown(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -109,6 +138,9 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const [clmReady, setClmReady] = useState(false);
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStartRef = useRef<number | null>(null);
 
   useEffect(() => {
     setToken(window.localStorage.getItem("employee_token") ?? "");
@@ -158,7 +190,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         if (cancelled) return;
         setTest(testData);
         setQuestions(questionsData);
-        let finalTimeLeft = testData.time_limit_seconds ?? 900;
+        let finalTimeLeft = testData.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS;
         if (testData.status === "in_progress" && testData.started_at) {
           const startedAtMs = new Date(testData.started_at).getTime();
           const elapsedSeconds = Math.floor((Date.now() - startedAtMs) / 1000);
@@ -295,6 +327,22 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     };
   }, []);
 
+  const persistProctorViolation = useCallback(async (violationType: string, count: number, autoSubmitted = false) => {
+    if (!token) return;
+    try {
+      await fetch(`/api/employee/tests/${testId}/proctor_violation`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ violationType, warningCount: count, autoSubmitted }),
+      });
+    } catch (err) {
+      console.warn("Failed to persist proctor violation:", err);
+    }
+  }, [testId, token]);
+
   const triggerProctorWarning = useCallback((violationType: string) => {
     if (phase !== "running") return;
 
@@ -307,6 +355,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       if (prev >= 3) return prev;
 
       const nextCount = prev + 1;
+      void persistProctorViolation(violationType, nextCount, nextCount >= 3);
       let msgText = "";
       if (nextCount >= 3) {
         msgText = "You have exceeded the maximum of 3 security violations. Your assessment is being automatically submitted.";
@@ -341,7 +390,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
       return nextCount;
     });
-  }, [phase]);
+  }, [phase, persistProctorViolation]);
 
   // Active proctoring event listeners
   useEffect(() => {
@@ -549,14 +598,63 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     };
   }, [phase, clmReady, triggerProctorWarning]);
 
+  const stopRecordingAndUpload = useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") return;
+
+    await new Promise<void>((resolve) => {
+      recorder.onstop = async () => {
+        try {
+          const durationSec = recordingStartRef.current
+            ? Math.floor((Date.now() - recordingStartRef.current) / 1000)
+            : 0;
+          const blob = new Blob(recordingChunksRef.current, {
+            type: recorder.mimeType || "video/webm",
+          });
+          if (blob.size > 0 && token) {
+            const formData = new FormData();
+            formData.append("video", new File([blob], `${testId}.webm`, { type: "video/webm" }));
+            formData.append("duration", String(durationSec));
+            await fetch(`/api/employee/tests/${testId}/upload_video`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+              body: formData,
+            });
+          }
+        } catch (err) {
+          console.warn("Failed to upload proctoring video:", err);
+        } finally {
+          resolve();
+        }
+      };
+      recorder.stop();
+    });
+  }, [testId, token]);
+
   const handleStartTest = async () => {
     await requestFullscreen();
+    if (!isFullscreenActive()) {
+      alert("Fullscreen mode is required to start this assessment. Please allow fullscreen and try again.");
+      return;
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240 }
+        video: { width: 640, height: 480, facingMode: "user" },
+        audio: false,
       });
       setCamStream(stream);
+
+      const recorder = createMediaRecorder(stream);
+      if (recorder) {
+        mediaRecorderRef.current = recorder;
+        recordingChunksRef.current = [];
+        recorder.ondataavailable = (event) => {
+          if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
+        };
+        recorder.start(1000);
+        recordingStartRef.current = Date.now();
+      }
     } catch (err) {
       console.warn("Failed to access webcam:", err);
       alert("Proctoring camera access is required to take this test. Please enable camera access in your browser settings and click Start again.");
@@ -581,8 +679,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       } catch (err) {
         console.warn("Failed to update test start time in database:", err);
       }
-      // Set local start time so the timer starts fresh
-      setTimeLeft(test.time_limit_seconds ?? 900);
+      setTimeLeft(test.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS);
     }
 
     setPhase("running");
@@ -598,6 +695,11 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     submittingRef.current = true;
     setMsg("Submitting…");
     try {
+      if (camStream) {
+        camStream.getTracks().forEach((track) => track.stop());
+      }
+      await stopRecordingAndUpload();
+
       const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,
         selected_index: selected,
@@ -626,6 +728,9 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         ai_analysis: res.ai_analysis,
         topic_title: (test as any)?.topic_title ?? "",
       });
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
       setPhase("submitted");
     } catch (e: any) {
       submittingRef.current = false;
@@ -726,6 +831,8 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
             <li>Fullscreen mode must remain active.</li>
             <li>Browser tab switching or minimizing is blocked.</li>
             <li>Face must be visible in the camera feed at all times.</li>
+            <li>Your session will be video-recorded for proctoring review.</li>
+            <li>Time limit: 30 minutes for 25 questions.</li>
             <li>3 security warnings will result in auto-submission.</li>
           </ul>
         </div>
