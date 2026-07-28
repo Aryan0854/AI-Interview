@@ -3,6 +3,7 @@ import fs from "fs";
 import { mkdir, readdir, readFile, writeFile } from "fs/promises";
 import { supabaseServer } from "@/lib/db";
 import { getRuntimeUploadsRoot } from "@/lib/runtime-data";
+import { isCloudDeployment } from "@/lib/container-runtime";
 
 export type DocCategory = "BR" | "JD" | "Resumes" | "Corp Pool";
 
@@ -16,7 +17,7 @@ const LOCAL_DIRS: Record<DocCategory, string> = {
 };
 
 export function useCloudDocsStorage(): boolean {
-  return process.env.VERCEL === "1" || process.env.DOCS_USE_CLOUD === "1";
+  return isCloudDeployment();
 }
 
 export function getDocsIngestMode(): "cloud" | "local" {

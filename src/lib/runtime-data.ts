@@ -2,12 +2,11 @@ import { join } from "path";
 import fs from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { supabaseServer } from "@/lib/db";
+import { getRuntimeUploadsRoot, isCloudDeployment } from "@/lib/container-runtime";
 
 const APP_DATA_BUCKET = "app-data";
 
-export function getRuntimeUploadsRoot() {
-  return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-}
+export { getRuntimeUploadsRoot };
 
 export function getStaticDataPath(filename: string) {
   return join(process.cwd(), "src", "data", filename);
@@ -42,7 +41,7 @@ export async function readPersistedJson(filename: string): Promise<string | null
     // fall through
   }
 
-  if (process.env.VERCEL === "1") {
+  if (isCloudDeployment()) {
     try {
       await ensureAppDataBucket();
       const { data, error } = await supabaseServer.storage.from(APP_DATA_BUCKET).download(filename);
@@ -77,7 +76,7 @@ export async function writePersistedJson(filename: string, content: string): Pro
   const runtimePath = join(getRuntimeUploadsRoot(), filename);
   await writeFile(runtimePath, content, "utf8");
 
-  if (process.env.VERCEL === "1") {
+  if (isCloudDeployment()) {
     try {
       await ensureAppDataBucket();
       await supabaseServer.storage.from(APP_DATA_BUCKET).upload(filename, content, {

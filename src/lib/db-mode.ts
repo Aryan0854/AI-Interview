@@ -1,9 +1,11 @@
+import { isCloudDeployment } from "@/lib/container-runtime";
+
 /**
  * Production uses Supabase Postgres as the single source of truth.
  * Local JSON is dev/offline fallback only when explicitly allowed.
  */
 export function useSupabasePrimary(): boolean {
-  return process.env.VERCEL === "1" || process.env.USE_SUPABASE_PRIMARY === "1";
+  return isCloudDeployment();
 }
 
 export function allowLocalTestsFallback(): boolean {

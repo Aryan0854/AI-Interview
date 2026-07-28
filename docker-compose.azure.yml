@@ -1,0 +1,22 @@
+# Local Azure-like run: docker compose -f docker-compose.azure.yml up --build
+# Requires .env.azure (copy from .env.azure.example)
+
+services:
+  ai-interview:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.azure
+    volumes:
+      - ai-interview-uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  ai-interview-uploads:
