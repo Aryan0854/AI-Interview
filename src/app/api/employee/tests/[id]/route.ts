@@ -3,6 +3,7 @@ import { supabase } from "@/lib/db";
 import { authenticateRequest, isAssessmentOnlyEmployee, isProductQbEmployee, PRODUCT_ASSESSMENT_TOPIC_ID } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import { writeLog } from "@/lib/structured-logger";
+import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
 
 import { fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
 
@@ -112,6 +113,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (status !== undefined) updates.status = status;
     if (started_at !== undefined) updates.started_at = started_at;
 
+    const localTest = await localTestsDb.getTestById(id);
+    if (localTest && employeeOwnsTest(localTest, auth.employeeId, employeeUuid)) {
+      const updated = await localTestsDb.updateTest(id, updates);
+      try {
+        await syncLocalTestStateToSupabase(id, auth.employee);
+      } catch (syncErr) {
+        console.warn("Failed to sync test progress to Supabase:", syncErr);
+      }
+      return NextResponse.json({ success: true, data: updated });
+    }
+
     try {
       const { data, error } = await supabase
         .from("tests")
@@ -123,9 +135,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (error) throw error;
       return NextResponse.json({ success: true, data });
     } catch (dbErr) {
-      console.warn("Supabase update progress failed, falling back to local database.", dbErr);
-      const updated = await localTestsDb.updateTest(id, updates);
-      return NextResponse.json({ success: true, data: updated });
+      console.warn("Supabase update progress failed:", dbErr);
+      return NextResponse.json({ error: "Failed to update test" }, { status: 500 });
     }
   } catch (e: any) {
     console.error("PATCH /employee/tests/[id] error:", e);

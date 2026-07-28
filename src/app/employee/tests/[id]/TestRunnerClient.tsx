@@ -605,22 +605,45 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     await new Promise<void>((resolve) => {
       recorder.onstop = async () => {
         try {
-          const durationSec = recordingStartRef.current
-            ? Math.floor((Date.now() - recordingStartRef.current) / 1000)
-            : 0;
           const blob = new Blob(recordingChunksRef.current, {
             type: recorder.mimeType || "video/webm",
           });
-          if (blob.size > 0 && token) {
-            const formData = new FormData();
-            formData.append("video", new File([blob], `${testId}.webm`, { type: "video/webm" }));
-            formData.append("duration", String(durationSec));
-            await fetch(`/api/employee/tests/${testId}/upload_video`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}` },
-              body: formData,
+          if (blob.size <= 0 || !token) return;
+
+          const authHeaders = { Authorization: `Bearer ${token}` };
+
+          const signedRes = await fetch(`/api/employee/tests/${testId}/video-upload-url`, {
+            method: "POST",
+            headers: authHeaders,
+          });
+
+          if (signedRes.ok) {
+            const { signedUrl } = await signedRes.json();
+            const putRes = await fetch(signedUrl, {
+              method: "PUT",
+              headers: { "Content-Type": blob.type || "video/webm" },
+              body: blob,
             });
+            if (putRes.ok) {
+              await fetch(`/api/employee/tests/${testId}/upload_video`, {
+                method: "POST",
+                headers: {
+                  ...authHeaders,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ complete: true }),
+              });
+              return;
+            }
           }
+
+          const formData = new FormData();
+          formData.append("video", new File([blob], `${testId}.webm`, { type: "video/webm" }));
+          await fetch(`/api/employee/tests/${testId}/upload_video`, {
+            method: "POST",
+            headers: authHeaders,
+            body: formData,
+          });
         } catch (err) {
           console.warn("Failed to upload proctoring video:", err);
         } finally {
@@ -695,10 +718,10 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     submittingRef.current = true;
     setMsg("Submitting…");
     try {
+      await stopRecordingAndUpload();
       if (camStream) {
         camStream.getTracks().forEach((track) => track.stop());
       }
-      await stopRecordingAndUpload();
 
       const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,

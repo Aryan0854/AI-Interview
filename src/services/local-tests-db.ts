@@ -2,6 +2,10 @@ import crypto from "crypto";
 import { supabase } from "@/lib/db";
 import { readPersistedJson, writePersistedJson } from "@/lib/runtime-data";
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
 export interface LocalTest {
   id: string;
   employee_id: string;
@@ -19,6 +23,10 @@ export interface LocalTest {
   topic_title?: string;
   subject_title?: string;
   session_recording_url?: string;
+  score_correct?: number | null;
+  score_total?: number | null;
+  score_percent?: number | null;
+  ai_analysis?: string | null;
   proctoring?: {
     warningCount: number;
     violations: Array<{ type: string; timestamp: string }>;
@@ -94,7 +102,7 @@ export class LocalTestsDb {
     }
     return {
       id: row.id,
-      employee_id: row.employee_id,
+      employee_id: row.employee_code || row.employee_id,
       topic_id: row.topic_id,
       subject_id: row.subject_id,
       difficulty: row.difficulty,
@@ -105,7 +113,15 @@ export class LocalTestsDb {
       started_at: row.started_at,
       completed_at: row.completed_at,
       in_progress: inProgress,
-      created_at: row.created_at
+      created_at: row.created_at,
+      topic_title: row.topic_title,
+      subject_title: row.subject_title,
+      session_recording_url: row.session_recording_url,
+      proctoring: row.proctoring,
+      score_correct: row.score_correct,
+      score_total: row.score_total,
+      score_percent: row.score_percent,
+      ai_analysis: row.ai_analysis,
     };
   }
 
@@ -281,6 +297,17 @@ export class LocalTestsDb {
       if (updates.started_at !== undefined) payload.started_at = updates.started_at;
       if (updates.completed_at !== undefined) payload.completed_at = updates.completed_at;
       if (updates.in_progress !== undefined) payload.in_progress = updates.in_progress ? JSON.stringify(updates.in_progress) : null;
+      if (updates.session_recording_url !== undefined) payload.session_recording_url = updates.session_recording_url;
+      if (updates.proctoring !== undefined) payload.proctoring = updates.proctoring;
+      if (updates.score_correct !== undefined) payload.score_correct = updates.score_correct;
+      if (updates.score_total !== undefined) payload.score_total = updates.score_total;
+      if (updates.score_percent !== undefined) payload.score_percent = updates.score_percent;
+      if (updates.ai_analysis !== undefined) payload.ai_analysis = updates.ai_analysis;
+      if (updates.topic_title !== undefined) payload.topic_title = updates.topic_title;
+      if (updates.subject_title !== undefined) payload.subject_title = updates.subject_title;
+      if (updates.employee_id !== undefined && isUuid(String(updates.employee_id))) {
+        payload.employee_id = updates.employee_id;
+      }
 
       const { data, error } = await supabase
         .from("tests")

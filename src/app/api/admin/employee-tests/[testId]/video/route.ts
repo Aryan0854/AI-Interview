@@ -16,7 +16,13 @@ export async function GET(
     const { testId } = await params;
     const fileBuffer = await readEmployeeTestVideo(testId);
     if (!fileBuffer) {
-      return NextResponse.json({ error: "Video not found" }, { status: 404 });
+      return NextResponse.json(
+        {
+          error:
+            "Recording not found. The test may have finished before proctoring video was saved — ask the employee to retake after the latest update.",
+        },
+        { status: 404 }
+      );
     }
 
     const fileSize = fileBuffer.length;

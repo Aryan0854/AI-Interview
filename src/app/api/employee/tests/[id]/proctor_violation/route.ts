@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
+import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
 
 export async function POST(
   request: NextRequest,
@@ -34,6 +35,12 @@ export async function POST(
     };
 
     await localTestsDb.updateTest(testId, { proctoring });
+
+    try {
+      await syncLocalTestStateToSupabase(testId, auth.employee);
+    } catch (syncErr) {
+      console.warn("Failed to sync proctoring to Supabase:", syncErr);
+    }
 
     return NextResponse.json({ success: true, proctoring });
   } catch (error: any) {

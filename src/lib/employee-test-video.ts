@@ -6,6 +6,10 @@ import { ensureRuntimeUploadsDir, getRuntimeUploadsRoot } from "@/lib/runtime-da
 const RECORDINGS_BUCKET = "recordings";
 const STORAGE_PREFIX = "employee-tests";
 
+export function employeeTestVideoStoragePath(testId: string): string {
+  return `${STORAGE_PREFIX}/${testId}.webm`;
+}
+
 function localVideoPath(testId: string) {
   return join(getRuntimeUploadsRoot(), "employee_test_recordings", `${testId}.webm`);
 }
@@ -22,49 +26,88 @@ async function ensureRecordingsBucket() {
   }
 }
 
-export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<void> {
+export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
+  if (!buffer.length) return false;
+
   try {
     await ensureRecordingsBucket();
-    const { error } = await supabaseServer.storage
-      .from(RECORDINGS_BUCKET)
-      .upload(`${STORAGE_PREFIX}/${testId}.webm`, buffer, {
-        contentType: "video/webm",
-        upsert: true,
-      });
+    const path = employeeTestVideoStoragePath(testId);
+    const { error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).upload(path, buffer, {
+      contentType: "video/webm",
+      upsert: true,
+    });
     if (error) throw error;
-    return;
+
+    const { data: verify, error: verifyErr } = await supabaseServer.storage
+      .from(RECORDINGS_BUCKET)
+      .download(path);
+    if (verifyErr || !verify) throw verifyErr || new Error("Upload verification failed");
+    return true;
   } catch (storageErr) {
     console.warn("Employee test video Supabase upload failed, using local fallback:", storageErr);
   }
 
-  await ensureRuntimeUploadsDir();
-  const dir = join(getRuntimeUploadsRoot(), "employee_test_recordings");
-  await mkdir(dir, { recursive: true });
-  await writeFile(localVideoPath(testId), buffer);
+  try {
+    await ensureRuntimeUploadsDir();
+    const dir = join(getRuntimeUploadsRoot(), "employee_test_recordings");
+    await mkdir(dir, { recursive: true });
+    await writeFile(localVideoPath(testId), buffer);
+    return true;
+  } catch (localErr) {
+    console.error("Employee test video local save failed:", localErr);
+    return false;
+  }
+}
+
+export async function createEmployeeTestVideoUploadUrl(
+  testId: string
+): Promise<{ signedUrl: string; path: string } | null> {
+  try {
+    await ensureRecordingsBucket();
+    const path = employeeTestVideoStoragePath(testId);
+    const { data, error } = await supabaseServer.storage
+      .from(RECORDINGS_BUCKET)
+      .createSignedUploadUrl(path);
+    if (error || !data?.signedUrl) throw error || new Error("No signed upload URL");
+    return { signedUrl: data.signedUrl, path };
+  } catch (err) {
+    console.warn("Failed to create signed upload URL for employee test video:", err);
+    return null;
+  }
+}
+
+export function getEmployeeTestVideoAdminUrl(testId: string): string {
+  return `/api/admin/employee-tests/${testId}/video`;
 }
 
 export async function readEmployeeTestVideo(testId: string): Promise<Buffer | null> {
+  const path = employeeTestVideoStoragePath(testId);
+
   try {
-    const { data, error } = await supabaseServer.storage
-      .from(RECORDINGS_BUCKET)
-      .download(`${STORAGE_PREFIX}/${testId}.webm`);
+    const { data, error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).download(path);
     if (!error && data) {
-      return Buffer.from(await data.arrayBuffer());
+      const buffer = Buffer.from(await data.arrayBuffer());
+      if (buffer.length > 0) return buffer;
     }
   } catch {
     // fall through to local
   }
 
   try {
-    return await readFile(localVideoPath(testId));
+    const local = await readFile(localVideoPath(testId));
+    if (local.length > 0) return local;
   } catch {
-    return null;
+    // fall through
   }
+
+  return null;
 }
 
 export async function deleteEmployeeTestVideo(testId: string): Promise<void> {
   try {
-    await supabaseServer.storage.from(RECORDINGS_BUCKET).remove([`${STORAGE_PREFIX}/${testId}.webm`]);
+    await supabaseServer.storage
+      .from(RECORDINGS_BUCKET)
+      .remove([employeeTestVideoStoragePath(testId)]);
   } catch {
     // ignore
   }

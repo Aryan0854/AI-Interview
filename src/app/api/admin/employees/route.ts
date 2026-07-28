@@ -89,29 +89,7 @@ export async function GET(request: NextRequest) {
   const allTestResults: any[] = [];
 
   try {
-    const { data: dbTests } = await supabase
-      .from("tests")
-      .select(`
-        id,
-        employee_id,
-        topic_id,
-        subject_id,
-        difficulty,
-        total_questions,
-        status,
-        started_at,
-        completed_at,
-        employees (
-          employee_id,
-          full_name
-        ),
-        learning_topics (
-          title
-        ),
-        learning_subjects (
-          title
-        )
-      `);
+    const { data: dbTests, error: dbTestsError } = await supabase.from("tests").select("*");
 
     const { data: dbAttempts } = await supabase
       .from("test_attempts")
@@ -127,41 +105,76 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (dbTests) {
+    if (dbTestsError) {
+      console.warn("Failed to fetch test results from Supabase:", dbTestsError.message);
+    } else if (dbTests) {
+      const employeeUuidMap = new Map<string, { employee_id: string; full_name: string }>();
+      try {
+        const { data: employeeRows } = await supabase
+          .from("employees")
+          .select("id, employee_id, full_name");
+        (employeeRows ?? []).forEach((row) => {
+          if (row.id) employeeUuidMap.set(row.id, row);
+        });
+      } catch {
+        // ignore lookup failures
+      }
+
       dbTests.forEach(test => {
-        const empInfo = test.employees as any;
-        const empId = empInfo?.employee_id;
+        const linked = employeeUuidMap.get(String(test.employee_id ?? ""));
+        const empId =
+          (test as any).employee_code ||
+          linked?.employee_id ||
+          (typeof test.employee_id === "string" && !/^[0-9a-f-]{36}$/i.test(test.employee_id)
+            ? test.employee_id
+            : null);
         if (!empId) return;
 
         const attInfo = attemptsMap.get(test.id);
         const answeredCount = attInfo?.total ?? 0;
-        const score = attInfo && attInfo.total > 0 ? Math.round((attInfo.correct / attInfo.total) * 100) : 0;
+        const correctCount =
+          (test as any).score_correct ??
+          attInfo?.correct ??
+          0;
+        const totalQs = (test as any).score_total ?? test.total_questions ?? 25;
+        const score =
+          (test as any).score_correct != null
+            ? (test as any).score_correct
+            : attInfo && attInfo.total > 0
+              ? attInfo.correct
+              : 0;
+        const scorePercent =
+          (test as any).score_percent ??
+          (attInfo && attInfo.total > 0
+            ? Math.round((attInfo.correct / Math.max(1, totalQs)) * 100)
+            : 0);
 
         const list = testResultsMap.get(empId) || [];
         list.push({
           status: test.status,
-          score,
+          score: scorePercent,
           completedAt: test.completed_at
         });
         testResultsMap.set(empId, list);
-
-        const topicInfo = test.learning_topics as any;
-        const subjectInfo = test.learning_subjects as any;
 
         allTestResults.push({
           id: test.id,
           employeeUuid: test.employee_id,
           employeeId: empId,
-          employeeName: empInfo?.full_name || empId,
+          employeeName: linked?.full_name || empId,
           topicId: test.topic_id,
-          topicTitle: topicInfo?.title || "Unknown Topic",
+          topicTitle: (test as any).topic_title || "Unknown Topic",
           subjectId: test.subject_id,
-          subjectTitle: subjectInfo?.title || "Unknown Subject",
+          subjectTitle: (test as any).subject_title || "Unknown Subject",
           difficulty: test.difficulty,
-          totalQuestions: test.total_questions,
+          totalQuestions: totalQs,
           status: test.status,
           answeredCount,
+          correctCount: score,
           score,
+          scorePercent,
+          videoUrl: (test as any).session_recording_url || null,
+          proctoring: (test as any).proctoring || null,
           startedAt: test.started_at,
           completedAt: test.completed_at
         });

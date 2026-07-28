@@ -64,6 +64,8 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (!error && testRow) {
+        await supabase.from("test_attempts").delete().eq("test_id", resolvedTestId);
+
         const { error: updateErr } = await supabase
           .from("tests")
           .update({
@@ -72,12 +74,16 @@ export async function POST(request: NextRequest) {
             current_question_index: 0,
             started_at: null,
             completed_at: null,
+            session_recording_url: null,
+            proctoring: null,
+            score_correct: null,
+            score_total: null,
+            score_percent: null,
+            ai_analysis: null,
           })
           .eq("id", resolvedTestId);
 
         if (updateErr) throw updateErr;
-
-        await supabase.from("test_attempts").delete().eq("test_id", resolvedTestId);
       } else {
         resetViaLocal = true;
       }
@@ -99,6 +105,10 @@ export async function POST(request: NextRequest) {
         completed_at: null,
         session_recording_url: null as any,
         proctoring: null as any,
+        score_correct: null,
+        score_total: null,
+        score_percent: null,
+        ai_analysis: null,
       });
       await localTestsDb.deleteAttempts(resolvedTestId);
       await deleteEmployeeTestVideo(resolvedTestId);

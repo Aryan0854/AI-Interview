@@ -66,10 +66,19 @@ function portalEmployeeId(account: { employee_id?: string | null }): string {
 
 function portalVideoTest(account: {
   test_id?: string | null;
-  tests?: Array<{ id: string; videoUrl?: string | null }>;
+  test_status?: string | null;
+  tests?: Array<{ id: string; videoUrl?: string | null; status?: string }>;
 }): { testId: string; hasVideo: boolean } | null {
   const withVideo = account.tests?.find((t) => t.videoUrl);
   if (withVideo) return { testId: withVideo.id, hasVideo: true };
+
+  const completed =
+    account.tests?.find((t) => t.status === "completed") ??
+    (account.test_status === "completed" && account.test_id
+      ? { id: account.test_id, videoUrl: null, status: "completed" }
+      : null);
+  if (completed) return { testId: completed.id, hasVideo: true };
+
   if (account.test_id) return { testId: account.test_id, hasVideo: false };
   return null;
 }
@@ -715,8 +724,18 @@ export default function AdminResumeDashboard() {
   const handleDownloadTestVideo = async (testId: string, employeeId: string) => {
     try {
       const res = await adminFetch(`/api/admin/employee-tests/${testId}/video`);
-      if (!res.ok) throw new Error("Recording not available yet.");
+      if (!res.ok) {
+        let message = "Recording not available for this test.";
+        try {
+          const payload = await res.json();
+          if (payload?.error) message = payload.error;
+        } catch {
+          // ignore
+        }
+        throw new Error(message);
+      }
       const blob = await res.blob();
+      if (!blob.size) throw new Error("Recording file is empty.");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -3452,7 +3471,9 @@ export default function AdminResumeDashboard() {
                                             disabled={!videoTest?.hasVideo}
                                             title={
                                               videoTest?.hasVideo
-                                                ? "Download test recording"
+                                                ? account.test_status === "completed"
+                                                  ? "Download test recording"
+                                                  : "Download test recording"
                                                 : "Recording available after test submission"
                                             }
                                             onClick={() =>
