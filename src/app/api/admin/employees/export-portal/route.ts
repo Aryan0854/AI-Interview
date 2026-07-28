@@ -12,11 +12,12 @@ import {
   formatAttemptResult,
   formatQuestionAnswerBlock,
   formatSubmittedAt,
-  getTestQuestionAttempts,
+  getTestQuestionAttemptsBatch,
 } from "@/services/employee-test-attempts-service";
 import { getPortalTestStatusLabel } from "@/lib/portal-test-status";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
   if (score === null || score === undefined) return "—";
@@ -255,14 +256,18 @@ export async function GET(request: NextRequest) {
     }));
     styleHeaderRow(detailSheet.getRow(1));
 
+    const completedTestIds = resourcePortalEmployees
+      .filter((account) => account.test_id && account.test_status === "completed")
+      .map((account) => account.test_id as string);
+    const attemptsByTestId = await getTestQuestionAttemptsBatch(completedTestIds);
+
     for (const account of resourcePortalEmployees) {
       const employeeName = account.full_name || account.employee_id;
       const scoreMax = account.score_max ?? account.assigned_question_count ?? 25;
-      let questionAttempts = null as Awaited<ReturnType<typeof getTestQuestionAttempts>> | null;
-
-      if (account.test_id && account.test_status === "completed") {
-        questionAttempts = await getTestQuestionAttempts(account.test_id);
-      }
+      const questionAttempts =
+        account.test_id && account.test_status === "completed"
+          ? attemptsByTestId.get(account.test_id) ?? null
+          : null;
 
       const answerBlock =
         questionAttempts && questionAttempts.length > 0

@@ -4,6 +4,7 @@ import { getTestQuestionAttempts } from "@/services/employee-test-attempts-servi
 import { localTestsDb } from "@/services/local-tests-db";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export type { AdminTestQuestionAttempt } from "@/services/employee-test-attempts-service";
 

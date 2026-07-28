@@ -1,4 +1,7 @@
-import { localTestsDb } from "@/services/local-tests-db";
+import { supabase } from "@/lib/db";
+import { allowLocalTestsFallback, useSupabasePrimary } from "@/lib/db-mode";
+import { formatAttemptResult, formatPortalTimestamp } from "@/lib/portal-format";
+import { localTestsDb, type LocalTestAttempt, type LocalTestQuestion } from "@/services/local-tests-db";
 
 export interface AdminTestQuestionAttempt {
   question_index: number;
@@ -14,16 +17,45 @@ function optionLabel(index: number): string {
   return String.fromCharCode(65 + index);
 }
 
-export function formatAttemptResult(isCorrect: boolean | null): string {
-  if (isCorrect === true) return "Correct";
-  if (isCorrect === false) return "Incorrect";
-  return "";
+function mapQuestionAttempt(
+  question: Pick<
+    LocalTestQuestion,
+    "id" | "question_index" | "question_text" | "options"
+  >,
+  attempt?: Pick<LocalTestAttempt, "selected_option_index" | "is_correct" | "created_at">
+): AdminTestQuestionAttempt {
+  const selectedIndex = attempt?.selected_option_index ?? null;
+  const selectedText =
+    selectedIndex !== null && question.options[selectedIndex] != null
+      ? `${optionLabel(selectedIndex)}) ${question.options[selectedIndex]}`
+      : null;
+
+  return {
+    question_index: question.question_index,
+    question_text: question.question_text,
+    options: question.options,
+    selected_option_index: selectedIndex,
+    selected_option_text: selectedText,
+    is_correct: attempt?.is_correct ?? null,
+    submitted_at: attempt?.created_at ?? null,
+  };
 }
 
-export function formatSubmittedAt(iso: string | null): string {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString();
+function buildAttemptsForTest(
+  questions: LocalTestQuestion[],
+  attempts: LocalTestAttempt[]
+): AdminTestQuestionAttempt[] {
+  const attemptsByQuestion = new Map<string, LocalTestAttempt>();
+  for (const attempt of attempts) {
+    attemptsByQuestion.set(attempt.question_id, attempt);
+  }
+
+  return [...questions]
+    .sort((a, b) => a.question_index - b.question_index)
+    .map((question) => mapQuestionAttempt(question, attemptsByQuestion.get(question.id)));
 }
+
+export { formatAttemptResult, formatPortalTimestamp as formatSubmittedAt };
 
 export function formatQuestionAnswerBlock(questions: AdminTestQuestionAttempt[]): string {
   if (questions.length === 0) return "";
@@ -38,7 +70,7 @@ export function formatQuestionAnswerBlock(questions: AdminTestQuestionAttempt[])
       lines.push("Not answered");
     }
     if (q.submitted_at) {
-      lines.push(`Submitted: ${formatSubmittedAt(q.submitted_at)}`);
+      lines.push(`Submitted: ${formatPortalTimestamp(q.submitted_at)}`);
     }
     lines.push("");
   }
@@ -48,36 +80,87 @@ export function formatQuestionAnswerBlock(questions: AdminTestQuestionAttempt[])
 export async function getTestQuestionAttempts(
   testId: string
 ): Promise<AdminTestQuestionAttempt[] | null> {
-  const test = await localTestsDb.getTestById(testId);
-  if (!test) return null;
+  const batch = await getTestQuestionAttemptsBatch([testId]);
+  const questions = batch.get(testId);
+  if (!questions) {
+    const test = await localTestsDb.getTestById(testId);
+    if (!test) return null;
+    return [];
+  }
+  return questions;
+}
 
-  const [questions, rawAttempts] = await Promise.all([
-    localTestsDb.getQuestions(testId),
-    localTestsDb.getAttempts(testId),
-  ]);
+export async function getTestQuestionAttemptsBatch(
+  testIds: string[]
+): Promise<Map<string, AdminTestQuestionAttempt[]>> {
+  const result = new Map<string, AdminTestQuestionAttempt[]>();
+  const uniqueIds = [...new Set(testIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return result;
 
-  const attemptsByQuestion = new Map<string, (typeof rawAttempts)[0]>();
-  for (const attempt of rawAttempts) {
-    attemptsByQuestion.set(attempt.question_id, attempt);
+  if (useSupabasePrimary()) {
+    try {
+      const [{ data: questionRows, error: qErr }, { data: attemptRows, error: aErr }] =
+        await Promise.all([
+          supabase.from("test_questions").select("*").in("test_id", uniqueIds),
+          supabase.from("test_attempts").select("*").in("test_id", uniqueIds),
+        ]);
+
+      if (qErr) throw qErr;
+      if (aErr) throw aErr;
+
+      const questionsByTest = new Map<string, LocalTestQuestion[]>();
+      for (const row of questionRows ?? []) {
+        const list = questionsByTest.get(row.test_id) ?? [];
+        list.push({
+          id: row.id,
+          test_id: row.test_id,
+          question_index: row.question_index,
+          question_text: row.question_text,
+          options: row.options || [],
+          correct_option_index: row.correct_option_index,
+          explanation: row.explanation || "",
+          difficulty: row.difficulty,
+          topic_id: row.topic_id,
+          topic_title: row.topic_title || "",
+          created_at: row.created_at,
+        });
+        questionsByTest.set(row.test_id, list);
+      }
+
+      const attemptsByTest = new Map<string, LocalTestAttempt[]>();
+      for (const row of attemptRows ?? []) {
+        const list = attemptsByTest.get(row.test_id) ?? [];
+        list.push({
+          id: row.id,
+          test_id: row.test_id,
+          employee_id: row.employee_id,
+          question_id: row.question_id,
+          selected_option_index: row.selected_option_index,
+          is_correct: row.is_correct,
+          time_taken_seconds: row.time_taken_seconds ?? 0,
+          session_key: row.session_key || "",
+          created_at: row.created_at,
+        });
+        attemptsByTest.set(row.test_id, list);
+      }
+
+      for (const testId of uniqueIds) {
+        const questions = questionsByTest.get(testId) ?? [];
+        const attempts = attemptsByTest.get(testId) ?? [];
+        result.set(testId, buildAttemptsForTest(questions, attempts));
+      }
+      return result;
+    } catch (err) {
+      if (!allowLocalTestsFallback()) throw err;
+      console.warn("Batch attempts Supabase failed, using local fallback:", err);
+    }
   }
 
-  const sortedQuestions = [...questions].sort((a, b) => a.question_index - b.question_index);
-  return sortedQuestions.map((question) => {
-    const attempt = attemptsByQuestion.get(question.id);
-    const selectedIndex = attempt?.selected_option_index ?? null;
-    const selectedText =
-      selectedIndex !== null && question.options[selectedIndex] != null
-        ? `${optionLabel(selectedIndex)}) ${question.options[selectedIndex]}`
-        : null;
-
-    return {
-      question_index: question.question_index,
-      question_text: question.question_text,
-      options: question.options,
-      selected_option_index: selectedIndex,
-      selected_option_text: selectedText,
-      is_correct: attempt?.is_correct ?? null,
-      submitted_at: attempt?.created_at ?? null,
-    };
-  });
+  const db = await localTestsDb.loadDB();
+  for (const testId of uniqueIds) {
+    const questions = db.test_questions.filter((q) => q.test_id === testId);
+    const attempts = db.test_attempts.filter((a) => a.test_id === testId);
+    result.set(testId, buildAttemptsForTest(questions, attempts));
+  }
+  return result;
 }

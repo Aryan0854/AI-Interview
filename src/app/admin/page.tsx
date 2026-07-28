@@ -33,6 +33,7 @@ import {
   Edit2
 } from "lucide-react";
 import dynamic from "next/dynamic";
+import { formatPortalTimestamp } from "@/lib/portal-format";
 const AdminResumeDetails = dynamic(() => import("@/components/AdminResumeDetails").then(mod => mod.AdminResumeDetails), {
   ssr: false,
   loading: () => (
@@ -367,6 +368,7 @@ export default function AdminResumeDashboard() {
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(false);
+  const [isExportingPortal, setIsExportingPortal] = useState(false);
   const [isDispatchingMails, setIsDispatchingMails] = useState(false);
   const [isBulkDispatchingMails, setIsBulkDispatchingMails] = useState(false);
   const [activeEmployee, setActiveEmployee] = useState<any>(null);
@@ -818,9 +820,11 @@ export default function AdminResumeDashboard() {
   };
 
   const handleExportPortalData = async () => {
+    if (isExportingPortal) return;
+    setIsExportingPortal(true);
+    setActionError(null);
     try {
-      const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") || "" : "";
-      const res = await fetch(`/api/admin/employees/export-portal?token=${encodeURIComponent(token)}`);
+      const res = await fetch("/api/admin/employees/export-portal");
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Export failed");
@@ -839,12 +843,18 @@ export default function AdminResumeDashboard() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+      setActionSuccess("Portal Excel export downloaded.");
+      setTimeout(() => setActionSuccess(null), 3000);
     } catch (excelErr: any) {
       console.error("Failed to export Excel:", excelErr);
       setActionError(excelErr.message || "Failed to export portal data");
       setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setIsExportingPortal(false);
     }
   };
+
+  const isCloudDocsIngest = process.env.NEXT_PUBLIC_CLOUD_DOCS_INGEST === "1";
 
   const loadLogs = async () => {
     setIsSystemLogsLoading(true);
@@ -3313,12 +3323,17 @@ export default function AdminResumeDashboard() {
                       <div className="flex gap-2 w-full sm:w-auto">
                         <Button
                           onClick={handleExportPortalData}
+                          disabled={isExportingPortal}
                           variant="outline"
                           size="sm"
                           className="flex-1 sm:flex-none rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-xs"
                         >
-                          <Download className="w-3.5 h-3.5" />
-                          Export to Excel
+                          {isExportingPortal ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5" />
+                          )}
+                          {isExportingPortal ? "Exporting..." : "Export to Excel"}
                         </Button>
                         <Button
                           onClick={() => handleRefresh("employees")}
@@ -3515,7 +3530,7 @@ export default function AdminResumeDashboard() {
                                                               )}
                                                               {q.submitted_at && (
                                                                 <div className="text-[10px] text-slate-400 font-medium">
-                                                                  Submitted: {new Date(q.submitted_at).toLocaleString()}
+                                                                  Submitted: {formatPortalTimestamp(q.submitted_at)}
                                                                 </div>
                                                               )}
                                                             </div>
@@ -4237,8 +4252,15 @@ export default function AdminResumeDashboard() {
                     Automated Folder Scanning
                   </label>
                   <p className="text-[9px] text-slate-400 font-medium mt-0.5">
-                    Scans source folders and refreshes dashboard data
+                    {isCloudDocsIngest
+                      ? "Scans Supabase docs-ingest storage and refreshes dashboard data"
+                      : "Scans local /docs folders and refreshes dashboard data"}
                   </p>
+                  {isCloudDocsIngest && (
+                    <Badge className="mt-1 border-0 text-[8px] px-1.5 py-0 font-bold bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                      Cloud storage mode
+                    </Badge>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Button
