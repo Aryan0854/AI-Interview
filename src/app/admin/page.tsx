@@ -339,6 +339,24 @@ export default function AdminResumeDashboard() {
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [testStatusFilter, setTestStatusFilter] = useState<PortalTestStatusFilter>("all");
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
+  const [testAttemptDetails, setTestAttemptDetails] = useState<
+    Record<
+      string,
+      {
+        loading: boolean;
+        questions: Array<{
+          question_index: number;
+          question_text: string;
+          options: string[];
+          selected_option_index: number | null;
+          selected_option_text: string | null;
+          is_correct: boolean | null;
+          submitted_at: string | null;
+        }>;
+        error?: string;
+      }
+    >
+  >({});
   const [emails, setEmails] = useState<any[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -372,6 +390,7 @@ export default function AdminResumeDashboard() {
 
   // Ingestion status state
   const [pipelineStatus, setPipelineStatus] = useState("Ingestion: Idle");
+  const [refreshingType, setRefreshingType] = useState<"requirements" | "candidates" | "employees" | "interviews" | null>(null);
   const [activityLogs, setActivityLogs] = useState<string[]>([]);
   const [uploadCategory, setUploadCategory] = useState("resume");
 
@@ -649,6 +668,50 @@ export default function AdminResumeDashboard() {
     }
   };
 
+  const loadTestAttemptDetails = async (testId: string) => {
+    let shouldFetch = true;
+    setTestAttemptDetails((prev) => {
+      const cached = prev[testId];
+      if (cached?.loading || (cached?.questions?.length && !cached.error)) {
+        shouldFetch = false;
+        return prev;
+      }
+      return {
+        ...prev,
+        [testId]: { loading: true, questions: prev[testId]?.questions ?? [] },
+      };
+    });
+    if (!shouldFetch) return;
+
+    try {
+      const res = await fetch(`/api/admin/employee-tests/${testId}/attempts`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load answers");
+
+      setTestAttemptDetails((prev) => ({
+        ...prev,
+        [testId]: { loading: false, questions: data.questions ?? [] },
+      }));
+    } catch (err: any) {
+      setTestAttemptDetails((prev) => ({
+        ...prev,
+        [testId]: { loading: false, questions: [], error: err.message },
+      }));
+    }
+  };
+
+  useEffect(() => {
+    for (const account of resourcePortalEmployees) {
+      if (
+        expandedEmployees[account.employee_id] &&
+        account.test_id &&
+        account.test_status === "completed"
+      ) {
+        loadTestAttemptDetails(account.test_id);
+      }
+    }
+  }, [expandedEmployees, resourcePortalEmployees]);
+
   const filteredPortalEmployees = useMemo(() => {
     const term = testResultsSearch.trim().toLowerCase();
     return resourcePortalEmployees.filter((account) => {
@@ -713,6 +776,11 @@ export default function AdminResumeDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to reset test");
       setActionSuccess(`Test reset successfully for employee ${employeeId}.`);
+      setTestAttemptDetails((prev) => {
+        const next = { ...prev };
+        delete next[testId];
+        return next;
+      });
       await loadEmployees();
     } catch (err: any) {
       setActionError(err.message || "Failed to reset test");
@@ -751,116 +819,30 @@ export default function AdminResumeDashboard() {
 
   const handleExportPortalData = async () => {
     try {
-      const ExcelJS = await import('exceljs');
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet('Employee Portal Results');
+      const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") || "" : "";
+      const res = await fetch(`/api/admin/employees/export-portal?token=${encodeURIComponent(token)}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Export failed");
+      }
 
-      const exportHeaders = [
-        'Employee Name',
-        'Employee ID',
-        'Role',
-        'Domain',
-        'Product',
-        'Email',
-        'DDH',
-        'Test Status',
-        'Average Score',
-        'Remarks',
-      ];
-
-      worksheet.columns = exportHeaders.map((header, index) => ({
-        header,
-        key: `col${index}`,
-        width: header === 'Email' ? 28 : header === 'Remarks' ? 30 : header === 'Product' ? 22 : header === 'Employee Name' ? 25 : 16,
-      }));
-
-      // Format header row (Row 1)
-      const headerRow = worksheet.getRow(1);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      headerRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF4F46E5' } // Indigo color
-      };
-      headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
-      headerRow.height = 25;
-
-      const portalRows =
-        resourcePortalEmployees.length > 0
-          ? resourcePortalEmployees
-          : Array.from(new Set(allTestResults.map((t) => t.employeeId))).map((employeeId) => {
-              const mapped = resourcePortalEmployees.find((e) => e.employee_id === employeeId);
-              if (mapped) return mapped;
-
-              const empTests = allTestResults.filter((t) => t.employeeId === employeeId);
-              const matchingEmp = employees.find((e) => e.employee_id === employeeId);
-              const completedTests = empTests.filter((t) => t.status === "completed");
-              const avgScore =
-                completedTests.length > 0
-                  ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
-                  : null;
-
-              return {
-                employee_id: employeeId,
-                full_name: matchingEmp?.full_name || empTests[0]?.employeeName || employeeId,
-                role: matchingEmp?.designation || "",
-                domain: matchingEmp?.department || "",
-                product: "",
-                email: matchingEmp?.email || "",
-                ddh: "",
-                test_status: empTests[0]?.status || null,
-                score: avgScore,
-                remarks: "",
-              };
-            });
-
-      portalRows.forEach((account) => {
-        worksheet.addRow([
-          portalEmployeeName(account),
-          portalEmployeeId(account),
-          account.role || "—",
-          account.domain || "—",
-          account.product || "—",
-          account.email || "—",
-          account.ddh || "—",
-          getPortalTestStatusLabel(account.test_status),
-          account.score !== null && account.score !== undefined
-            ? formatPortalScore(account.score, account.score_max ?? 25)
-            : "—",
-          account.remarks?.trim() ? account.remarks : "—",
-        ]);
-      });
-
-      // Add styling and borders to data cells
-      worksheet.eachRow((row, rowNumber) => {
-        if (rowNumber > 1) {
-          row.height = 20;
-          row.eachCell((cell) => {
-            cell.alignment = { vertical: 'middle', horizontal: 'left' };
-            cell.border = {
-              top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-              bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-              left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-              right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
-            };
-          });
-        }
-      });
-
-      // Write to buffer
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
-      link.setAttribute("download", `employee_portal_test_results_${new Date().toISOString().split('T')[0]}.xlsx`);
-      link.style.visibility = 'hidden';
+      link.setAttribute(
+        "download",
+        `employee_portal_test_results_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
+      link.style.visibility = "hidden";
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    } catch (excelErr) {
+      URL.revokeObjectURL(url);
+    } catch (excelErr: any) {
       console.error("Failed to export Excel:", excelErr);
+      setActionError(excelErr.message || "Failed to export portal data");
+      setTimeout(() => setActionError(null), 5000);
     }
   };
 
@@ -1025,8 +1007,10 @@ export default function AdminResumeDashboard() {
   };
 
   const handleRefresh = async (type: "requirements" | "candidates" | "employees" | "interviews") => {
-    setPipelineStatus(`Ingestion: Refreshing ${type}...`);
-    setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Starting refresh for ${type}...`, ...prev]);
+    if (refreshingType) return;
+    setRefreshingType(type);
+    setPipelineStatus(`Ingestion: Scanning & refreshing ${type}...`);
+    setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Starting folder scan and refresh for ${type}...`, ...prev]);
     try {
       const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "all";
       const jdQuery = `&activeJdId=${encodeURIComponent(sendJdId)}`;
@@ -1035,27 +1019,29 @@ export default function AdminResumeDashboard() {
       });
       const result = await res.json();
       if (result.success) {
-        setPipelineStatus(`Ingestion: Idle (Last refresh: ${new Date().toLocaleTimeString()})`);
-        setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Refresh ${type} completed.`, ...prev]);
+        setPipelineStatus(`Ingestion: Idle (Last scan: ${new Date().toLocaleTimeString()})`);
+        setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} completed.`, ...prev]);
         
         if (type === "requirements") {
           await loadJobDescriptions();
-        } else if (type === "candidates") {
+        } else if (type === "candidates" || type === "interviews") {
           await loadResumes();
         } else if (type === "employees") {
           await loadEmployees();
         }
         await loadLogs();
-        setActionSuccess(`Refresh of ${type} completed successfully.`);
+        setActionSuccess(`Scan & refresh of ${type} completed successfully.`);
         setTimeout(() => setActionSuccess(null), 3000);
       } else {
         throw new Error(result.error || "Failed");
       }
     } catch (err: any) {
       setPipelineStatus("Ingestion: Error");
-      setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Refresh ${type} failed: ${err.message}`, ...prev]);
-      setActionError(`Refresh of ${type} failed: ${err.message}`);
+      setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} failed: ${err.message}`, ...prev]);
+      setActionError(`Scan & refresh of ${type} failed: ${err.message}`);
       setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setRefreshingType(null);
     }
   };
 
@@ -2495,42 +2481,6 @@ export default function AdminResumeDashboard() {
           </div>
           <div className="flex items-center gap-2 md:gap-3 flex-wrap">
             <ThemeToggle />
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("requirements")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Requirements
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("candidates")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Candidates
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("employees")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Employee Data
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("interviews")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Interviews
-            </Button>
             <Link href="/">
               <Button variant="outline" size="sm" className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs">
                 <ArrowLeft className="w-3.5 h-3.5" />
@@ -3371,13 +3321,18 @@ export default function AdminResumeDashboard() {
                           Export to Excel
                         </Button>
                         <Button
-                          onClick={loadEmployees}
+                          onClick={() => handleRefresh("employees")}
+                          disabled={refreshingType !== null}
                           variant="outline"
                           size="sm"
                           className="flex-1 sm:flex-none rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-xs"
                         >
-                          <RefreshCcw className="w-3.5 h-3.5" />
-                          Refresh Portal Data
+                          {refreshingType === "employees" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCcw className="w-3.5 h-3.5" />
+                          )}
+                          Scan & Refresh Portal
                         </Button>
                       </div>
                     </div>
@@ -3526,11 +3481,71 @@ export default function AdminResumeDashboard() {
                                               <h4 className="font-extrabold text-[11px] uppercase tracking-wider text-slate-500 mb-2">
                                                 Assigned Questions ({account.assigned_question_count})
                                               </h4>
-                                              <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                                                {(account.assigned_questions || []).map((q: string, idx: number) => (
-                                                  <li key={idx}>{q}</li>
-                                                ))}
-                                              </ol>
+                                              {account.test_status === "completed" && account.test_id ? (
+                                                (() => {
+                                                  const attemptData = testAttemptDetails[account.test_id];
+                                                  if (attemptData?.loading) {
+                                                    return (
+                                                      <div className="flex items-center gap-2 text-[11px] text-slate-500 py-2">
+                                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                        Loading submitted answers...
+                                                      </div>
+                                                    );
+                                                  }
+                                                  if (attemptData?.questions?.length) {
+                                                    return (
+                                                      <ol className="list-decimal pl-5 space-y-3 text-[11px] text-slate-600 dark:text-slate-300">
+                                                        {attemptData.questions.map((q) => (
+                                                          <li key={q.question_index} className="space-y-1">
+                                                            <div>{q.question_text}</div>
+                                                            <div className="pl-1 space-y-0.5">
+                                                              {q.selected_option_text ? (
+                                                                <div
+                                                                  className={`font-semibold ${
+                                                                    q.is_correct
+                                                                      ? "text-emerald-600 dark:text-emerald-400"
+                                                                      : "text-rose-600 dark:text-rose-400"
+                                                                  }`}
+                                                                >
+                                                                  Selected: {q.selected_option_text}
+                                                                  {q.is_correct === false ? " (Incorrect)" : q.is_correct ? " (Correct)" : ""}
+                                                                </div>
+                                                              ) : (
+                                                                <div className="text-slate-400 font-medium italic">Not answered</div>
+                                                              )}
+                                                              {q.submitted_at && (
+                                                                <div className="text-[10px] text-slate-400 font-medium">
+                                                                  Submitted: {new Date(q.submitted_at).toLocaleString()}
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                          </li>
+                                                        ))}
+                                                      </ol>
+                                                    );
+                                                  }
+                                                  if (attemptData?.error) {
+                                                    return (
+                                                      <p className="text-[11px] text-rose-500 font-medium">
+                                                        Could not load answers: {attemptData.error}
+                                                      </p>
+                                                    );
+                                                  }
+                                                  return (
+                                                    <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                                                      {(account.assigned_questions || []).map((q: string, idx: number) => (
+                                                        <li key={idx}>{q}</li>
+                                                      ))}
+                                                    </ol>
+                                                  );
+                                                })()
+                                              ) : (
+                                                <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                                                  {(account.assigned_questions || []).map((q: string, idx: number) => (
+                                                    <li key={idx}>{q}</li>
+                                                  ))}
+                                                </ol>
+                                              )}
                                             </div>
                                             {account.tests?.length > 0 && (
                                               <div className="border border-indigo-50 dark:border-slate-850 rounded-xl overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
@@ -4217,44 +4232,69 @@ export default function AdminResumeDashboard() {
               )}
 
               <div className="space-y-2">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                  Automated Folder Scanning
-                </label>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                    Automated Folder Scanning
+                  </label>
+                  <p className="text-[9px] text-slate-400 font-medium mt-0.5">
+                    Scans source folders and refreshes dashboard data
+                  </p>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     variant="outline"
+                    disabled={refreshingType !== null}
                     onClick={() => handleRefresh("requirements")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200"
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
                   >
-                    <ClipboardList className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan Requirements</span>
+                    {refreshingType === "requirements" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <ClipboardList className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Requirements</span>
                     <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/BR & JD</span>
                   </Button>
                   <Button
                     variant="outline"
+                    disabled={refreshingType !== null}
                     onClick={() => handleRefresh("candidates")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200"
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
                   >
-                    <FileText className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan Candidates</span>
+                    {refreshingType === "candidates" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <FileText className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Candidates</span>
                     <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/Resumes</span>
                   </Button>
                   <Button
                     variant="outline"
+                    disabled={refreshingType !== null}
                     onClick={() => handleRefresh("employees")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200"
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
                   >
-                    <Users className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan Employees</span>
+                    {refreshingType === "employees" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <Users className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Employees</span>
                     <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/Corp Pool</span>
                   </Button>
                   <Button
                     variant="outline"
+                    disabled={refreshingType !== null}
                     onClick={() => handleRefresh("interviews")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200"
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
                   >
-                    <Video className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Sync Interviews</span>
+                    {refreshingType === "interviews" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <Video className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Sync & Refresh Interviews</span>
                     <span className="text-[7px] text-slate-400 font-semibold uppercase">Database & CSV</span>
                   </Button>
                 </div>

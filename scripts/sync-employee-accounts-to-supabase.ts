@@ -54,12 +54,30 @@ async function detectSchemaMode(): Promise<SchemaMode> {
   return "full";
 }
 
+const VALID_DEPARTMENTS = new Set([
+  "engineering",
+  "data-science",
+  "product",
+  "design",
+  "marketing",
+  "hr",
+  "finance",
+  "operations",
+  "general",
+]);
+
+function normalizeDepartment(value: unknown): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (VALID_DEPARTMENTS.has(raw)) return raw;
+  return "general";
+}
+
 function buildRow(emp: Record<string, unknown>, mode: SchemaMode) {
   const base = {
     employee_id: emp.employee_id,
     email: emp.email || `${emp.employee_id}@nokia.com`,
     full_name: emp.full_name || emp.employee_id,
-    department: emp.department || "general",
+    department: normalizeDepartment(emp.department),
     role: emp.role || "employee",
     is_first_login: emp.is_first_login ?? false,
     updated_at: new Date().toISOString(),
