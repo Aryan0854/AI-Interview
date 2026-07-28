@@ -3,9 +3,6 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import { supabase } from "@/lib/db";
 
 export interface PortalSettings {
-  showEffectivenessTab: boolean;
-  showManagerConsoleTab: boolean;
-  portalFeaturesEnabled: boolean;
   showSystemLogsViewer: boolean;
 }
 
@@ -45,9 +42,6 @@ export class SettingsService {
       } else if (data && data.value) {
         const parsed = data.value as any;
         return {
-          showEffectivenessTab: parsed.showEffectivenessTab !== false,
-          showManagerConsoleTab: parsed.showManagerConsoleTab !== false,
-          portalFeaturesEnabled: parsed.portalFeaturesEnabled !== false,
           showSystemLogsViewer: parsed.showSystemLogsViewer !== false,
         };
       }
@@ -60,16 +54,10 @@ export class SettingsService {
       const raw = await readFile(path, "utf8");
       const parsed = JSON.parse(raw);
       return {
-        showEffectivenessTab: parsed.showEffectivenessTab !== false,
-        showManagerConsoleTab: parsed.showManagerConsoleTab !== false,
-        portalFeaturesEnabled: parsed.portalFeaturesEnabled !== false,
         showSystemLogsViewer: parsed.showSystemLogsViewer !== false,
       };
-    } catch (e: any) {
+    } catch {
       return {
-        showEffectivenessTab: true,
-        showManagerConsoleTab: true,
-        portalFeaturesEnabled: true,
         showSystemLogsViewer: true,
       };
     }
@@ -87,7 +75,7 @@ export class SettingsService {
         .from("portal_settings")
         .upsert({
           key: "portal_features",
-          value: updated
+          value: updated,
         });
 
       if (error) throw error;

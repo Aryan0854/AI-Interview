@@ -350,9 +350,6 @@ export default function AdminResumeDashboard() {
   const [expandedJdId, setExpandedJdId] = useState<string | null>(null);
 
   const [portalSettings, setPortalSettings] = useState({
-    showEffectivenessTab: true,
-    showManagerConsoleTab: true,
-    portalFeaturesEnabled: true,
     showSystemLogsViewer: true,
   });
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
@@ -870,9 +867,6 @@ export default function AdminResumeDashboard() {
       const data = await res.json();
       if (data && typeof data === "object") {
         setPortalSettings({
-          showEffectivenessTab: data.showEffectivenessTab !== false,
-          showManagerConsoleTab: data.showManagerConsoleTab !== false,
-          portalFeaturesEnabled: data.portalFeaturesEnabled !== false,
           showSystemLogsViewer: data.showSystemLogsViewer !== false,
         });
       }
@@ -946,9 +940,6 @@ export default function AdminResumeDashboard() {
       
       if (settingsData && typeof settingsData === "object") {
         setPortalSettings({
-          showEffectivenessTab: settingsData.showEffectivenessTab !== false,
-          showManagerConsoleTab: settingsData.showManagerConsoleTab !== false,
-          portalFeaturesEnabled: settingsData.portalFeaturesEnabled !== false,
           showSystemLogsViewer: settingsData.showSystemLogsViewer !== false,
         });
       }
@@ -976,9 +967,7 @@ export default function AdminResumeDashboard() {
     }
   };
 
-  const handleTogglePortalSetting = async (
-    key: "showEffectivenessTab" | "showManagerConsoleTab" | "portalFeaturesEnabled" | "showSystemLogsViewer"
-  ) => {
+  const handleTogglePortalSetting = async (key: "showSystemLogsViewer") => {
     setIsUpdatingSettings(true);
     const updatedVal = !portalSettings[key];
     const newSettings = {
@@ -4360,25 +4349,6 @@ export default function AdminResumeDashboard() {
             </div>
 
             <div className="space-y-3 flex-1 flex flex-col justify-center">
-              <div className="flex items-center justify-between gap-3 p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 rounded-xl">
-                <div className="space-y-0.5 min-w-0">
-                  <div className="text-xs font-bold text-foreground">Portal Tabs Visibility</div>
-                  <div className="text-[9px] text-slate-400 font-medium leading-snug">Toggle Effectiveness & Manager Console</div>
-                </div>
-                <Button
-                  onClick={() => handleTogglePortalSetting("portalFeaturesEnabled")}
-                  disabled={isUpdatingSettings}
-                  size="sm"
-                  className={`h-7 px-3 text-[10px] font-black rounded-lg border shrink-0 ${
-                    portalSettings.portalFeaturesEnabled
-                      ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-500"
-                      : "bg-secondary hover:bg-slate-200 text-slate-500 border-slate-200 dark:border-slate-700"
-                  }`}
-                >
-                  {portalSettings.portalFeaturesEnabled ? "ENABLED" : "DISABLED"}
-                </Button>
-              </div>
-
               <div className="flex items-center justify-between gap-3 p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 rounded-xl">
                 <div className="space-y-0.5 min-w-0">
                   <div className="text-xs font-bold text-foreground">System Logs Viewer</div>

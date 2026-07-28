@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Loader2, LogOut, BookOpen, Sparkles, ShieldAlert, BarChart3, UserRound } from "lucide-react";
+import { Loader2, LogOut, BookOpen, Sparkles, ShieldAlert, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -34,11 +34,6 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
     employee_id: string;
     full_name: string;
   } | null>(null);
-  const [settings, setSettings] = useState({
-    showEffectivenessTab: true,
-    showManagerConsoleTab: true,
-    portalFeaturesEnabled: true
-  });
 
   const [isIdle, setIsIdle] = useState(false);
   const [countdown, setCountdown] = useState(30);
@@ -51,39 +46,13 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
   }, [isIdle]);
 
   useEffect(() => {
-    fetch("/api/portal_settings")
-      .then(res => res.json())
-      .then(data => {
-        if (data && typeof data === "object") {
-          setSettings({
-            showEffectivenessTab: data.showEffectivenessTab !== false,
-            showManagerConsoleTab: data.showManagerConsoleTab !== false,
-            portalFeaturesEnabled: data.portalFeaturesEnabled !== false
-          });
-        }
-      })
-      .catch(err => console.error("Failed to load portal settings:", err));
-  }, []);
-
-  useEffect(() => {
     if (loading) return;
-    const isEffectiveness = pathname === "/employee/effectiveness";
-    const isManager = pathname === "/employee/manager";
     const isLearn = pathname === "/employee/learn" || pathname.startsWith("/employee/learn/");
-    const featuresDisabled = !settings.portalFeaturesEnabled;
-    const effDisabled = !settings.showEffectivenessTab;
-    const mgrDisabled = !settings.showManagerConsoleTab;
 
     if (assessmentOnly && isLearn) {
       router.replace("/employee/dashboard");
-    } else if (assessmentOnly && (isEffectiveness || isManager)) {
-      router.replace("/employee/dashboard");
-    } else if (isEffectiveness && (featuresDisabled || effDisabled)) {
-      router.replace("/employee/dashboard");
-    } else if (isManager && (featuresDisabled || mgrDisabled)) {
-      router.replace("/employee/dashboard");
     }
-  }, [pathname, settings, loading, router, assessmentOnly]);
+  }, [pathname, loading, router, assessmentOnly]);
 
   useEffect(() => {
     const token = window.localStorage.getItem("employee_token");
@@ -137,8 +106,6 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
   const isLearnActive =
     pathname === "/employee/learn" || pathname.startsWith("/employee/learn/");
   const isDashboardActive = pathname === "/employee/dashboard" || pathname.startsWith("/employee/tests/");
-  const isEffectivenessActive = pathname === "/employee/effectiveness";
-  const isManagerActive = pathname === "/employee/manager";
 
   useEffect(() => {
     if (loading) return;
@@ -254,18 +221,6 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
                   <BarChart3 className="h-4 w-4 shrink-0" />
                   <span className="hidden sm:inline">{assessmentOnly ? "Assessment" : "Analytics"}</span>
                 </Link>
-                {!assessmentOnly && settings.portalFeaturesEnabled && settings.showEffectivenessTab && (
-                  <Link href="/employee/effectiveness" className={`hidden md:inline-flex ${navLinkClass(isEffectivenessActive)}`}>
-                    <UserRound className="h-4 w-4 shrink-0" />
-                    <span>Effectiveness</span>
-                  </Link>
-                )}
-                {!assessmentOnly && settings.portalFeaturesEnabled && settings.showManagerConsoleTab && (
-                  <Link href="/employee/manager" className={`hidden xl:inline-flex ${navLinkClass(isManagerActive)}`}>
-                    <UserRound className="h-4 w-4 shrink-0" />
-                    <span>Manager</span>
-                  </Link>
-                )}
               </nav>
 
               <Button
