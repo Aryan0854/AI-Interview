@@ -18,17 +18,20 @@ const DEFAULT_TIME_LIMIT_SECONDS = 1800;
 function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
   if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
   const mimeTypes = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
     "video/webm",
   ];
   for (const type of mimeTypes) {
     if (MediaRecorder.isTypeSupported?.(type)) {
-      return new MediaRecorder(stream, { mimeType: type });
+      return new MediaRecorder(stream, {
+        mimeType: type,
+        videoBitsPerSecond: 400_000,
+      });
     }
   }
   try {
-    return new MediaRecorder(stream);
+    return new MediaRecorder(stream, { videoBitsPerSecond: 400_000 });
   } catch {
     return null;
   }
@@ -598,58 +601,86 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     };
   }, [phase, clmReady, triggerProctorWarning]);
 
-  const stopRecordingAndUpload = useCallback(async () => {
+  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
+    if (!recorder || recorder.state === "inactive") {
+      console.warn("Proctoring recorder was not active at submit time.");
+      return false;
+    }
 
-    await new Promise<void>((resolve) => {
+    const uploadBlob = async (blob: Blob): Promise<boolean> => {
+      if (blob.size <= 0 || !token) return false;
+
+      const authHeaders = { Authorization: `Bearer ${token}` };
+      const CHUNK_SIZE = 2 * 1024 * 1024;
+      const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
+
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const slice = blob.slice(
+          chunkIndex * CHUNK_SIZE,
+          Math.min(blob.size, (chunkIndex + 1) * CHUNK_SIZE)
+        );
+        const formData = new FormData();
+        formData.append("chunkIndex", String(chunkIndex));
+        formData.append("totalChunks", String(totalChunks));
+        formData.append(
+          "chunk",
+          new File([slice], `${testId}-chunk-${chunkIndex}.webm`, {
+            type: blob.type || "video/webm",
+          })
+        );
+
+        const res = await fetch(`/api/employee/tests/${testId}/upload_video/chunk`, {
+          method: "POST",
+          headers: authHeaders,
+          body: formData,
+        });
+
+        if (!res.ok) {
+          console.warn("Video chunk upload failed:", await res.text().catch(() => ""));
+          return false;
+        }
+
+        const payload = await res.json().catch(() => ({}));
+        if (payload?.complete && payload?.success) {
+          return true;
+        }
+      }
+
+      return false;
+    };
+
+    return await new Promise<boolean>((resolve) => {
       recorder.onstop = async () => {
         try {
           const blob = new Blob(recordingChunksRef.current, {
             type: recorder.mimeType || "video/webm",
           });
-          if (blob.size <= 0 || !token) return;
-
-          const authHeaders = { Authorization: `Bearer ${token}` };
-
-          const signedRes = await fetch(`/api/employee/tests/${testId}/video-upload-url`, {
-            method: "POST",
-            headers: authHeaders,
-          });
-
-          if (signedRes.ok) {
-            const { signedUrl } = await signedRes.json();
-            const putRes = await fetch(signedUrl, {
-              method: "PUT",
-              headers: { "Content-Type": blob.type || "video/webm" },
-              body: blob,
-            });
-            if (putRes.ok) {
-              await fetch(`/api/employee/tests/${testId}/upload_video`, {
-                method: "POST",
-                headers: {
-                  ...authHeaders,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ complete: true }),
-              });
-              return;
-            }
+          if (blob.size <= 0) {
+            console.warn("Proctoring recording blob is empty.");
+            resolve(false);
+            return;
           }
 
-          const formData = new FormData();
-          formData.append("video", new File([blob], `${testId}.webm`, { type: "video/webm" }));
-          await fetch(`/api/employee/tests/${testId}/upload_video`, {
-            method: "POST",
-            headers: authHeaders,
-            body: formData,
-          });
+          let ok = await uploadBlob(blob);
+          if (!ok) {
+            await new Promise((r) => setTimeout(r, 800));
+            ok = await uploadBlob(blob);
+          }
+          resolve(ok);
         } catch (err) {
           console.warn("Failed to upload proctoring video:", err);
-        } finally {
-          resolve();
+          resolve(false);
         }
       };
+
+      try {
+        if (recorder.state === "recording") {
+          recorder.requestData();
+        }
+      } catch {
+        // ignore
+      }
       recorder.stop();
     });
   }, [testId, token]);
@@ -669,15 +700,21 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       setCamStream(stream);
 
       const recorder = createMediaRecorder(stream);
-      if (recorder) {
-        mediaRecorderRef.current = recorder;
-        recordingChunksRef.current = [];
-        recorder.ondataavailable = (event) => {
-          if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
-        };
-        recorder.start(1000);
-        recordingStartRef.current = Date.now();
+      if (!recorder) {
+        stream.getTracks().forEach((track) => track.stop());
+        alert(
+          "Could not start proctoring video recording. Please use Chrome or Edge, allow camera access, and try again."
+        );
+        return;
       }
+
+      mediaRecorderRef.current = recorder;
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
+      };
+      recorder.start(1000);
+      recordingStartRef.current = Date.now();
     } catch (err) {
       console.warn("Failed to access webcam:", err);
       alert("Proctoring camera access is required to take this test. Please enable camera access in your browser settings and click Start again.");

@@ -10,6 +10,7 @@ import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-
 import { supabaseServer } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 async function markVideoReady(
   testId: string,

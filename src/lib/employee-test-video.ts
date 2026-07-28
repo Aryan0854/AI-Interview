@@ -67,7 +67,7 @@ export async function createEmployeeTestVideoUploadUrl(
     const path = employeeTestVideoStoragePath(testId);
     const { data, error } = await supabaseServer.storage
       .from(RECORDINGS_BUCKET)
-      .createSignedUploadUrl(path);
+      .createSignedUploadUrl(path, { upsert: true });
     if (error || !data?.signedUrl) throw error || new Error("No signed upload URL");
     return { signedUrl: data.signedUrl, path };
   } catch (err) {
