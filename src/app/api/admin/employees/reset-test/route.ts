@@ -5,6 +5,8 @@ import { supabase } from "@/lib/db";
 import { writeLog } from "@/lib/structured-logger";
 import { cacheStore } from "@/lib/cache-store";
 import { deleteEmployeeTestVideo } from "@/lib/employee-test-video";
+import { resetTestInSupabase } from "@/services/employee-test-supabase-sync";
+import { allowLocalTestsFallback, useSupabasePrimary } from "@/lib/db-mode";
 
 /**
  * POST /api/admin/employees/reset-test
@@ -54,66 +56,32 @@ export async function POST(request: NextRequest) {
     }
 
     const existingQuestions = await localTestsDb.getQuestions(resolvedTestId);
-    let resetViaLocal = false;
 
-    try {
-      const { data: testRow, error } = await supabase
-        .from("tests")
-        .select("id, employee_id, total_questions")
-        .eq("id", resolvedTestId)
-        .maybeSingle();
+    // Postgres is source of truth in production.
+    await resetTestInSupabase(resolvedTestId);
 
-      if (!error && testRow) {
-        await supabase.from("test_attempts").delete().eq("test_id", resolvedTestId);
-
-        const { error: updateErr } = await supabase
-          .from("tests")
-          .update({
-            status: "pending",
-            in_progress: null,
-            current_question_index: 0,
-            started_at: null,
-            completed_at: null,
-            session_recording_url: null,
-            proctoring: null,
-            score_correct: null,
-            score_total: null,
-            score_percent: null,
-            ai_analysis: null,
-          })
-          .eq("id", resolvedTestId);
-
-        if (updateErr) throw updateErr;
-      } else {
-        resetViaLocal = true;
+    if (allowLocalTestsFallback()) {
+      try {
+        await localTestsDb.updateTest(resolvedTestId, {
+          status: "pending",
+          in_progress: null,
+          current_question_index: 0,
+          started_at: null,
+          completed_at: null,
+          session_recording_url: null as any,
+          proctoring: null as any,
+          score_correct: null,
+          score_total: null,
+          score_percent: null,
+          ai_analysis: null,
+        });
+        await localTestsDb.deleteAttempts(resolvedTestId);
+      } catch {
+        // test may exist only in Supabase after migration
       }
-    } catch {
-      resetViaLocal = true;
     }
 
-    if (resetViaLocal) {
-      const localTest = await localTestsDb.getTestById(resolvedTestId);
-      if (!localTest) {
-        return NextResponse.json({ error: "Test not found" }, { status: 404 });
-      }
-
-      await localTestsDb.updateTest(resolvedTestId, {
-        status: "pending",
-        in_progress: null,
-        current_question_index: 0,
-        started_at: null,
-        completed_at: null,
-        session_recording_url: null as any,
-        proctoring: null as any,
-        score_correct: null,
-        score_total: null,
-        score_percent: null,
-        ai_analysis: null,
-      });
-      await localTestsDb.deleteAttempts(resolvedTestId);
-      await deleteEmployeeTestVideo(resolvedTestId);
-    }
-
+    await deleteEmployeeTestVideo(resolvedTestId);
     cacheStore.invalidate("employees");
 
     await writeLog(

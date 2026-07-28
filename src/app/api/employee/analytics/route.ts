@@ -1,11 +1,208 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
-import { localTestsDb } from "@/services/local-tests-db";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
+import { localTestsDb, LocalTestsDb } from "@/services/local-tests-db";
+import { allowLocalTestsFallback } from "@/lib/db-mode";
 import { computeReadinessScore, computeSkillLevel } from "@/lib/dashboard-analytics";
 
+function round(n: number, d = 0) {
+  const m = 10 ** d;
+  return Math.round(n * m) / m;
+}
+
+async function loadLocalAnalytics(employeeCode: string) {
+  const localTests = await localTestsDb.getAllTestsForEmployee(employeeCode);
+  const completedTests = localTests.filter((t) => t.status === "completed");
+  const totalTests = completedTests.length;
+
+  const allAttempts = await localTestsDb.getAllAttemptsForEmployee(employeeCode);
+
+  const averageScore =
+    completedTests.length > 0
+      ? round(
+          completedTests.reduce((sum, test) => {
+            const testAttempts = allAttempts.filter((a) => a.test_id === test.id);
+            const correct = LocalTestsDb.scoreFromAttempts(testAttempts, test);
+            const totalQs = test.total_questions || 25;
+            const pct =
+              test.score_percent ??
+              (totalQs > 0 ? round((correct / totalQs) * 100) : 0);
+            return sum + pct;
+          }, 0) / completedTests.length
+        )
+      : 0;
+
+  const totalLearningMins = completedTests.reduce((sum, test) => sum + test.total_questions * 2, 0);
+  const totalLearningHours = round(totalLearningMins / 60);
+
+  const subjects = [
+    { id: "resource-subject", title: "Product Assessment" },
+    { id: "2", title: "AI / ML" },
+    { id: "3", title: "Data" },
+    { id: "8", title: "Python" },
+    { id: "9", title: "SQL" },
+    { id: "10", title: "Cloud" },
+    { id: "11", title: "MLOps" },
+  ];
+
+  const subjectBreakdown = subjects
+    .map((subject) => {
+      const matchingTests = completedTests.filter((t) => t.subject_id === subject.id);
+      const testIds = matchingTests.map((t) => t.id);
+      if (testIds.length === 0) {
+        return {
+          subject_id: subject.id,
+          subject_title: subject.title,
+          average_pct: 0,
+          mastery_pct: 0,
+          topic_count: 0,
+        };
+      }
+
+      const perTestScores = matchingTests.map((test) => {
+        const testAttempts = allAttempts.filter((a) => a.test_id === test.id);
+        const correct = LocalTestsDb.scoreFromAttempts(testAttempts, test);
+        const totalQs = test.total_questions || 25;
+        return (
+          test.score_percent ??
+          (totalQs > 0 ? round((correct / totalQs) * 100) : 0)
+        );
+      });
+      const average_pct = round(
+        perTestScores.reduce((sum, score) => sum + score, 0) / perTestScores.length
+      );
+
+      return {
+        subject_id: subject.id,
+        subject_title: matchingTests[0]?.subject_title || subject.title,
+        average_pct,
+        mastery_pct: average_pct >= 80 ? testIds.length : 0,
+        topic_count: testIds.length,
+      };
+    })
+    .filter((s) => s.topic_count > 0);
+
+  const weeklyMap: Record<string, { tests: number; mins: number }> = {};
+  completedTests.forEach((test) => {
+    const date = new Date(test.completed_at || test.created_at);
+    const day = date.getDay();
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - ((day + 6) % 7));
+    const key = weekStart.toISOString().split("T")[0];
+    if (!weeklyMap[key]) weeklyMap[key] = { tests: 0, mins: 0 };
+    weeklyMap[key].tests += 1;
+    weeklyMap[key].mins += test.total_questions * 2;
+  });
+
+  const weeklyActivity = Object.entries(weeklyMap).map(([week_start, values]) => {
+    const weekTests = completedTests.filter((test) => {
+      const date = new Date(test.completed_at || test.created_at);
+      const day = date.getDay();
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - ((day + 6) % 7));
+      return weekStart.toISOString().split("T")[0] === week_start;
+    });
+    const weekScores = weekTests.map((test) => {
+      const testAttempts = allAttempts.filter((a) => a.test_id === test.id);
+      const correct = LocalTestsDb.scoreFromAttempts(testAttempts, test);
+      const totalQs = test.total_questions || 25;
+      return (
+        test.score_percent ??
+        (totalQs > 0 ? round((correct / totalQs) * 100) : 0)
+      );
+    });
+    const avg_score =
+      weekScores.length > 0
+        ? round(weekScores.reduce((sum, score) => sum + score, 0) / weekScores.length)
+        : 0;
+
+    return {
+      week_start,
+      tests_taken: values.tests,
+      hours_spent: round(values.mins / 60),
+      avg_score,
+    };
+  });
+
+  const sortedCompleted = [...completedTests]
+    .sort(
+      (a, b) =>
+        new Date(b.completed_at || b.created_at).getTime() -
+        new Date(a.completed_at || a.created_at).getTime()
+    )
+    .slice(0, 10);
+
+  const recentResults = sortedCompleted.map((test) => {
+    const testAttempts = allAttempts.filter((a) => a.test_id === test.id);
+    const correct = LocalTestsDb.scoreFromAttempts(testAttempts, test);
+    const totalQs = test.total_questions || 25;
+    const accuracy_pct =
+      test.score_percent ?? (totalQs > 0 ? round((correct / totalQs) * 100) : 0);
+
+    return {
+      id: test.id,
+      topic_id: test.topic_id,
+      topic_title: test.topic_title || test.topic_id,
+      subject_id: test.subject_id,
+      subject_title: test.subject_title || test.subject_id,
+      difficulty: test.difficulty,
+      total_questions: test.total_questions,
+      correct_answers: correct,
+      accuracy_pct,
+      time_taken_seconds: 0,
+      started_at: test.started_at,
+      completed_at: test.completed_at || "",
+      topic_breakdown: [],
+      ai_analysis:
+        test.ai_analysis ??
+        (typeof test.in_progress === "string" ? test.in_progress : ""),
+      improvement_suggestions: [],
+    };
+  });
+
+  const sorted = [...subjectBreakdown].sort((a, b) => b.average_pct - a.average_pct);
+  const strongest_subject =
+    sorted[0]?.topic_count > 0
+      ? {
+          subject_id: sorted[0].subject_id,
+          subject_title: sorted[0].subject_title,
+          average_pct: sorted[0].average_pct,
+        }
+      : undefined;
+  const weakest_subject =
+    sorted[sorted.length - 1]?.topic_count > 0
+      ? {
+          subject_id: sorted[sorted.length - 1].subject_id,
+          subject_title: sorted[sorted.length - 1].subject_title,
+          average_pct: sorted[sorted.length - 1].average_pct,
+        }
+      : undefined;
+
+  const ai_readiness_score = computeReadinessScore({
+    averageScore,
+    totalTestsTaken: totalTests,
+    subjectBreakdown,
+    testScores: recentResults.map((item) => item.accuracy_pct),
+  });
+  const skill_level = computeSkillLevel(ai_readiness_score);
+
+  return {
+    total_tests_taken: totalTests,
+    average_score: averageScore,
+    total_learning_hours: totalLearningHours,
+    ai_readiness_score,
+    skill_level,
+    strongest_subject,
+    weakest_subject,
+    score_history: recentResults.map((item) => ({ date: item.completed_at, score: item.accuracy_pct })),
+    subject_breakdown: subjectBreakdown,
+    weekly_activity: weeklyActivity,
+    recent_attempts: recentResults,
+  };
+}
+
 export async function GET(request: NextRequest) {
-  const auth = authenticateRequest(request);
+  const auth = await authenticateRequestAsync(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -34,10 +231,10 @@ export async function GET(request: NextRequest) {
       .eq("status", "completed");
     if (countErr) throw countErr;
 
-    if ((totalTests ?? 0) === 0) {
-      const localProbe = await localTestsDb.getAllTestsForEmployee(employeeCode);
-      if (localProbe.some((t) => t.status === "completed")) {
-        throw new Error("No completed tests in Supabase — use local fallback");
+    if ((totalTests ?? 0) === 0 && allowLocalTestsFallback()) {
+      const localPayload = await loadLocalAnalytics(employeeCode);
+      if (localPayload.total_tests_taken > 0) {
+        return NextResponse.json(localPayload);
       }
     }
 
@@ -205,177 +402,16 @@ export async function GET(request: NextRequest) {
       recent_attempts: recentResults,
     });
 
-  } catch (error) {
-    console.warn("Supabase analytics failed, falling back to local JSON database:", error);
-
+  } catch {
+    if (allowLocalTestsFallback()) {
     try {
-      const localEmp = auth.employee;
-      const userUuid = employeeCode;
-      
-      const localTests = await localTestsDb.getAllTestsForEmployee(userUuid);
-      const completedTests = localTests.filter((t) => t.status === "completed");
-      const totalTests = completedTests.length;
-      
-      const allAttempts = await localTestsDb.getAllAttemptsForEmployee(userUuid);
-      
-      const correctAttempts = allAttempts.filter((a) => a.is_correct).length;
-      const averageScore =
-        allAttempts.length > 0
-          ? round((correctAttempts / allAttempts.length) * 100)
-          : completedTests.length > 0 && completedTests[0].score_percent != null
-            ? completedTests[0].score_percent!
-            : 0;
-      
-      const totalLearningMins = completedTests.reduce((sum, test) => sum + (test.total_questions * 2), 0);
-      const totalLearningHours = round(totalLearningMins / 60);
-
-      const subjects = [
-        { id: "resource-subject", title: "Product Assessment" },
-        { id: "2", title: "AI / ML" },
-        { id: "3", title: "Data" },
-        { id: "8", title: "Python" },
-        { id: "9", title: "SQL" },
-        { id: "10", title: "Cloud" },
-        { id: "11", title: "MLOps" },
-      ];
-
-      const subjectBreakdown = subjects.map((subject) => {
-        const matchingTests = completedTests.filter((t) => t.subject_id === subject.id);
-        const testIds = matchingTests.map((t) => t.id);
-        if (testIds.length === 0) {
-          return {
-            subject_id: subject.id,
-            subject_title: subject.title,
-            average_pct: 0,
-            mastery_pct: 0,
-            topic_count: 0,
-          };
-        }
-
-        const attemptsForSub = allAttempts.filter((a) => testIds.includes(a.test_id));
-        const correctFromAttempts = attemptsForSub.filter((a) => a.is_correct).length;
-        const scoreFromTests = matchingTests
-          .map((t) => t.score_percent)
-          .filter((v): v is number => typeof v === "number");
-        const average_pct =
-          attemptsForSub.length > 0
-            ? round((correctFromAttempts / attemptsForSub.length) * 100)
-            : scoreFromTests.length > 0
-              ? round(scoreFromTests.reduce((a, b) => a + b, 0) / scoreFromTests.length)
-              : 0;
-
-        return {
-          subject_id: subject.id,
-          subject_title: matchingTests[0]?.subject_title || subject.title,
-          average_pct,
-          mastery_pct: average_pct >= 80 ? testIds.length : 0,
-          topic_count: testIds.length,
-        };
-      }).filter((s) => s.topic_count > 0);
-
-      const weeklyMap: Record<string, { tests: number; mins: number }> = {};
-      completedTests.forEach((test) => {
-        const date = new Date(test.completed_at || test.created_at);
-        const day = date.getDay();
-        const weekStart = new Date(date);
-        weekStart.setDate(date.getDate() - ((day + 6) % 7));
-        const key = weekStart.toISOString().split("T")[0];
-        if (!weeklyMap[key]) weeklyMap[key] = { tests: 0, mins: 0 };
-        weeklyMap[key].tests += 1;
-        weeklyMap[key].mins += (test.total_questions * 2);
-      });
-
-      const weeklyActivity = Object.entries(weeklyMap).map(([week_start, values]) => {
-        const weekTests = completedTests.filter((test) => {
-          const date = new Date(test.completed_at || test.created_at);
-          const day = date.getDay();
-          const weekStart = new Date(date);
-          weekStart.setDate(date.getDate() - ((day + 6) % 7));
-          return weekStart.toISOString().split("T")[0] === week_start;
-        });
-        const weekTestIds = weekTests.map((t) => t.id);
-        const weekAttempts = allAttempts.filter((a) => weekTestIds.includes(a.test_id));
-        const weekCorrect = weekAttempts.filter((a) => a.is_correct).length;
-        const avg_score = weekAttempts.length ? round((weekCorrect / weekAttempts.length) * 100) : 0;
-
-        return {
-          week_start,
-          tests_taken: values.tests,
-          hours_spent: round(values.mins / 60),
-          avg_score,
-        };
-      });
-
-      const sortedCompleted = [...completedTests]
-        .sort((a, b) => new Date(b.completed_at || b.created_at).getTime() - new Date(a.completed_at || a.created_at).getTime())
-        .slice(0, 10);
-
-      const recentResults = sortedCompleted.map((test) => {
-        const testAttempts = allAttempts.filter((a) => a.test_id === test.id);
-        const correct = test.score_correct ?? testAttempts.filter((a) => a.is_correct).length;
-        const totalAnswered = testAttempts.length || test.total_questions;
-        const accuracy_pct =
-          test.score_percent ??
-          (totalAnswered > 0 ? round((correct / totalAnswered) * 100) : 0);
-
-        return {
-          id: test.id,
-          topic_id: test.topic_id,
-          topic_title: test.topic_title || test.topic_id,
-          subject_id: test.subject_id,
-          subject_title: test.subject_title || test.subject_id,
-          difficulty: test.difficulty,
-          total_questions: test.total_questions,
-          correct_answers: correct,
-          accuracy_pct,
-          time_taken_seconds: 0,
-          started_at: test.started_at,
-          completed_at: test.completed_at || "",
-          topic_breakdown: [],
-          ai_analysis:
-            test.ai_analysis ??
-            (typeof test.in_progress === "string" ? test.in_progress : ""),
-          improvement_suggestions: [],
-        };
-      });
-
-      const sorted = [...subjectBreakdown].sort((a, b) => b.average_pct - a.average_pct);
-      const strongest_subject = sorted[0]?.topic_count > 0
-        ? { subject_id: sorted[0].subject_id, subject_title: sorted[0].subject_title, average_pct: sorted[0].average_pct }
-        : undefined;
-      const weakest_subject = sorted[sorted.length - 1]?.topic_count > 0
-        ? { subject_id: sorted[sorted.length - 1].subject_id, subject_title: sorted[sorted.length - 1].subject_title, average_pct: sorted[sorted.length - 1].average_pct }
-        : undefined;
-
-      const ai_readiness_score = computeReadinessScore({
-        averageScore,
-        totalTestsTaken: totalTests,
-        subjectBreakdown,
-        testScores: recentResults.map((item) => item.accuracy_pct),
-      });
-      const skill_level = computeSkillLevel(ai_readiness_score);
-
-      return NextResponse.json({
-        total_tests_taken: totalTests,
-        average_score: averageScore,
-        total_learning_hours: totalLearningHours,
-        ai_readiness_score: ai_readiness_score,
-        skill_level: skill_level,
-        strongest_subject,
-        weakest_subject,
-        score_history: recentResults.map((item) => ({ date: item.completed_at, score: item.accuracy_pct })),
-        subject_breakdown: subjectBreakdown,
-        weekly_activity: weeklyActivity,
-        recent_attempts: recentResults,
-      });
+      const localPayload = await loadLocalAnalytics(employeeCode);
+      return NextResponse.json(localPayload);
     } catch (fallbackError) {
       console.error("Local database analytics fallback failed:", fallbackError);
       return NextResponse.json({ error: "Failed to load analytics" }, { status: 500 });
     }
+    }
+    return NextResponse.json({ error: "Failed to load analytics" }, { status: 500 });
   }
-}
-
-function round(n: number, d = 0) {
-  const m = 10 ** d;
-  return Math.round(n * m) / m;
 }

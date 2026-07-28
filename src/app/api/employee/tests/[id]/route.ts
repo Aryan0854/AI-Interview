@@ -4,6 +4,7 @@ import { authenticateRequest, isAssessmentOnlyEmployee, isProductQbEmployee, PRO
 import { localTestsDb } from "@/services/local-tests-db";
 import { writeLog } from "@/lib/structured-logger";
 import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
+import { useSupabasePrimary } from "@/lib/db-mode";
 
 import { fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
 
@@ -41,6 +42,31 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     let testRow: any = null;
     let questions: any[] = [];
 
+    if (useSupabasePrimary()) {
+      try {
+        const { data, error } = await supabase
+          .from("tests")
+          .select("*")
+          .eq("id", id)
+          .eq("employee_id", employeeUuid)
+          .single();
+
+        if (error || !data) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        testRow = data;
+
+        const { data: qData } = await supabase
+          .from("test_questions")
+          .select("*")
+          .eq("test_id", id)
+          .order("question_index");
+        questions = qData ?? [];
+      } catch (dbErr) {
+        console.error("Supabase load failed:", dbErr);
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+    } else {
     const localTest = await localTestsDb.getTestById(id);
     if (localTest && employeeOwnsTest(localTest, auth.employeeId, employeeUuid)) {
       testRow = localTest;
@@ -73,6 +99,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         testRow = localTest;
         questions = await localTestsDb.getQuestions(id);
       }
+    }
     }
 
     if (

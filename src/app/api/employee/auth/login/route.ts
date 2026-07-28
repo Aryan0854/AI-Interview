@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addEmployeeAccount, getEmployeeAccount, hasPassword, verifyPassword, signToken, syncEmployeeToSupabase } from "@/lib/employee-auth";
+import { getEmployeeAccountAsync, hasPassword, verifyPassword, signToken, syncEmployeeToSupabase } from "@/lib/employee-auth";
+import { cacheEmployeeAccount } from "@/services/employee-account-store";
 import { isRateLimited, getClientIp } from "@/lib/security";
 import { auditLogService } from "@/services/audit-log-service";
 
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Employee ID is required" }, { status: 400 });
     }
 
-    const employee = getEmployeeAccount(employee_id);
+    const employee = await getEmployeeAccountAsync(employee_id);
     if (!employee) {
       return NextResponse.json({ error: "Invalid Employee ID" }, { status: 401 });
     }
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     const token = signToken(employee.employee_id);
+    cacheEmployeeAccount(employee);
     await syncEmployeeToSupabase(employee);
 
     if (isFirstLogin) {

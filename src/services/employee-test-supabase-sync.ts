@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/db";
+import { useSupabasePrimary } from "@/lib/db-mode";
 import type { EmployeeAccount } from "@/lib/employee-auth";
 import {
   localTestsDb,
@@ -39,8 +40,6 @@ export async function resolveEmployeeUuid(
     .maybeSingle();
   if (existing?.id) return existing.id;
 
-  const department = "general";
-
   const { data: inserted, error } = await supabase
     .from("employees")
     .upsert(
@@ -48,7 +47,7 @@ export async function resolveEmployeeUuid(
         employee_id: code,
         email: profile?.email || `${code}@nokia.com`,
         full_name: profile?.full_name || code,
-        department,
+        department: "general",
         role: profile?.role || "employee",
         product: profile?.product || null,
         is_first_login: profile?.is_first_login ?? false,
@@ -65,10 +64,24 @@ export async function resolveEmployeeUuid(
   return inserted.id;
 }
 
-function buildTestPayload(test: LocalTest, employeeUuid: string) {
+/** Full test row for Postgres upsert (matches full-schema-and-seed.sql). */
+export function buildTestRow(test: LocalTest, employeeUuid: string): Record<string, unknown> {
   const aiAnalysis =
     test.ai_analysis ??
     (typeof test.in_progress === "string" ? test.in_progress : null);
+
+  let inProgress: unknown = test.in_progress;
+  if (typeof inProgress === "object" && inProgress !== null) {
+    inProgress = inProgress;
+  } else if (typeof inProgress === "string") {
+    try {
+      inProgress = JSON.parse(inProgress);
+    } catch {
+      inProgress = null;
+    }
+  } else {
+    inProgress = null;
+  }
 
   return {
     id: test.id,
@@ -78,14 +91,14 @@ function buildTestPayload(test: LocalTest, employeeUuid: string) {
     subject_id: test.subject_id,
     topic_title: test.topic_title ?? null,
     subject_title: test.subject_title ?? null,
-    difficulty: test.difficulty,
+    difficulty: String(test.difficulty ?? "medium"),
     total_questions: test.total_questions,
     time_limit_seconds: test.time_limit_seconds,
     status: test.status,
     current_question_index: test.current_question_index,
     started_at: test.started_at,
     completed_at: test.completed_at,
-    in_progress: typeof test.in_progress === "object" ? test.in_progress : null,
+    in_progress: inProgress,
     session_recording_url: test.session_recording_url ?? null,
     proctoring: test.proctoring ?? null,
     score_correct: test.score_correct ?? null,
@@ -126,7 +139,8 @@ export async function syncAttemptsToSupabase(
   replaceExisting = true
 ): Promise<void> {
   if (replaceExisting) {
-    await supabase.from("test_attempts").delete().eq("test_id", testId);
+    const { error: delErr } = await supabase.from("test_attempts").delete().eq("test_id", testId);
+    if (delErr) throw delErr;
   }
 
   if (attempts.length === 0) return;
@@ -150,9 +164,8 @@ export async function syncTestToSupabase(
   employeeUuid: string,
   questions?: LocalTestQuestion[]
 ): Promise<void> {
-  const { error } = await supabase
-    .from("tests")
-    .upsert(buildTestPayload(test, employeeUuid), { onConflict: "id" });
+  const row = buildTestRow(test, employeeUuid);
+  const { error } = await supabase.from("tests").upsert(row, { onConflict: "id" });
   if (error) throw error;
 
   if (questions && questions.length > 0) {
@@ -179,8 +192,11 @@ export async function syncLocalTestStateToSupabase(
   profile?: Partial<EmployeeAccount>
 ): Promise<void> {
   const bundle = await syncProductTestBundle(testId, profile);
-  if (!bundle) return;
-  await syncTestToSupabase(bundle.test, bundle.employeeUuid);
+  if (!bundle) {
+    if (useSupabasePrimary()) {
+      throw new Error(`Test ${testId} not found — cannot sync to Supabase`);
+    }
+  }
 }
 
 export async function syncSubmitToSupabase(
@@ -199,4 +215,28 @@ export async function syncSubmitToSupabase(
 
   await syncTestToSupabase(merged, employeeUuid, questions);
   await syncAttemptsToSupabase(testId, employeeUuid, attempts, true);
+}
+
+/** Reset a test row in Postgres (admin reset). */
+export async function resetTestInSupabase(testId: string): Promise<void> {
+  const { error: attErr } = await supabase.from("test_attempts").delete().eq("test_id", testId);
+  if (attErr) throw attErr;
+
+  const { error: updErr } = await supabase
+    .from("tests")
+    .update({
+      status: "pending",
+      in_progress: null,
+      current_question_index: 0,
+      started_at: null,
+      completed_at: null,
+      session_recording_url: null,
+      proctoring: null,
+      score_correct: null,
+      score_total: null,
+      score_percent: null,
+      ai_analysis: null,
+    })
+    .eq("id", testId);
+  if (updErr) throw updErr;
 }

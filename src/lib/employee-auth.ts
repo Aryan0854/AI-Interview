@@ -3,6 +3,15 @@ import path from "path";
 import crypto from "crypto";
 import type { NextRequest } from "next/server";
 import { supabase } from "@/lib/db";
+import { useSupabasePrimary } from "@/lib/db-mode";
+import {
+  cacheEmployeeAccount,
+  fetchEmployeeAccountFromDb,
+  fetchEmployeeByEmailFromDb,
+  getCachedEmployeeAccount,
+  shouldUseDbAccounts,
+  upsertEmployeeAccountToDb,
+} from "@/services/employee-account-store";
 
 export interface EmployeeAccount {
   employee_id: string;
@@ -43,10 +52,18 @@ interface AccountStore {
 }
 
 const STATIC_ACCOUNT_FILE = path.join(process.cwd(), "src", "data", "employee-accounts.json");
-const AUTH_SECRET = process.env.EMPLOYEE_AUTH_SECRET || "dev-employee-auth-secret";
+const AUTH_SECRET = process.env.EMPLOYEE_AUTH_SECRET || "";
 
-if (!process.env.EMPLOYEE_AUTH_SECRET) {
-  console.warn("EMPLOYEE_AUTH_SECRET is not set. Using a development fallback secret.");
+if (!AUTH_SECRET) {
+  if (useSupabasePrimary()) {
+    console.error("EMPLOYEE_AUTH_SECRET is required in production.");
+  } else {
+    console.warn("EMPLOYEE_AUTH_SECRET is not set. Using a development fallback secret.");
+  }
+}
+
+function getAuthSecret(): string {
+  return AUTH_SECRET || "dev-employee-auth-secret";
 }
 
 function getAccountFilePath() {
@@ -131,14 +148,34 @@ function normalizeEmployeeId(employeeId: string) {
 }
 
 export function getEmployeeAccount(employeeId: string): EmployeeAccount | null {
+  if (shouldUseDbAccounts()) {
+    const cached = getCachedEmployeeAccount(employeeId);
+    if (cached) return cached;
+  }
   const store = readStore();
   return store.employees.find((employee) => normalizeEmployeeId(employee.employee_id) === normalizeEmployeeId(employeeId)) ?? null;
+}
+
+export async function getEmployeeAccountAsync(employeeId: string): Promise<EmployeeAccount | null> {
+  if (shouldUseDbAccounts()) {
+    const fromDb = await fetchEmployeeAccountFromDb(employeeId);
+    if (fromDb) return fromDb;
+  }
+  return getEmployeeAccount(employeeId);
 }
 
 export function getEmployeeByEmail(email: string): EmployeeAccount | null {
   const store = readStore();
   const cleanEmail = email.toLowerCase().trim();
   return store.employees.find((employee) => employee.email?.toLowerCase().trim() === cleanEmail) ?? null;
+}
+
+export async function getEmployeeByEmailAsync(email: string): Promise<EmployeeAccount | null> {
+  if (shouldUseDbAccounts()) {
+    const fromDb = await fetchEmployeeByEmailFromDb(email);
+    if (fromDb) return fromDb;
+  }
+  return getEmployeeByEmail(email);
 }
 
 export function hasPassword(employee: EmployeeAccount): boolean {
@@ -157,26 +194,68 @@ export function verifyPassword(password: string, salt: string, hash: string) {
 }
 
 export function saveEmployeePassword(employeeId: string, password: string) {
-  const store = readStore();
-  const employee = store.employees.find((item) => normalizeEmployeeId(item.employee_id) === normalizeEmployeeId(employeeId));
+  const employee = getEmployeeAccount(employeeId);
   if (!employee) return false;
 
   const { hash, salt } = hashPassword(password);
   employee.password_hash = hash;
   employee.password_salt = salt;
   employee.is_first_login = false;
+
+  if (shouldUseDbAccounts()) {
+    cacheEmployeeAccount(employee);
+    void upsertEmployeeAccountToDb(employee);
+    return true;
+  }
+
+  const store = readStore();
+  const idx = store.employees.findIndex((item) => normalizeEmployeeId(item.employee_id) === normalizeEmployeeId(employeeId));
+  if (idx === -1) return false;
+  store.employees[idx] = employee;
   writeStore(store);
   return true;
 }
 
-export function completeFirstTimeLogin(employeeId: string) {
-  const store = readStore();
-  const employee = store.employees.find((item) => normalizeEmployeeId(item.employee_id) === normalizeEmployeeId(employeeId));
+export async function saveEmployeePasswordAsync(employeeId: string, password: string): Promise<boolean> {
+  const employee = await getEmployeeAccountAsync(employeeId);
   if (!employee) return false;
-
+  const { hash, salt } = hashPassword(password);
+  employee.password_hash = hash;
+  employee.password_salt = salt;
   employee.is_first_login = false;
+  if (shouldUseDbAccounts()) {
+    return upsertEmployeeAccountToDb(employee);
+  }
+  return saveEmployeePassword(employeeId, password);
+}
+
+export function completeFirstTimeLogin(employeeId: string) {
+  const employee = getEmployeeAccount(employeeId);
+  if (!employee) return false;
+  employee.is_first_login = false;
+
+  if (shouldUseDbAccounts()) {
+    cacheEmployeeAccount(employee);
+    void upsertEmployeeAccountToDb(employee);
+    return true;
+  }
+
+  const store = readStore();
+  const idx = store.employees.findIndex((item) => normalizeEmployeeId(item.employee_id) === normalizeEmployeeId(employeeId));
+  if (idx === -1) return false;
+  store.employees[idx].is_first_login = false;
   writeStore(store);
   return true;
+}
+
+export async function completeFirstTimeLoginAsync(employeeId: string): Promise<boolean> {
+  const employee = await getEmployeeAccountAsync(employeeId);
+  if (!employee) return false;
+  employee.is_first_login = false;
+  if (shouldUseDbAccounts()) {
+    return upsertEmployeeAccountToDb(employee);
+  }
+  return completeFirstTimeLogin(employeeId);
 }
 
 export function signToken(employeeId: string, expiresInMs?: number) {
@@ -184,7 +263,7 @@ export function signToken(employeeId: string, expiresInMs?: number) {
   const expiresAt = Date.now() + duration;
   const payload = JSON.stringify({ employee_id: normalizeEmployeeId(employeeId), exp: expiresAt });
   const encoded = Buffer.from(payload).toString("base64url");
-  const signature = crypto.createHmac("sha256", AUTH_SECRET).update(encoded).digest("hex");
+  const signature = crypto.createHmac("sha256", getAuthSecret()).update(encoded).digest("hex");
   return `${encoded}.${signature}`;
 }
 
@@ -193,7 +272,7 @@ export function verifyToken(token: string) {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return null;
 
-  const expected = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  const expected = crypto.createHmac("sha256", getAuthSecret()).update(payload).digest("hex");
   if (!crypto.timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expected, "utf8"))) {
     return null;
   }
@@ -217,7 +296,22 @@ export function authenticateRequest(request: NextRequest) {
   return { employeeId: employee.employee_id, employee };
 }
 
+export async function authenticateRequestAsync(request: NextRequest) {
+  const authHeader = request.headers.get("authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : authHeader;
+  const employeeId = verifyToken(token);
+  if (!employeeId) return null;
+  const employee = await getEmployeeAccountAsync(employeeId);
+  if (!employee) return null;
+  return { employeeId: employee.employee_id, employee };
+}
+
 export function addEmployeeAccount(account: EmployeeAccount) {
+  if (shouldUseDbAccounts()) {
+    cacheEmployeeAccount(account);
+    void upsertEmployeeAccountToDb(account);
+    return true;
+  }
   const store = readStore();
   const existing = store.employees.find((item) => normalizeEmployeeId(item.employee_id) === normalizeEmployeeId(account.employee_id));
   if (existing) return false;
@@ -227,6 +321,17 @@ export function addEmployeeAccount(account: EmployeeAccount) {
 }
 
 export async function syncEmployeeToSupabase(account: EmployeeAccount): Promise<string | null> {
+  if (shouldUseDbAccounts()) {
+    const ok = await upsertEmployeeAccountToDb(account);
+    if (!ok) return null;
+    const { data } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("employee_id", account.employee_id)
+      .maybeSingle();
+    return data?.id ?? null;
+  }
+
   try {
     // 1. Check if employee already exists in Supabase by employee_id
     const { data: existing, error: findError } = await supabase
@@ -250,6 +355,11 @@ export async function syncEmployeeToSupabase(account: EmployeeAccount): Promise<
         email: account.email || "",
         full_name: account.full_name || account.employee_id,
         role: account.role || "employee",
+        product: account.product ?? null,
+        password_hash: account.password_hash ?? null,
+        password_salt: account.password_salt ?? null,
+        product_qb_eligible: account.product_qb_eligible ?? false,
+        assessment_only: account.assessment_only ?? false,
         xp_points: account.xp_points || 0,
         streak_days: account.streak_days || 0,
         skill_level: account.skill_level || "beginner",

@@ -1,24 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, isProductQbEmployee } from "@/lib/employee-auth";
-import { localTestsDb } from "@/services/local-tests-db";
+import { authenticateRequestAsync, isProductQbEmployee } from "@/lib/employee-auth";
+import { getEmployeeUuid } from "@/lib/employee-test-access";
 import { supabase } from "@/lib/db";
 
-async function getEmployeeUuid(employeeId: string): Promise<string> {
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employeeId);
-  if (isUuid) return employeeId;
-
-  try {
-    const { data } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("employee_id", employeeId)
-      .maybeSingle();
-    if (data?.id) return data.id;
-  } catch {
-    // fall through
-  }
-  return employeeId;
-}
+const TOPIC_ID = "resource-product-assessment";
 
 /**
  * GET /api/employee/assigned-test
@@ -26,7 +11,7 @@ async function getEmployeeUuid(employeeId: string): Promise<string> {
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestAsync(request);
     if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -35,54 +20,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ test: null });
     }
 
-    const topicId = "resource-product-assessment";
+    const employeeUuid = await getEmployeeUuid(auth.employeeId);
+    const { data, error } = await supabase
+      .from("tests")
+      .select("id, topic_id, topic_title, subject_id, total_questions, status, started_at, completed_at, created_at")
+      .eq("employee_id", employeeUuid)
+      .eq("topic_id", TOPIC_ID)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    try {
-      const employeeUuid = await getEmployeeUuid(auth.employeeId);
-      const { data, error } = await supabase
-        .from("tests")
-        .select("id, topic_id, topic_title, subject_id, total_questions, status, started_at, completed_at, created_at")
-        .eq("employee_id", employeeUuid)
-        .eq("topic_id", topicId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (!error && data) {
-        if (data.status === "completed") {
-          return NextResponse.json({ test: null });
-        }
-        return NextResponse.json({
-          test_id: data.id,
-          topic_title: data.topic_title ?? "Product Assessment",
-          subject_title: "Product Assessment",
-          total_questions: data.total_questions,
-          status: data.status,
-          started_at: data.started_at,
-          completed_at: data.completed_at,
-        });
-      }
-    } catch (dbErr) {
-      console.warn("Supabase assigned-test lookup failed, using local fallback:", dbErr);
+    if (error) {
+      console.error("assigned-test Supabase error:", error.message);
+      return NextResponse.json({ error: "Failed to load assigned test" }, { status: 500 });
     }
 
-    const localTest = await localTestsDb.getTest(auth.employeeId, topicId);
-    if (!localTest) {
+    if (!data) {
       return NextResponse.json({ test: null });
     }
 
-    if (localTest.status === "completed") {
+    if (data.status === "completed") {
       return NextResponse.json({ test: null });
     }
 
     return NextResponse.json({
-      test_id: localTest.id,
-      topic_title: localTest.topic_title ?? "Product Assessment",
-      subject_title: localTest.subject_title ?? "Product Assessment",
-      total_questions: localTest.total_questions,
-      status: localTest.status,
-      started_at: localTest.started_at,
-      completed_at: localTest.completed_at,
+      test_id: data.id,
+      topic_title: data.topic_title ?? "Product Assessment",
+      subject_title: "Product Assessment",
+      total_questions: data.total_questions,
+      status: data.status,
+      started_at: data.started_at,
+      completed_at: data.completed_at,
     });
   } catch (e) {
     console.error("GET /employee/assigned-test error:", e);

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, isAssessmentOnlyEmployee, isProductQbEmployee } from "@/lib/employee-auth";
+import { authenticateRequestAsync, isAssessmentOnlyEmployee, isProductQbEmployee } from "@/lib/employee-auth";
 
 export async function GET(request: NextRequest) {
-  const auth = authenticateRequest(request);
+  const auth = await authenticateRequestAsync(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

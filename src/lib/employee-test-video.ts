@@ -80,6 +80,42 @@ export function getEmployeeTestVideoAdminUrl(testId: string): string {
   return `/api/admin/employee-tests/${testId}/video`;
 }
 
+export function getEmployeeTestVideoPublicUrl(testId: string): string | null {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "";
+  if (!supabaseUrl.startsWith("http")) return null;
+  const path = employeeTestVideoStoragePath(testId);
+  return `${supabaseUrl}/storage/v1/object/public/${RECORDINGS_BUCKET}/${path}`;
+}
+
+export async function employeeTestVideoExists(testId: string): Promise<boolean> {
+  const path = employeeTestVideoStoragePath(testId);
+  try {
+    const { data, error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).list(STORAGE_PREFIX, {
+      search: `${testId}.webm`,
+    });
+    if (!error && data?.some((f) => f.name === `${testId}.webm`)) return true;
+  } catch {
+    // fall through
+  }
+
+  try {
+    const { data, error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).download(path);
+    if (!error && data) {
+      const buffer = Buffer.from(await data.arrayBuffer());
+      return buffer.length > 0;
+    }
+  } catch {
+    // fall through
+  }
+
+  try {
+    const local = await readFile(localVideoPath(testId));
+    return local.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function readEmployeeTestVideo(testId: string): Promise<Buffer | null> {
   const path = employeeTestVideoStoragePath(testId);
 
@@ -90,7 +126,20 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
       if (buffer.length > 0) return buffer;
     }
   } catch {
-    // fall through to local
+    // fall through to local / public URL
+  }
+
+  const publicUrl = getEmployeeTestVideoPublicUrl(testId);
+  if (publicUrl) {
+    try {
+      const res = await fetch(publicUrl);
+      if (res.ok) {
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (buffer.length > 0) return buffer;
+      }
+    } catch {
+      // fall through
+    }
   }
 
   try {

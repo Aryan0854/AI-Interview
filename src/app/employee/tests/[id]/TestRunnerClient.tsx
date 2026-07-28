@@ -611,7 +611,43 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     const uploadBlob = async (blob: Blob): Promise<boolean> => {
       if (blob.size <= 0 || !token) return false;
 
-      const authHeaders = { Authorization: `Bearer ${token}` };
+      const authHeaders = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
+
+      // Production: direct upload to Supabase Storage (serverless-safe)
+      try {
+        const urlRes = await fetch(`/api/employee/tests/${testId}/video-upload-url`, {
+          method: "POST",
+          headers: authHeaders,
+        });
+        if (urlRes.ok) {
+          const { signedUrl } = await urlRes.json();
+          if (signedUrl) {
+            const putRes = await fetch(signedUrl, {
+              method: "PUT",
+              headers: { "Content-Type": blob.type || "video/webm" },
+              body: blob,
+            });
+            if (putRes.ok) {
+              const completeRes = await fetch(`/api/employee/tests/${testId}/upload_video`, {
+                method: "POST",
+                headers: authHeaders,
+                body: JSON.stringify({ complete: true }),
+              });
+              if (completeRes.ok) {
+                const payload = await completeRes.json().catch(() => ({}));
+                return Boolean(payload?.success);
+              }
+            }
+          }
+        }
+      } catch (directErr) {
+        console.warn("Direct Supabase video upload failed, trying chunk fallback:", directErr);
+      }
+
+      // Fallback: chunked server upload (local dev only)
       const CHUNK_SIZE = 2 * 1024 * 1024;
       const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
 
@@ -632,7 +668,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
         const res = await fetch(`/api/employee/tests/${testId}/upload_video/chunk`, {
           method: "POST",
-          headers: authHeaders,
+          headers: { Authorization: `Bearer ${token}` },
           body: formData,
         });
 

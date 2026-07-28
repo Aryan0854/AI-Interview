@@ -5,7 +5,8 @@ import { readFile, writeFile } from 'fs/promises';
 import { refreshEmployees, EmployeeRecord, calculateSkillMatch } from '@/services/automation-service';
 import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
-import { localTestsDb } from '@/services/local-tests-db';
+import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
+import { allowLocalTestsFallback, useSupabasePrimary } from '@/lib/db-mode';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -84,78 +85,38 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Query MCQ test results for each employee
+  // Query MCQ test results from Supabase (production source of truth)
   const testResultsMap = new Map<string, { status: string; score: number; completedAt: string | null }[]>();
   const allTestResults: any[] = [];
 
   try {
-    const { data: dbTests, error: dbTestsError } = await supabase.from("tests").select("*");
+    const { data: viewRows, error: viewError } = await supabase
+      .from("employee_test_results")
+      .select("*");
 
-    const { data: dbAttempts } = await supabase
-      .from("test_attempts")
-      .select("test_id, is_correct");
+    if (viewError) {
+      // View may not exist on older schemas — fall back to tests table
+      const { data: dbTests, error: dbTestsError } = await supabase.from("tests").select("*");
+      if (dbTestsError) throw dbTestsError;
 
-    const attemptsMap = new Map<string, { correct: number; total: number }>();
-    if (dbAttempts) {
-      dbAttempts.forEach(att => {
-        const current = attemptsMap.get(att.test_id) || { correct: 0, total: 0 };
-        current.total += 1;
-        if (att.is_correct) current.correct += 1;
-        attemptsMap.set(att.test_id, current);
-      });
-    }
-
-    if (dbTestsError) {
-      console.warn("Failed to fetch test results from Supabase:", dbTestsError.message);
-    } else if (dbTests) {
+      const { data: employeeRows } = await supabase
+        .from("employees")
+        .select("id, employee_id, full_name");
       const employeeUuidMap = new Map<string, { employee_id: string; full_name: string }>();
-      try {
-        const { data: employeeRows } = await supabase
-          .from("employees")
-          .select("id, employee_id, full_name");
-        (employeeRows ?? []).forEach((row) => {
-          if (row.id) employeeUuidMap.set(row.id, row);
-        });
-      } catch {
-        // ignore lookup failures
-      }
+      (employeeRows ?? []).forEach((row) => {
+        if (row.id) employeeUuidMap.set(row.id, row);
+      });
 
-      dbTests.forEach(test => {
+      (dbTests ?? []).forEach((test) => {
         const linked = employeeUuidMap.get(String(test.employee_id ?? ""));
-        const empId =
-          (test as any).employee_code ||
-          linked?.employee_id ||
-          (typeof test.employee_id === "string" && !/^[0-9a-f-]{36}$/i.test(test.employee_id)
-            ? test.employee_id
-            : null);
+        const empId = (test as any).employee_code || linked?.employee_id;
         if (!empId) return;
 
-        const attInfo = attemptsMap.get(test.id);
-        const answeredCount = attInfo?.total ?? 0;
-        const correctCount =
-          (test as any).score_correct ??
-          attInfo?.correct ??
-          0;
         const totalQs = (test as any).score_total ?? test.total_questions ?? 25;
-        const score =
-          (test as any).score_correct != null
-            ? (test as any).score_correct
-            : attInfo && attInfo.total > 0
-              ? attInfo.correct
-              : 0;
+        const score = (test as any).score_correct ?? 0;
         const scorePercent =
           (test as any).score_percent ??
-          (attInfo && attInfo.total > 0
-            ? Math.round((attInfo.correct / Math.max(1, totalQs)) * 100)
-            : 0);
-
-        const list = testResultsMap.get(empId) || [];
-        list.push({
-          status: test.status,
-          score: scorePercent,
-          completedAt: test.completed_at
-        });
-        testResultsMap.set(empId, list);
+          (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
 
         allTestResults.push({
           id: test.id,
@@ -169,58 +130,95 @@ export async function GET(request: NextRequest) {
           difficulty: test.difficulty,
           totalQuestions: totalQs,
           status: test.status,
-          answeredCount,
+          answeredCount: 0,
           correctCount: score,
           score,
           scorePercent,
           videoUrl: (test as any).session_recording_url || null,
           proctoring: (test as any).proctoring || null,
           startedAt: test.started_at,
-          completedAt: test.completed_at
+          completedAt: test.completed_at,
         });
+
+        const list = testResultsMap.get(empId) || [];
+        list.push({ status: test.status, score: scorePercent, completedAt: test.completed_at });
+        testResultsMap.set(empId, list);
+      });
+    } else {
+      (viewRows ?? []).forEach((row: any) => {
+        const empId = row.employee_code;
+        if (!empId) return;
+
+        const totalQs = row.score_total ?? row.total_questions ?? 25;
+        const score = row.score_correct ?? 0;
+        const scorePercent =
+          row.score_percent ??
+          (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
+
+        allTestResults.push({
+          id: row.test_id,
+          employeeUuid: null,
+          employeeId: empId,
+          employeeName: row.employee_name || empId,
+          topicId: row.topic_id,
+          topicTitle: row.topic_title || "Unknown Topic",
+          subjectId: row.subject_id,
+          subjectTitle: row.subject_title || "Unknown Subject",
+          difficulty: "medium",
+          totalQuestions: totalQs,
+          status: row.status,
+          answeredCount: row.answers_submitted ?? 0,
+          correctCount: score,
+          score,
+          scorePercent,
+          videoUrl: row.video_url || null,
+          proctoring: row.proctoring || null,
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+        });
+
+        const list = testResultsMap.get(empId) || [];
+        list.push({ status: row.status, score: scorePercent, completedAt: row.completed_at });
+        testResultsMap.set(empId, list);
       });
     }
   } catch (err) {
-    console.warn("Failed to fetch test results from Supabase:", err);
+    console.error("Failed to fetch test results from Supabase:", err);
   }
 
+  // Dev-only: overlay local JSON when not running Supabase-primary
+  if (!useSupabasePrimary() && allowLocalTestsFallback()) {
   try {
     const localTests = await localTestsDb.loadDB().catch(() => null);
     if (localTests) {
       const localAttempts = localTests.test_attempts || [];
-      const localAttemptsMap = new Map<string, { correct: number; total: number }>();
-      localAttempts.forEach(att => {
-        const current = localAttemptsMap.get(att.test_id) || { correct: 0, total: 0 };
-        current.total += 1;
-        if (att.is_correct) current.correct += 1;
-        localAttemptsMap.set(att.test_id, current);
-      });
 
       localTests.tests.forEach(test => {
         const empId = test.employee_id;
         if (!empId) return;
 
-        const attInfo = localAttemptsMap.get(test.id);
-        const answeredCount = attInfo?.total ?? 0;
-        const correctCount = attInfo?.correct ?? 0;
+        const testAttempts = localAttempts.filter((a) => a.test_id === test.id);
+        const answeredCount = testAttempts.length;
+        const correctCount = LocalTestsDb.scoreFromAttempts(testAttempts, test);
         const totalQs = test.total_questions ?? 25;
         const score = correctCount;
         const scorePercent =
-          attInfo && attInfo.total > 0
-            ? Math.round((attInfo.correct / Math.max(1, totalQs)) * 100)
-            : 0;
+          test.score_percent ??
+          (totalQs > 0 ? Math.round((correctCount / totalQs) * 100) : 0);
 
-        const list = testResultsMap.get(empId) || [];
-        if (!list.some(t => t.completedAt === test.completed_at)) {
-          list.push({
+        const existingIdx = allTestResults.findIndex((t) => t.id === test.id);
+        if (existingIdx >= 0) {
+          allTestResults[existingIdx] = {
+            ...allTestResults[existingIdx],
             status: test.status,
-            score: scorePercent,
-            completedAt: test.completed_at
-          });
-          testResultsMap.set(empId, list);
-        }
-
-        if (!allTestResults.some(t => t.id === test.id)) {
+            answeredCount,
+            correctCount,
+            score,
+            scorePercent,
+            videoUrl: test.session_recording_url || allTestResults[existingIdx].videoUrl || null,
+            completedAt: test.completed_at,
+          };
+        } else {
           const matchingEmp = employees.find(e => e.employee_id === empId);
           allTestResults.push({
             id: test.id,
@@ -244,10 +242,21 @@ export async function GET(request: NextRequest) {
             completedAt: test.completed_at
           });
         }
+
+        const list = testResultsMap.get(empId) || [];
+        if (!list.some(t => t.completedAt === test.completed_at && test.status === "completed")) {
+          list.push({
+            status: test.status,
+            score: scorePercent,
+            completedAt: test.completed_at
+          });
+          testResultsMap.set(empId, list);
+        }
       });
     }
   } catch (err) {
     console.warn("Failed to fetch test results from local DB:", err);
+  }
   }
 
   // Attach testResults to employees
