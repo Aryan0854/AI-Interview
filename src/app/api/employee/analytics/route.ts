@@ -34,6 +34,13 @@ export async function GET(request: NextRequest) {
       .eq("status", "completed");
     if (countErr) throw countErr;
 
+    if ((totalTests ?? 0) === 0) {
+      const localProbe = await localTestsDb.getAllTestsForEmployee(employeeCode);
+      if (localProbe.some((t) => t.status === "completed")) {
+        throw new Error("No completed tests in Supabase — use local fallback");
+      }
+    }
+
     const { data: att, error: attErr } = await supabase
       .from("test_attempts")
       .select("test_id, is_correct")
@@ -212,22 +219,29 @@ export async function GET(request: NextRequest) {
       const allAttempts = await localTestsDb.getAllAttemptsForEmployee(userUuid);
       
       const correctAttempts = allAttempts.filter((a) => a.is_correct).length;
-      const averageScore = allAttempts.length > 0 ? round((correctAttempts / allAttempts.length) * 100) : 0;
+      const averageScore =
+        allAttempts.length > 0
+          ? round((correctAttempts / allAttempts.length) * 100)
+          : completedTests.length > 0 && completedTests[0].score_percent != null
+            ? completedTests[0].score_percent!
+            : 0;
       
       const totalLearningMins = completedTests.reduce((sum, test) => sum + (test.total_questions * 2), 0);
       const totalLearningHours = round(totalLearningMins / 60);
 
       const subjects = [
+        { id: "resource-subject", title: "Product Assessment" },
         { id: "2", title: "AI / ML" },
         { id: "3", title: "Data" },
         { id: "8", title: "Python" },
         { id: "9", title: "SQL" },
         { id: "10", title: "Cloud" },
-        { id: "11", title: "MLOps" }
+        { id: "11", title: "MLOps" },
       ];
 
       const subjectBreakdown = subjects.map((subject) => {
-        const testIds = completedTests.filter((t) => t.subject_id === String(subject.id)).map((t) => t.id);
+        const matchingTests = completedTests.filter((t) => t.subject_id === subject.id);
+        const testIds = matchingTests.map((t) => t.id);
         if (testIds.length === 0) {
           return {
             subject_id: subject.id,
@@ -239,17 +253,25 @@ export async function GET(request: NextRequest) {
         }
 
         const attemptsForSub = allAttempts.filter((a) => testIds.includes(a.test_id));
-        const correct = attemptsForSub.filter((a) => a.is_correct).length;
-        const average_pct = attemptsForSub.length > 0 ? round((correct / attemptsForSub.length) * 100) : 0;
+        const correctFromAttempts = attemptsForSub.filter((a) => a.is_correct).length;
+        const scoreFromTests = matchingTests
+          .map((t) => t.score_percent)
+          .filter((v): v is number => typeof v === "number");
+        const average_pct =
+          attemptsForSub.length > 0
+            ? round((correctFromAttempts / attemptsForSub.length) * 100)
+            : scoreFromTests.length > 0
+              ? round(scoreFromTests.reduce((a, b) => a + b, 0) / scoreFromTests.length)
+              : 0;
 
         return {
           subject_id: subject.id,
-          subject_title: subject.title,
+          subject_title: matchingTests[0]?.subject_title || subject.title,
           average_pct,
           mastery_pct: average_pct >= 80 ? testIds.length : 0,
           topic_count: testIds.length,
         };
-      });
+      }).filter((s) => s.topic_count > 0);
 
       const weeklyMap: Record<string, { tests: number; mins: number }> = {};
       completedTests.forEach((test) => {
@@ -290,8 +312,11 @@ export async function GET(request: NextRequest) {
 
       const recentResults = sortedCompleted.map((test) => {
         const testAttempts = allAttempts.filter((a) => a.test_id === test.id);
-        const correct = testAttempts.filter((a) => a.is_correct).length;
-        const accuracy_pct = testAttempts.length > 0 ? round((correct / testAttempts.length) * 100) : 0;
+        const correct = test.score_correct ?? testAttempts.filter((a) => a.is_correct).length;
+        const totalAnswered = testAttempts.length || test.total_questions;
+        const accuracy_pct =
+          test.score_percent ??
+          (totalAnswered > 0 ? round((correct / totalAnswered) * 100) : 0);
 
         return {
           id: test.id,
@@ -307,7 +332,9 @@ export async function GET(request: NextRequest) {
           started_at: test.started_at,
           completed_at: test.completed_at || "",
           topic_breakdown: [],
-          ai_analysis: typeof test.in_progress === "string" ? test.in_progress : "",
+          ai_analysis:
+            test.ai_analysis ??
+            (typeof test.in_progress === "string" ? test.in_progress : ""),
           improvement_suggestions: [],
         };
       });

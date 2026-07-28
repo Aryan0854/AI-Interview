@@ -206,8 +206,14 @@ export function DashboardInner() {
   }, [displayAnalytics, displayResults]);
 
   const recentResults = useMemo(() => {
-    const items = (displayResults ?? []).filter(r => r && typeof r === 'object');
-    return items.slice(0, 10).reverse();
+    const items = (displayResults ?? []).filter((r) => r && typeof r === "object");
+    return items
+      .sort((a, b) => {
+        const aTime = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const bTime = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return bTime - aTime;
+      })
+      .slice(0, 10);
   }, [displayResults]);
 
   // ── Render — loading
@@ -292,21 +298,21 @@ export function DashboardInner() {
 
       <main className="max-w-full mx-auto px-6 md:px-12 -mt-6 pb-14 space-y-6 relative z-10">
 
-        {assignedTest && productQbEligible && (
+        {assignedTest && productQbEligible && assignedTest.status !== "completed" && (
           <Card className="p-6 bg-card border border-indigo-200 dark:border-indigo-900 shadow-soft">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-primary">Assigned Product Assessment</p>
                 <h2 className="mt-1 text-xl font-bold text-foreground">{assignedTest.topic_title}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {assignedTest.total_questions} questions · {assignedTest.status === "completed" ? "Completed" : "Ready to start"}
+                  {assignedTest.total_questions} questions · Ready to start
                 </p>
               </div>
               <Button
                 className="rounded-xl"
                 onClick={() => router.push(`/employee/tests/${assignedTest.test_id}`)}
               >
-                {assignedTest.status === "completed" ? "Review Assessment" : "Start Assessment"}
+                Start Assessment
               </Button>
             </div>
           </Card>
@@ -427,22 +433,36 @@ export function DashboardInner() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {recentResults.map((r: any) => (
                 <Card key={r.id} className="p-5 bg-card border border-indigo-100 dark:border-slate-850 hover:border-indigo-400 dark:hover:border-indigo-800 hover:shadow-card transition-all duration-200 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-semibold text-sm text-foreground">{r.topic_title}</h3>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-sm text-foreground truncate">{r.topic_title}</h3>
                       <p className="text-xs text-muted-foreground">{r.subject_title}</p>
                     </div>
                     <ScorePill pct={r.accuracy_pct} />
                   </div>
-                  {r.ai_analysis && typeof r.ai_analysis === 'string' && (
-                    <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{r.ai_analysis}</p>
+                  <div className="rounded-lg bg-secondary/60 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Score</p>
+                    <p className="text-lg font-extrabold text-foreground">
+                      {r.correct_answers}/{r.total_questions}
+                      <span className="ml-1 text-sm font-semibold text-muted-foreground">({r.accuracy_pct}%)</span>
+                    </p>
+                  </div>
+                  {r.ai_analysis && typeof r.ai_analysis === "string" && (
+                    <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">{r.ai_analysis}</p>
                   )}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider dark:border-slate-800 dark:text-slate-300">{r.difficulty}</Badge>
-                    <span>·</span>
-                    <span>{toDateStr(r.completed_at)}</span>
-                    <span>·</span>
-                    <span>{r.correct_answers}/{r.total_questions} correct</span>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-wider dark:border-slate-800 dark:text-slate-300">{r.difficulty}</Badge>
+                      <span>{toDateStr(r.completed_at)}</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 rounded-lg text-xs font-bold shrink-0"
+                      onClick={() => router.push(`/employee/tests/${r.id}`)}
+                    >
+                      Review
+                    </Button>
                   </div>
                 </Card>
               ))}

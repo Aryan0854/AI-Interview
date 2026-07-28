@@ -49,6 +49,9 @@ export async function GET(request: NextRequest) {
         .maybeSingle();
 
       if (!error && data) {
+        if (data.status === "completed") {
+          return NextResponse.json({ test: null });
+        }
         return NextResponse.json({
           test_id: data.id,
           topic_title: data.topic_title ?? "Product Assessment",
@@ -65,6 +68,10 @@ export async function GET(request: NextRequest) {
 
     const localTest = await localTestsDb.getTest(auth.employeeId, topicId);
     if (!localTest) {
+      return NextResponse.json({ test: null });
+    }
+
+    if (localTest.status === "completed") {
       return NextResponse.json({ test: null });
     }
 

@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     if (testsError) throw testsError;
 
     if (!tests || tests.length === 0) {
-      return NextResponse.json([]);
+      throw new Error("No completed tests in Supabase — use local fallback");
     }
 
     const topicIds = Array.from(new Set(tests.map((test) => test.topic_id)));
@@ -134,18 +134,20 @@ export async function GET(request: NextRequest) {
       return {
         id: test.id,
         topic_id: test.topic_id,
-        topic_title: topicTitle.get(test.topic_id) ?? test.topic_id,
+        topic_title: topicTitle.get(test.topic_id) ?? (test as any).topic_title ?? test.topic_id,
         subject_id: test.subject_id,
-        subject_title: subjectTitle.get(test.subject_id) ?? test.subject_id,
+        subject_title: subjectTitle.get(test.subject_id) ?? (test as any).subject_title ?? test.subject_id,
         difficulty: test.difficulty,
         total_questions: test.total_questions,
-        correct_answers: accuracy.correct,
-        accuracy_pct,
+        correct_answers: (test as any).score_correct ?? accuracy.correct,
+        accuracy_pct: (test as any).score_percent ?? accuracy_pct,
         time_taken_seconds: 0,
         started_at: test.started_at,
         completed_at: test.completed_at,
         topic_breakdown: [],
-        ai_analysis: typeof test.in_progress === "string" ? test.in_progress : "",
+        ai_analysis:
+          (test as any).ai_analysis ??
+          (typeof test.in_progress === "string" ? test.in_progress : ""),
         improvement_suggestions: [],
       };
     });
@@ -167,8 +169,11 @@ export async function GET(request: NextRequest) {
 
       const results: ResultItem[] = completedTests.map((test) => {
         const testAttempts = allAttempts.filter((a) => a.test_id === test.id);
-        const correct = testAttempts.filter((a) => a.is_correct).length;
-        const accuracy_pct = testAttempts.length > 0 ? round((correct / testAttempts.length) * 100) : 0;
+        const correct = test.score_correct ?? testAttempts.filter((a) => a.is_correct).length;
+        const totalAnswered = testAttempts.length || test.total_questions;
+        const accuracy_pct =
+          test.score_percent ??
+          (totalAnswered > 0 ? round((correct / totalAnswered) * 100) : 0);
 
         return {
           id: test.id,
@@ -184,7 +189,9 @@ export async function GET(request: NextRequest) {
           started_at: test.started_at,
           completed_at: test.completed_at,
           topic_breakdown: [],
-          ai_analysis: typeof test.in_progress === "string" ? test.in_progress : "",
+          ai_analysis:
+            test.ai_analysis ??
+            (typeof test.in_progress === "string" ? test.in_progress : ""),
           improvement_suggestions: [],
         };
       });
