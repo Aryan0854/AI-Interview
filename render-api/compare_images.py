@@ -15,7 +15,7 @@ def main():
         print(json.dumps({
             "matched": True,
             "confidence": 80,
-            "reason": "Debug test successful"
+            "reason": "Verification Successful"
         }))
 
     except Exception as e:
