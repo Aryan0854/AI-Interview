@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,7 @@ import {
   Edit2
 } from "lucide-react";
 import dynamic from "next/dynamic";
+import { formatPortalTimestamp } from "@/lib/portal-format";
 const AdminResumeDetails = dynamic(() => import("@/components/AdminResumeDetails").then(mod => mod.AdminResumeDetails), {
   ssr: false,
   loading: () => (
@@ -45,6 +46,74 @@ const AdminResumeDetails = dynamic(() => import("@/components/AdminResumeDetails
   )
 });
 import ThemeToggle from "@/components/ThemeToggle";
+import {
+  getPortalTestStatusBadgeClass,
+  getPortalTestStatusLabel,
+  mapBackendTestStatus,
+  matchesPortalTestStatusFilter,
+  PORTAL_TEST_STATUS_FILTER_OPTIONS,
+  type PortalTestStatusFilter,
+} from "@/lib/portal-test-status";
+
+function portalEmployeeName(account: { full_name?: string | null; employee_id?: string | null }): string {
+  const name = account.full_name?.trim();
+  if (name) return name;
+  return account.employee_id?.trim() || "—";
+}
+
+function portalEmployeeId(account: { employee_id?: string | null }): string {
+  return account.employee_id?.trim() || "—";
+}
+
+function portalVideoTest(account: {
+  test_id?: string | null;
+  test_status?: string | null;
+  tests?: Array<{ id: string; videoUrl?: string | null; status?: string }>;
+}): { testId: string; hasVideo: boolean } | null {
+  // Only treat a recording as downloadable after a completed attempt with a real URL.
+  const completedWithVideo = account.tests?.find(
+    (t) => t.status === "completed" && !!t.videoUrl
+  );
+  if (completedWithVideo) {
+    return { testId: completedWithVideo.id, hasVideo: true };
+  }
+
+  if (account.test_status === "completed" && account.test_id) {
+    const primary = account.tests?.find((t) => t.id === account.test_id);
+    if (primary?.videoUrl) {
+      return { testId: primary.id, hasVideo: true };
+    }
+  }
+
+  if (account.test_id) return { testId: account.test_id, hasVideo: false };
+  return null;
+}
+
+function sanitizeDownloadPart(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
+function portalVideoFileName(employeeId: string, employeeName: string): string {
+  const idPart = sanitizeDownloadPart(employeeId) || "employee";
+  const namePart = sanitizeDownloadPart(employeeName);
+  return namePart ? `${idPart}-${namePart}.webm` : `${idPart}.webm`;
+}
+
+function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
+  if (score === null || score === undefined) return "—";
+  return `${score}/${scoreMax}`;
+}
+
+function portalScorePercent(score: number | null | undefined, scoreMax = 25): number {
+  if (score === null || score === undefined || scoreMax <= 0) return 0;
+  return Math.round((score / scoreMax) * 100);
+}
 
 function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
@@ -280,10 +349,36 @@ export default function AdminResumeDashboard() {
   const [showClearLogsModal, setShowClearLogsModal] = useState(false);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<"employee" | "suitable" | "unsuitable" | "outbox" | "requirements" | "logs" | "employee-portal">("employee");
+  const [activeTab, setActiveTab] = useState<"employee" | "suitable" | "unsuitable" | "outbox" | "requirements" | "logs" | "employee-portal">("requirements");
   const [allTestResults, setAllTestResults] = useState<any[]>([]);
+  const [resourcePortalEmployees, setResourcePortalEmployees] = useState<any[]>([]);
+  const [resettingTestId, setResettingTestId] = useState<string | null>(null);
+  const [resetTargetEmployee, setResetTargetEmployee] = useState<{
+    testId: string;
+    employeeId: string;
+    employeeName: string;
+  } | null>(null);
   const [testResultsSearch, setTestResultsSearch] = useState("");
+  const [testStatusFilter, setTestStatusFilter] = useState<PortalTestStatusFilter>("all");
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
+  const [testAttemptDetails, setTestAttemptDetails] = useState<
+    Record<
+      string,
+      {
+        loading: boolean;
+        questions: Array<{
+          question_index: number;
+          question_text: string;
+          options: string[];
+          selected_option_index: number | null;
+          selected_option_text: string | null;
+          is_correct: boolean | null;
+          submitted_at: string | null;
+        }>;
+        error?: string;
+      }
+    >
+  >({});
   const [emails, setEmails] = useState<any[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -294,6 +389,7 @@ export default function AdminResumeDashboard() {
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(false);
+  const [isExportingPortal, setIsExportingPortal] = useState(false);
   const [isDispatchingMails, setIsDispatchingMails] = useState(false);
   const [isBulkDispatchingMails, setIsBulkDispatchingMails] = useState(false);
   const [activeEmployee, setActiveEmployee] = useState<any>(null);
@@ -304,9 +400,7 @@ export default function AdminResumeDashboard() {
   const [expandedJdId, setExpandedJdId] = useState<string | null>(null);
 
   const [portalSettings, setPortalSettings] = useState({
-    showEffectivenessTab: true,
-    showManagerConsoleTab: true,
-    portalFeaturesEnabled: true
+    showSystemLogsViewer: true,
   });
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
 
@@ -319,6 +413,7 @@ export default function AdminResumeDashboard() {
 
   // Ingestion status state
   const [pipelineStatus, setPipelineStatus] = useState("Ingestion: Idle");
+  const [refreshingType, setRefreshingType] = useState<"requirements" | "candidates" | "employees" | "interviews" | null>(null);
   const [activityLogs, setActivityLogs] = useState<string[]>([]);
   const [uploadCategory, setUploadCategory] = useState("resume");
 
@@ -588,6 +683,7 @@ export default function AdminResumeDashboard() {
       const data = await res.json();
       setEmployees(data.employees || []);
       setAllTestResults(data.allTestResults || []);
+      setResourcePortalEmployees(data.resourcePortalEmployees || []);
     } catch (err) {
       console.error("Failed to fetch employees", err);
     } finally {
@@ -595,102 +691,198 @@ export default function AdminResumeDashboard() {
     }
   };
 
-  const handleExportPortalData = async () => {
-    try {
-      const ExcelJS = await import('exceljs');
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet('Employee Portal Results');
-
-      // Define columns
-      worksheet.columns = [
-        { header: 'Employee Name', key: 'name', width: 25 },
-        { header: 'Employee ID', key: 'empId', width: 15 },
-        { header: 'Department', key: 'department', width: 20 },
-        { header: 'Designation', key: 'designation', width: 22 },
-        { header: 'Registered Status', key: 'registeredStatus', width: 18 },
-        { header: 'Skills', key: 'skills', width: 30 },
-        { header: 'Tests Taken', key: 'testsCount', width: 12 },
-        { header: 'Average Score', key: 'avgScore', width: 15 },
-        { header: 'Detailed Test Attempts', key: 'testDetails', width: 50 }
-      ];
-
-      // Format header row (Row 1)
-      const headerRow = worksheet.getRow(1);
-      headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      headerRow.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF4F46E5' } // Indigo color
+  const loadTestAttemptDetails = async (testId: string) => {
+    let shouldFetch = true;
+    setTestAttemptDetails((prev) => {
+      const cached = prev[testId];
+      if (cached?.loading || (cached?.questions?.length && !cached.error)) {
+        shouldFetch = false;
+        return prev;
+      }
+      return {
+        ...prev,
+        [testId]: { loading: true, questions: prev[testId]?.questions ?? [] },
       };
-      headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
-      headerRow.height = 25;
+    });
+    if (!shouldFetch) return;
 
-      const accounts = Array.from(new Set(allTestResults.map(t => t.employeeId)))
-        .map(empId => {
-          const empTests = allTestResults.filter(t => t.employeeId === empId);
-          const matchingEmp = employees.find(e => e.employee_id === empId);
-          
-          const name = matchingEmp?.full_name || empTests[0]?.employeeName || empId;
-          const department = matchingEmp?.department || "Auto-Registered";
-          const designation = matchingEmp?.designation || "External Candidate";
-          const registeredStatus = matchingEmp?.status || "Registered";
-          const skills = matchingEmp?.skills || "—";
-          
-          const completedTests = empTests.filter(t => t.status === "completed");
-          const avgScore = completedTests.length > 0
-            ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
-            : null;
+    try {
+      const res = await fetch(`/api/admin/employee-tests/${testId}/attempts`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load answers");
 
-          return {
-            name,
-            empId,
-            department,
-            designation,
-            registeredStatus,
-            skills,
-            testsCount: empTests.length,
-            avgScore: avgScore !== null ? `${avgScore}%` : "—",
-            testDetails: empTests.map(t => `${t.topicTitle} (${t.status === 'completed' ? t.score + '%' : t.status})`).join("; ")
-          };
-        });
+      setTestAttemptDetails((prev) => ({
+        ...prev,
+        [testId]: { loading: false, questions: data.questions ?? [] },
+      }));
+    } catch (err: any) {
+      setTestAttemptDetails((prev) => ({
+        ...prev,
+        [testId]: { loading: false, questions: [], error: err.message },
+      }));
+    }
+  };
 
-      // Add rows to worksheet
-      accounts.forEach(acc => {
-        worksheet.addRow(acc);
+  useEffect(() => {
+    for (const account of resourcePortalEmployees) {
+      if (
+        expandedEmployees[account.employee_id] &&
+        account.test_id &&
+        account.test_status === "completed"
+      ) {
+        loadTestAttemptDetails(account.test_id);
+      }
+    }
+  }, [expandedEmployees, resourcePortalEmployees]);
+
+  const filteredPortalEmployees = useMemo(() => {
+    const term = testResultsSearch.trim().toLowerCase();
+    return resourcePortalEmployees.filter((account) => {
+      if (!matchesPortalTestStatusFilter(account.test_status, testStatusFilter)) {
+        return false;
+      }
+      if (!term) return true;
+      return (
+        account.full_name?.toLowerCase().includes(term) ||
+        account.employee_id?.toLowerCase().includes(term) ||
+        account.role?.toLowerCase().includes(term) ||
+        account.domain?.toLowerCase().includes(term) ||
+        account.product?.toLowerCase().includes(term) ||
+        account.email?.toLowerCase().includes(term) ||
+        account.ddh?.toLowerCase().includes(term)
+      );
+    });
+  }, [resourcePortalEmployees, testResultsSearch, testStatusFilter]);
+
+  const portalDashboardStats = useMemo(() => {
+    const scored = resourcePortalEmployees.filter((e) => e.score !== null);
+    return {
+      mapped: resourcePortalEmployees.length,
+      assigned: resourcePortalEmployees.filter((e) => e.test_id).length,
+      pending: resourcePortalEmployees.filter((e) => e.test_status === "pending").length,
+      completed: resourcePortalEmployees.filter((e) => e.test_status === "completed").length,
+      globalAvgScore:
+        scored.length > 0
+          ? Math.round(scored.reduce((acc, curr) => acc + (curr.score || 0), 0) / scored.length)
+          : 0,
+      scoreMax: 25,
+    };
+  }, [resourcePortalEmployees]);
+
+  const handleResetEmployeeTestClick = (
+    testId: string | null,
+    employeeId: string,
+    employeeName: string
+  ) => {
+    if (!testId) {
+      setActionError("No assigned test found for this employee.");
+      return;
+    }
+    setResetTargetEmployee({ testId, employeeId, employeeName });
+  };
+
+  const handleConfirmResetEmployeeTest = async () => {
+    if (!resetTargetEmployee) return;
+
+    const { testId, employeeId } = resetTargetEmployee;
+    setResetTargetEmployee(null);
+    setResettingTestId(testId);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/admin/employees/reset-test", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ testId, employeeId }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to reset test");
+      setActionSuccess(`Test reset successfully for employee ${employeeId}.`);
+      setTestAttemptDetails((prev) => {
+        const next = { ...prev };
+        delete next[testId];
+        return next;
+      });
+      await loadEmployees();
+    } catch (err: any) {
+      setActionError(err.message || "Failed to reset test");
+    } finally {
+      setResettingTestId(null);
+    }
+  };
 
-      // Add styling and borders to data cells
-      worksheet.eachRow((row, rowNumber) => {
-        if (rowNumber > 1) {
-          row.height = 20;
-          row.eachCell((cell) => {
-            cell.alignment = { vertical: 'middle', horizontal: 'left' };
-            cell.border = {
-              top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-              bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-              left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-              right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
-            };
-          });
+  const handleDownloadTestVideo = async (
+    testId: string,
+    employeeId: string,
+    employeeName?: string
+  ) => {
+    try {
+      const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+      const res = await adminFetch(
+        `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}`
+      );
+      if (!res.ok) {
+        let message = "Recording not available for this test.";
+        try {
+          const payload = await res.json();
+          if (payload?.error) message = payload.error;
+        } catch {
+          // ignore
         }
-      });
-
-      // Write to buffer
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      
+        throw new Error(message);
+      }
+      const blob = await res.blob();
+      if (!blob.size) throw new Error("Recording file is empty.");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `employee_portal_test_results_${new Date().toISOString().split('T')[0]}.xlsx`);
-      link.style.visibility = 'hidden';
+      link.href = url;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    } catch (excelErr) {
-      console.error("Failed to export Excel:", excelErr);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to download test recording");
     }
   };
+
+  const handleExportPortalData = async () => {
+    if (isExportingPortal) return;
+    setIsExportingPortal(true);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/admin/employees/export-portal");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Export failed");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute(
+        "download",
+        `employee_portal_test_results_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
+      link.style.visibility = "hidden";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setActionSuccess("Portal Excel export downloaded.");
+      setTimeout(() => setActionSuccess(null), 3000);
+    } catch (excelErr: any) {
+      console.error("Failed to export Excel:", excelErr);
+      setActionError(excelErr.message || "Failed to export portal data");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setIsExportingPortal(false);
+    }
+  };
+
+  const isCloudDocsIngest = process.env.NEXT_PUBLIC_CLOUD_DOCS_INGEST === "1";
 
   const loadLogs = async () => {
     setIsSystemLogsLoading(true);
@@ -714,9 +906,7 @@ export default function AdminResumeDashboard() {
       const data = await res.json();
       if (data && typeof data === "object") {
         setPortalSettings({
-          showEffectivenessTab: data.showEffectivenessTab !== false,
-          showManagerConsoleTab: data.showManagerConsoleTab !== false,
-          portalFeaturesEnabled: data.portalFeaturesEnabled !== false
+          showSystemLogsViewer: data.showSystemLogsViewer !== false,
         });
       }
     } catch (err) {
@@ -759,22 +949,33 @@ export default function AdminResumeDashboard() {
 
       // 2. Fetch all other states in parallel using computed default JD ID
       const sendJdId = (initialJdId && !initialJdId.includes("@")) ? initialJdId : "all";
+      const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T | null> =>
+        Promise.race([
+          promise,
+          new Promise<null>((resolve) =>
+            setTimeout(() => {
+              console.warn(`[admin] ${label} timed out after ${ms}ms`);
+              resolve(null);
+            }, ms)
+          ),
+        ]);
+
       const [resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] = await Promise.all([
-        fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`),
-        fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`),
-        fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`),
-        fetch("/api/admin/reset_logs"),
-        fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`),
-        fetch("/api/portal_settings").catch(() => null)
+        withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 20000, "resumes"),
+        withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
+        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`), 20000, "employees"),
+        withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
+        withTimeout(fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`), 15000, "logs"),
+        withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
       ]);
 
       const [resumesData, emailsData, employeesData, resetLogsData, logsData, settingsData] = await Promise.all([
-        resumesRes.json(),
-        emailsRes.json(),
-        employeesRes.json(),
-        resetLogsRes.json(),
-        logsRes.json(),
-        settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({})
+        resumesRes ? resumesRes.json().catch(() => ({})) : Promise.resolve({}),
+        emailsRes ? emailsRes.json().catch(() => ({})) : Promise.resolve({}),
+        employeesRes ? employeesRes.json().catch(() => ({})) : Promise.resolve({}),
+        resetLogsRes ? resetLogsRes.json().catch(() => ({})) : Promise.resolve({}),
+        logsRes ? logsRes.json().catch(() => ({})) : Promise.resolve({}),
+        settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
       ]);
 
       // 3. Batch state updates together
@@ -783,14 +984,13 @@ export default function AdminResumeDashboard() {
       setEmails(emailsData.emails || []);
       setEmployees(employeesData.employees || []);
       setAllTestResults(employeesData.allTestResults || []);
+      setResourcePortalEmployees(employeesData.resourcePortalEmployees || []);
       setResetLogs(resetLogsData.logs || []);
       setSystemLogs(logsData.logs || []);
       
       if (settingsData && typeof settingsData === "object") {
         setPortalSettings({
-          showEffectivenessTab: settingsData.showEffectivenessTab !== false,
-          showManagerConsoleTab: settingsData.showManagerConsoleTab !== false,
-          portalFeaturesEnabled: settingsData.portalFeaturesEnabled !== false
+          showSystemLogsViewer: settingsData.showSystemLogsViewer !== false,
         });
       }
 
@@ -817,7 +1017,7 @@ export default function AdminResumeDashboard() {
     }
   };
 
-  const handleTogglePortalSetting = async (key: "showEffectivenessTab" | "showManagerConsoleTab" | "portalFeaturesEnabled") => {
+  const handleTogglePortalSetting = async (key: "showSystemLogsViewer") => {
     setIsUpdatingSettings(true);
     const updatedVal = !portalSettings[key];
     const newSettings = {
@@ -856,8 +1056,10 @@ export default function AdminResumeDashboard() {
   };
 
   const handleRefresh = async (type: "requirements" | "candidates" | "employees" | "interviews") => {
-    setPipelineStatus(`Ingestion: Refreshing ${type}...`);
-    setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Starting refresh for ${type}...`, ...prev]);
+    if (refreshingType) return;
+    setRefreshingType(type);
+    setPipelineStatus(`Ingestion: Scanning & refreshing ${type}...`);
+    setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Starting folder scan and refresh for ${type}...`, ...prev]);
     try {
       const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "all";
       const jdQuery = `&activeJdId=${encodeURIComponent(sendJdId)}`;
@@ -866,27 +1068,29 @@ export default function AdminResumeDashboard() {
       });
       const result = await res.json();
       if (result.success) {
-        setPipelineStatus(`Ingestion: Idle (Last refresh: ${new Date().toLocaleTimeString()})`);
-        setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Refresh ${type} completed.`, ...prev]);
+        setPipelineStatus(`Ingestion: Idle (Last scan: ${new Date().toLocaleTimeString()})`);
+        setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} completed.`, ...prev]);
         
         if (type === "requirements") {
           await loadJobDescriptions();
-        } else if (type === "candidates") {
+        } else if (type === "candidates" || type === "interviews") {
           await loadResumes();
         } else if (type === "employees") {
           await loadEmployees();
         }
         await loadLogs();
-        setActionSuccess(`Refresh of ${type} completed successfully.`);
+        setActionSuccess(`Scan & refresh of ${type} completed successfully.`);
         setTimeout(() => setActionSuccess(null), 3000);
       } else {
         throw new Error(result.error || "Failed");
       }
     } catch (err: any) {
       setPipelineStatus("Ingestion: Error");
-      setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Refresh ${type} failed: ${err.message}`, ...prev]);
-      setActionError(`Refresh of ${type} failed: ${err.message}`);
+      setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} failed: ${err.message}`, ...prev]);
+      setActionError(`Scan & refresh of ${type} failed: ${err.message}`);
       setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setRefreshingType(null);
     }
   };
 
@@ -2326,42 +2530,6 @@ export default function AdminResumeDashboard() {
           </div>
           <div className="flex items-center gap-2 md:gap-3 flex-wrap">
             <ThemeToggle />
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("requirements")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Requirements
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("candidates")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Candidates
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("employees")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Employee Data
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => handleRefresh("interviews")}
-              className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
-            >
-              <RefreshCcw className="w-3.5 h-3.5 text-primary" />
-              Refresh Interviews
-            </Button>
             <Link href="/">
               <Button variant="outline" size="sm" className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs">
                 <ArrowLeft className="w-3.5 h-3.5" />
@@ -2398,227 +2566,14 @@ export default function AdminResumeDashboard() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:items-stretch items-start">
-          
-          {/* INGESTION PIPELINE CONTROL CARD */}
-          <div className="lg:col-span-3">
-            <Card className="p-6 border-indigo-150 dark:border-slate-800 shadow-md bg-card rounded-3xl relative overflow-hidden lg:h-full flex flex-col gap-6">
-              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
-              
-              <div className="space-y-6">
-                <div className="flex justify-between items-center pb-2 border-b border-border">
-                  <div className="flex items-center gap-2">
-                    <Settings className="w-5 h-5 text-primary animate-spin-slow" />
-                    <div>
-                      <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Ingestion Pipeline</h3>
-                      <p className="text-[10px] text-slate-400 font-semibold mt-1">Folder-driven automation panel</p>
-                    </div>
-                  </div>
-                  <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 ${
-                    pipelineStatus.includes("Error") ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400" :
-                    pipelineStatus.includes("Idle") ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                    "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
-                  }`}>
-                    {pipelineStatus.includes("Idle") ? "Active" : "Processing"}
-                  </Badge>
-                </div>
-
-                {/* Pipeline Status Indicator */}
-                <div className="rounded-2xl border border-border bg-slate-50/50 dark:bg-slate-950/40 p-3.5 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="relative flex h-2 w-2">
-                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                        pipelineStatus.includes("Error") ? "bg-rose-450" :
-                        pipelineStatus.includes("Idle") ? "bg-emerald-450" :
-                        "bg-amber-450"
-                      }`} />
-                      <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                        pipelineStatus.includes("Error") ? "bg-rose-500" :
-                        pipelineStatus.includes("Idle") ? "bg-emerald-500" :
-                        "bg-amber-500"
-                      }`} />
-                    </div>
-                    <span className="text-xs font-bold text-muted-foreground truncate">{pipelineStatus}</span>
-                  </div>
-                  {activityLogs.length > 0 && (
-                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider shrink-0">
-                      Auto-Syncing
-                    </span>
-                  )}
-                </div>
-
-                {/* Requirement / Active BR Selector */}
-                {jds.length > 0 && (
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                      Active Requirement (JD / BR)
-                    </label>
-                    <div className="flex gap-2">
-                      {adminEmail === "admin@infinite.com" ? (
-                        <select
-                          value={selectedSelectValue}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setSelectedJdId(val);
-                            if (val === "all") {
-                              setJdSavedText("");
-                              setJdText("");
-                            } else {
-                              const firstJd = jds.find(j => (j.rmEmail || "admin@infinite.com").toLowerCase().trim() === val.toLowerCase().trim());
-                              if (firstJd) {
-                                setJdSavedText(firstJd.jdText);
-                                setJdText(firstJd.jdText);
-                              } else {
-                                setJdSavedText("");
-                                setJdText("");
-                              }
-                            }
-                          }}
-                          className="w-0 flex-1 min-w-0 rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-[11px] font-bold text-slate-755 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 truncate"
-                        >
-                          <option value="all">📁 All Job Descriptions (View All Candidates)</option>
-                          {(() => {
-                            const seenEmails = new Set();
-                            return jds.reduce((acc: any[], j) => {
-                              const email = (j.rmEmail || "admin@infinite.com").toLowerCase().trim();
-                              if (email !== "admin@infinite.com" && !seenEmails.has(email)) {
-                                seenEmails.add(email);
-                                acc.push(
-                                  <option key={email} value={email} title={email}>
-                                    {email}
-                                  </option>
-                                );
-                              }
-                              return acc;
-                            }, []);
-                          })()}
-                        </select>
-                      ) : (
-                        <div className="flex-1 min-w-0 rounded-lg border border-border bg-slate-50/50 dark:bg-slate-950 px-2.5 py-2 text-[10px] font-bold text-slate-755 dark:text-slate-200 truncate select-none cursor-default">
-                          {adminEmail}
-                        </div>
-                      )}
-                      {selectedJdId && selectedJdId !== "all" && adminEmail === "admin@infinite.com" && (
-                        <Button
-                          variant="ghost"
-                          onClick={() => handleDeleteJd(selectedJdId)}
-                          className="h-8 w-8 p-0 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg flex items-center justify-center border border-rose-100 dark:border-slate-800"
-                          title="Delete this Job Description"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Background Scan Controls */}
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                    Automated Folder Scanning
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Button
-                      variant="outline"
-                      onClick={() => handleRefresh("requirements")}
-                      className="flex flex-col items-center justify-center px-1.5 py-2.5 h-auto rounded-2xl border-indigo-50 hover:bg-indigo-50/30 hover:border-border dark:hover:bg-slate-950/40 gap-1 text-center group transition-all duration-300 shadow-sm"
-                    >
-                      <ClipboardList className="w-4 h-4 text-primary group-hover:scale-110 transition duration-200" />
-                      <span className="text-[10px] font-extrabold text-slate-855 dark:text-slate-200 whitespace-nowrap">Scan Requirements</span>
-                      <span className="text-[7.5px] text-slate-400 font-semibold uppercase whitespace-nowrap">/docs/BR & /docs/JD</span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleRefresh("candidates")}
-                      className="flex flex-col items-center justify-center px-1.5 py-2.5 h-auto rounded-2xl border-indigo-50 hover:bg-indigo-50/30 hover:border-border dark:hover:bg-slate-950/40 gap-1 text-center group transition-all duration-300 shadow-sm"
-                    >
-                      <FileText className="w-4 h-4 text-primary group-hover:scale-110 transition duration-200" />
-                      <span className="text-[10px] font-extrabold text-slate-855 dark:text-slate-200 whitespace-nowrap">Scan Candidates</span>
-                      <span className="text-[7.5px] text-slate-400 font-semibold uppercase whitespace-nowrap">/docs/Resumes</span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleRefresh("employees")}
-                      className="flex flex-col items-center justify-center px-1.5 py-2.5 h-auto rounded-2xl border-indigo-50 hover:bg-indigo-50/30 hover:border-border dark:hover:bg-slate-950/40 gap-1 text-center group transition-all duration-300 shadow-sm"
-                    >
-                      <Users className="w-4 h-4 text-primary group-hover:scale-110 transition duration-200" />
-                      <span className="text-[10px] font-extrabold text-slate-855 dark:text-slate-200 whitespace-nowrap">Scan Employees</span>
-                      <span className="text-[7.5px] text-slate-400 font-semibold uppercase whitespace-nowrap">/docs/Corp Pool</span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => handleRefresh("interviews")}
-                      className="flex flex-col items-center justify-center px-1.5 py-2.5 h-auto rounded-2xl border-indigo-50 hover:bg-indigo-50/30 hover:border-border dark:hover:bg-slate-955/40 gap-1 text-center group transition-all duration-300 shadow-sm"
-                    >
-                      <Video className="w-4 h-4 text-primary group-hover:scale-110 transition duration-200" />
-                      <span className="text-[10px] font-extrabold text-slate-855 dark:text-slate-200 whitespace-nowrap">Sync Interviews</span>
-                      <span className="text-[7.5px] text-slate-400 font-semibold uppercase whitespace-nowrap">Database & CSV</span>
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Unified Ingestion Upload */}
-              <div className="space-y-3 pt-2 flex-grow flex flex-col min-h-0">
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                    Unified File Upload
-                  </label>
-                  <select
-                    value={uploadCategory}
-                    onChange={(e) => setUploadCategory(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-[11px] font-bold text-slate-755 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 truncate"
-                  >
-                    <option value="resume">📄 Candidate Resume</option>
-                    <option value="jd">💼 Job Description (JD)</option>
-                    <option value="br">📊 Business Requirement (BR)</option>
-                    <option value="employee">👥 Employee Pool Data</option>
-                    <option value="interview">📝 Interview CSV Sync</option>
-                  </select>
-                </div>
-
-                <div 
-                  onClick={() => unifiedFileInputRef.current?.click()}
-                  className="border-2 border-dashed border-border hover:border-indigo-455 dark:hover:border-slate-700 bg-slate-50/30 dark:bg-slate-950/30 hover:bg-indigo-50/20 dark:hover:bg-slate-900/20 rounded-2xl p-5 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-1.5 group flex-1"
-                >
-                  <Upload className="w-7 h-7 text-primary group-hover:scale-110 transition-transform duration-200" />
-                  <span className="text-[11px] font-bold text-slate-750 dark:text-slate-250">
-                    Click to select file for upload
-                  </span>
-                  <span className="text-[9px] text-slate-400 font-semibold max-w-[240px] leading-relaxed block">
-                    {uploadCategory === 'resume' && "Saves to /docs/Resumes & auto-screens"}
-                    {uploadCategory === 'jd' && "Saves to /docs/JD & parses details"}
-                    {uploadCategory === 'br' && "Saves to /docs/BR as excel template row"}
-                    {uploadCategory === 'employee' && "Saves to /docs/Corp Pool & updates match scores"}
-                    {uploadCategory === 'interview' && "Syncs and parses candidate_interview_data.csv"}
-                  </span>
-                  <input
-                    type="file"
-                    ref={unifiedFileInputRef}
-                    onChange={handleUnifiedUpload}
-                    className="hidden"
-                    accept={
-                      uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip' :
-                      uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt' :
-                      uploadCategory === 'br' ? '.xlsx,.csv' :
-                      uploadCategory === 'employee' ? '.csv,.xlsx,.pdf,.doc,.docx' :
-                      '.csv'
-                    }
-                  />
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* SCREENING RESULTS TAB CONTAINER (9 Columns) */}
-          <div className="lg:col-span-9">
-            <Card className="border-border shadow-md bg-card rounded-3xl overflow-hidden flex flex-col lg:h-full">
+        {/* SCREENING RESULTS TAB CONTAINER */}
+        <Card className="border-border shadow-md bg-card rounded-3xl overflow-hidden flex flex-col">
               
               {/* Tab Header Navigation */}
-              <div className="flex overflow-x-auto scrollbar-none border-b border-border bg-muted/50 shrink-0">
+              <div className="flex overflow-x-auto scrollbar-none border-b border-border bg-muted/50 shrink-0 w-full px-1 sm:px-2">
                 <button
                   onClick={() => setActiveTab("requirements")}
-                  className={`flex-1 py-4 px-6 font-black text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-2 flex-shrink-0 whitespace-nowrap ${
+                  className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
                     activeTab === "requirements"
                       ? "border-indigo-600 text-indigo-700 bg-card dark:text-violet-400"
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
@@ -2632,7 +2587,7 @@ export default function AdminResumeDashboard() {
                 </button>
                 <button
                   onClick={() => setActiveTab("employee")}
-                  className={`flex-1 py-4 px-6 font-black text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-2 flex-shrink-0 whitespace-nowrap ${
+                  className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
                     activeTab === "employee"
                       ? "border-indigo-600 text-indigo-700 bg-card dark:text-violet-400"
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
@@ -2645,7 +2600,7 @@ export default function AdminResumeDashboard() {
                 </button>
                 <button
                   onClick={() => setActiveTab("suitable")}
-                  className={`flex-1 py-4 px-6 font-black text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-2 flex-shrink-0 whitespace-nowrap ${
+                  className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
                     activeTab === "suitable"
                       ? "border-indigo-600 text-indigo-700 bg-card dark:text-violet-400"
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
@@ -2658,7 +2613,7 @@ export default function AdminResumeDashboard() {
                 </button>
                 <button
                   onClick={() => setActiveTab("unsuitable")}
-                  className={`flex-1 py-4 px-6 font-black text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-2 flex-shrink-0 whitespace-nowrap ${
+                  className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
                     activeTab === "unsuitable"
                       ? "border-indigo-600 text-indigo-700 bg-card dark:text-violet-400"
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
@@ -2671,7 +2626,7 @@ export default function AdminResumeDashboard() {
                 </button>
                 <button
                   onClick={() => setActiveTab("employee-portal")}
-                  className={`flex-1 py-4 px-6 font-black text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-2 flex-shrink-0 whitespace-nowrap ${
+                  className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
                     activeTab === "employee-portal"
                       ? "border-indigo-600 text-indigo-700 bg-card dark:text-violet-400"
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
@@ -2679,12 +2634,12 @@ export default function AdminResumeDashboard() {
                 >
                   Employee Portal
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee-portal" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {Array.from(new Set(allTestResults.map(t => t.employeeId))).length}
+                    {resourcePortalEmployees.length || Array.from(new Set(allTestResults.map(t => t.employeeId))).length}
                   </Badge>
                 </button>
                 <button
                   onClick={() => setActiveTab("outbox")}
-                  className={`flex-1 py-4 px-6 font-black text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-2 flex-shrink-0 whitespace-nowrap ${
+                  className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
                     activeTab === "outbox"
                       ? "border-indigo-600 text-indigo-700 bg-card dark:text-violet-400"
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
@@ -3343,244 +3298,443 @@ export default function AdminResumeDashboard() {
                   )
                 ) : activeTab === "employee-portal" ? (
                   <div className="space-y-4">
-                    {/* Summary Metrics */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
+                    <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/60 dark:bg-indigo-950/20 px-4 py-3 text-xs text-indigo-800 dark:text-indigo-200">
+                      Showing employee data from <span className="font-bold">Resource_Question_Mapping.xlsx</span> merged with live portal test results.
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 shrink-0">
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total Registered Accounts</span>
-                        <span className="text-xl md:text-2xl font-black text-primary">
-                          {Array.from(new Set(allTestResults.map(t => t.employeeId))).length}
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Mapped Employees</span>
+                        <span className="text-xl md:text-2xl font-black text-primary">{portalDashboardStats.mapped}</span>
+                      </div>
+                      <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Assigned Tests</span>
+                        <span className="text-xl md:text-2xl font-black text-violet-600 dark:text-violet-400">
+                          {portalDashboardStats.assigned}
                         </span>
                       </div>
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total Tests Taken</span>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Tests Completed</span>
                         <span className="text-xl md:text-2xl font-black text-emerald-600 dark:text-emerald-400">
-                          {allTestResults.length}
+                          {portalDashboardStats.completed}
                         </span>
                       </div>
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Avg Tests / Account</span>
-                        <span className="text-xl md:text-2xl font-black text-amber-500">
-                          {Array.from(new Set(allTestResults.map(t => t.employeeId))).length > 0
-                            ? (allTestResults.length / Array.from(new Set(allTestResults.map(t => t.employeeId))).length).toFixed(1)
-                            : 0}
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Pending</span>
+                        <span className="text-xl md:text-2xl font-black text-amber-600 dark:text-amber-400">
+                          {portalDashboardStats.pending}
                         </span>
                       </div>
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Global Avg Score</span>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Global Avg Score (/25)</span>
                         <span className="text-xl md:text-2xl font-black text-primary">
-                          {allTestResults.filter(t => t.status === "completed").length > 0
-                            ? Math.round(
-                                allTestResults
-                                  .filter(t => t.status === "completed")
-                                  .reduce((acc, curr) => acc + (curr.score || 0), 0) /
-                                  allTestResults.filter(t => t.status === "completed").length
-                              )
-                            : 0}%
+                          {formatPortalScore(portalDashboardStats.globalAvgScore, portalDashboardStats.scoreMax)}
                         </span>
                       </div>
                     </div>
 
-                    {/* Search and refresh controls */}
                     <div className="flex flex-col sm:flex-row gap-3 justify-between items-center shrink-0">
-                      <div className="w-full sm:w-72 relative">
-                        <input
-                          type="text"
-                          placeholder="Search accounts or details..."
-                          value={testResultsSearch}
-                          onChange={(e) => setTestResultsSearch(e.target.value)}
-                          className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
-                        />
+                      <div className="flex flex-col sm:flex-row gap-3 w-full sm:flex-1">
+                        <div className="w-full sm:flex-1 relative">
+                          <input
+                            type="text"
+                            placeholder="Search name, ID, product, email..."
+                            value={testResultsSearch}
+                            onChange={(e) => setTestResultsSearch(e.target.value)}
+                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                          />
+                        </div>
+                        <div className="w-full sm:w-44 shrink-0">
+                          <select
+                            value={testStatusFilter}
+                            onChange={(e) => setTestStatusFilter(e.target.value as PortalTestStatusFilter)}
+                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                            aria-label="Test Status filter"
+                          >
+                            {PORTAL_TEST_STATUS_FILTER_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.value === "all" ? "Test Status: All" : option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                       <div className="flex gap-2 w-full sm:w-auto">
                         <Button
                           onClick={handleExportPortalData}
+                          disabled={isExportingPortal}
                           variant="outline"
                           size="sm"
                           className="flex-1 sm:flex-none rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-xs"
                         >
-                          <Download className="w-3.5 h-3.5" />
-                          Export to Excel
+                          {isExportingPortal ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5" />
+                          )}
+                          {isExportingPortal ? "Exporting..." : "Export to Excel"}
                         </Button>
                         <Button
-                          onClick={loadEmployees}
+                          onClick={() => handleRefresh("employees")}
+                          disabled={refreshingType !== null}
                           variant="outline"
                           size="sm"
                           className="flex-1 sm:flex-none rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-xs"
                         >
-                          <RefreshCcw className="w-3.5 h-3.5" />
-                          Refresh Portal Data
+                          {refreshingType === "employees" ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCcw className="w-3.5 h-3.5" />
+                          )}
+                          Scan & Refresh Portal
                         </Button>
                       </div>
                     </div>
 
-                    {/* Accounts Table */}
                     <div className="border border-border rounded-2xl overflow-hidden">
                       <div className="overflow-auto max-h-[600px]">
-                        <table className="w-full text-left border-collapse text-xs">
+                        <table className="w-full text-left border-collapse text-xs min-w-[1200px]">
                           <thead>
                             <tr className="bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-border text-slate-500 font-extrabold uppercase tracking-wider text-[10px] sticky top-0 z-10">
                               <th className="p-3 w-10"></th>
                               <th className="p-3">Employee Name</th>
                               <th className="p-3">Employee ID</th>
-                              <th className="p-3">Department</th>
-                              <th className="p-3">Designation</th>
-                              <th className="p-3">Registered Status</th>
-                              <th className="p-3">Tests Taken</th>
-                              <th className="p-3">Avg Score</th>
+                              <th className="p-3">Role</th>
+                              <th className="p-3">Domain</th>
+                              <th className="p-3">Product</th>
+                              <th className="p-3">Email</th>
+                              <th className="p-3">Emp Status</th>
+                              <th className="p-3">Assigned Qs</th>
+                              <th className="p-3">Test Status</th>
+                              <th className="p-3">Score</th>
+                              <th className="p-3">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-800/50">
-                            {Array.from(new Set(allTestResults.map(t => t.employeeId)))
-                              .map(empId => {
-                                const empTests = allTestResults.filter(t => t.employeeId === empId);
-                                const matchingEmp = employees.find(e => e.employee_id === empId);
-                                
-                                const name = matchingEmp?.full_name || empTests[0]?.employeeName || empId;
-                                const department = matchingEmp?.department || "Auto-Registered";
-                                const designation = matchingEmp?.designation || "External Candidate";
-                                const registeredStatus = matchingEmp?.status || "Registered";
-                                const skills = matchingEmp?.skills || "—";
-                                
-                                const completedTests = empTests.filter(t => t.status === "completed");
-                                const avgScore = completedTests.length > 0
-                                  ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
-                                  : null;
-
-                                return {
-                                  empId,
-                                  name,
-                                  department,
-                                  designation,
-                                  registeredStatus,
-                                  skills,
-                                  testsCount: empTests.length,
-                                  avgScore,
-                                  tests: empTests
-                                };
-                              })
-                              .filter(account => {
-                                if (!testResultsSearch) return true;
-                                const term = testResultsSearch.toLowerCase();
-                                return (
-                                  account.name?.toLowerCase().includes(term) ||
-                                  account.empId?.toLowerCase().includes(term) ||
-                                  account.department?.toLowerCase().includes(term) ||
-                                  account.designation?.toLowerCase().includes(term)
-                                );
-                              })
+                            {filteredPortalEmployees
                               .map(account => {
-                                const isExpanded = !!expandedEmployees[account.empId];
+                                const isExpanded = !!expandedEmployees[account.employee_id];
+                                const statusLabel = getPortalTestStatusLabel(account.test_status);
+                                const videoTest = portalVideoTest(account);
+
                                 return (
-                                  <React.Fragment key={account.empId}>
-                                    <tr 
-                                      className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150 cursor-pointer"
-                                      onClick={() => setExpandedEmployees(prev => ({
-                                        ...prev,
-                                        [account.empId]: !prev[account.empId]
-                                      }))}
+                                  <React.Fragment key={account.employee_id}>
+                                    <tr
+                                      className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150"
                                     >
                                       <td className="p-3 text-center">
-                                        <button className="text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors duration-150">
-                                          {isExpanded ? (
-                                            <ChevronUp className="w-4 h-4" />
-                                          ) : (
-                                            <ChevronDown className="w-4 h-4" />
-                                          )}
+                                        <button
+                                          className="text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors duration-150"
+                                          onClick={() => setExpandedEmployees(prev => ({
+                                            ...prev,
+                                            [account.employee_id]: !prev[account.employee_id]
+                                          }))}
+                                        >
+                                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                                         </button>
                                       </td>
                                       <td className="p-3">
-                                        <div className="font-semibold text-slate-800 dark:text-slate-150">{account.name}</div>
-                                        <div className="text-[10px] text-slate-400 font-medium max-w-xs truncate" title={account.skills}>
-                                          Skills: {account.skills}
-                                        </div>
+                                        <div className="font-semibold text-slate-800 dark:text-slate-200">{portalEmployeeName(account)}</div>
+                                        {account.ddh ? (
+                                          <div className="text-[10px] text-slate-400 font-medium">DDH: {account.ddh}</div>
+                                        ) : null}
                                       </td>
-                                      <td className="p-3 font-bold text-slate-500">{account.empId}</td>
-                                      <td className="p-3 font-semibold text-slate-600 dark:text-slate-400">{account.department}</td>
-                                      <td className="p-3 font-medium text-slate-500">{account.designation}</td>
+                                      <td className="p-3 font-bold text-slate-700 dark:text-slate-300">{portalEmployeeId(account)}</td>
+                                      <td className="p-3 font-medium text-slate-600 dark:text-slate-400">{account.role || "—"}</td>
+                                      <td className="p-3 font-medium text-slate-500">{account.domain || "—"}</td>
+                                      <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={account.product}>{account.product || "—"}</td>
+                                      <td className="p-3 text-slate-500 max-w-[180px] truncate" title={account.email}>{account.email || "—"}</td>
                                       <td className="p-3">
-                                        <Badge className={`border-0 text-[10px] px-2 py-0.5 font-bold ${
-                                          account.registeredStatus.toLowerCase() === "active" || account.registeredStatus.toLowerCase() === "registered"
-                                            ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/35 dark:text-indigo-300"
-                                            : "bg-slate-100 text-slate-700 dark:bg-slate-850 dark:text-slate-300"
-                                        }`}>
-                                          {account.registeredStatus}
+                                        <Badge className="border-0 text-[10px] px-2 py-0.5 font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/35 dark:text-indigo-300">
+                                          {account.emp_status || "—"}
                                         </Badge>
                                       </td>
                                       <td className="p-3">
                                         <Badge className="border-0 bg-secondary text-muted-foreground font-bold text-[10px] px-2 py-0.5">
-                                          {account.testsCount} {account.testsCount === 1 ? "Test" : "Tests"}
+                                          {account.assigned_question_count} Qs
+                                        </Badge>
+                                      </td>
+                                      <td className="p-3">
+                                        <Badge className={`border-0 text-[10px] px-2 py-0.5 font-bold ${getPortalTestStatusBadgeClass(account.test_status)}`}>
+                                          {statusLabel}
                                         </Badge>
                                       </td>
                                       <td className="p-3">
                                         <span className={`font-black text-sm ${
-                                          account.avgScore !== null
-                                            ? (account.avgScore >= 70 ? "text-emerald-600 dark:text-emerald-400" : (account.avgScore >= 40 ? "text-amber-500" : "text-rose-500"))
+                                          account.score !== null
+                                            ? (portalScorePercent(account.score, account.score_max ?? 25) >= 70
+                                              ? "text-emerald-600 dark:text-emerald-400"
+                                              : (portalScorePercent(account.score, account.score_max ?? 25) >= 40
+                                                ? "text-amber-500"
+                                                : "text-rose-500"))
                                             : "text-slate-400"
                                         }`}>
-                                          {account.avgScore !== null ? `${account.avgScore}%` : "—"}
+                                          {formatPortalScore(account.score, account.score_max ?? 25)}
                                         </span>
+                                      </td>
+                                      <td className="p-3">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={!videoTest?.hasVideo}
+                                            title={
+                                              videoTest?.hasVideo
+                                                ? "Download completed test recording"
+                                                : "Recording available after the test is completed"
+                                            }
+                                            onClick={() =>
+                                              videoTest &&
+                                              handleDownloadTestVideo(
+                                                videoTest.testId,
+                                                portalEmployeeId(account),
+                                                portalEmployeeName(account)
+                                              )
+                                            }
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
+                                          >
+                                            <Download className="w-3.5 h-3.5 mr-1" />
+                                            Video
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={!account.test_id || resettingTestId === account.test_id}
+                                            onClick={() =>
+                                              handleResetEmployeeTestClick(
+                                                account.test_id,
+                                                account.employee_id,
+                                                portalEmployeeName(account)
+                                              )
+                                            }
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
+                                          >
+                                            {resettingTestId === account.test_id ? (
+                                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                              <>
+                                                <RefreshCcw className="w-3.5 h-3.5 mr-1" />
+                                                Reset Test
+                                              </>
+                                            )}
+                                          </Button>
+                                        </div>
                                       </td>
                                     </tr>
                                     {isExpanded && (
                                       <tr className="bg-slate-50/40 dark:bg-slate-900/10">
-                                        <td colSpan={8} className="p-4 border-t border-b border-border/50">
-                                          <div className="pl-6 space-y-2">
-                                            <h4 className="font-extrabold text-[11px] uppercase tracking-wider text-slate-500">
-                                              Test Details for {account.name} ({account.empId})
-                                            </h4>
-                                            <div className="border border-indigo-50 dark:border-slate-850 rounded-xl overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
-                                              <table className="w-full text-left border-collapse text-xs">
-                                                <thead>
-                                                  <tr className="bg-slate-50 dark:bg-slate-900 border-b border-indigo-50 dark:border-slate-850 text-slate-500 font-bold uppercase tracking-wider text-[9px]">
-                                                    <th className="p-2.5">Topic / Subject</th>
-                                                    <th className="p-2.5">Difficulty</th>
-                                                    <th className="p-2.5">Questions</th>
-                                                    <th className="p-2.5">Score</th>
-                                                    <th className="p-2.5">Status</th>
-                                                    <th className="p-2.5">Date / Time</th>
-                                                  </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-850/50">
-                                                  {account.tests.map(test => (
-                                                    <tr key={test.id} className="hover:bg-slate-50/30 dark:hover:bg-slate-900/20">
-                                                      <td className="p-2.5">
-                                                        <div className="font-semibold text-slate-800 dark:text-slate-200">{test.topicTitle}</div>
-                                                        <div className="text-[9px] text-slate-400 font-medium">{test.subjectTitle}</div>
-                                                      </td>
-                                                      <td className="p-2.5 capitalize text-slate-600 dark:text-slate-400 font-medium">
-                                                        {test.difficulty}
-                                                      </td>
-                                                      <td className="p-2.5 text-slate-500 font-medium">{test.totalQuestions} Qs</td>
-                                                      <td className="p-2.5">
-                                                        <span className={`font-black ${
-                                                          test.score >= 70 ? "text-emerald-600" : (test.score >= 40 ? "text-amber-500" : "text-rose-500")
-                                                        }`}>
-                                                          {test.status === "completed" ? `${test.score}%` : "—"}
-                                                        </span>
-                                                      </td>
-                                                      <td className="p-2.5">
-                                                        <Badge className={`border-0 text-[9px] px-1.5 py-0.25 font-bold ${
-                                                          test.status === "completed" 
-                                                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-300"
-                                                            : test.status === "in_progress"
-                                                              ? "bg-amber-100 text-amber-805 dark:bg-amber-955/35 dark:text-amber-300"
-                                                              : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-350"
-                                                        }`}>
-                                                          {test.status === "completed" ? "Completed" : (test.status === "in_progress" ? "In Progress" : "Pending")}
-                                                        </Badge>
-                                                      </td>
-                                                      <td className="p-2.5 text-slate-550 font-medium">
-                                                        {test.completedAt 
-                                                          ? new Date(test.completedAt).toLocaleString()
-                                                          : (test.startedAt
-                                                            ? `Started ${new Date(test.startedAt).toLocaleString()}`
-                                                            : "—")}
-                                                      </td>
-                                                    </tr>
+                                        <td colSpan={12} className="p-4 border-t border-b border-border/50">
+                                          <div className="pl-6 space-y-4">
+                                            {account.remarks && (
+                                              <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
+                                                Remarks: {account.remarks}
+                                              </p>
+                                            )}
+                                            <div>
+                                              <h4 className="font-extrabold text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+                                                Assigned Questions ({account.assigned_question_count})
+                                              </h4>
+                                              {account.test_status === "completed" && account.test_id ? (
+                                                (() => {
+                                                  const attemptData = testAttemptDetails[account.test_id];
+                                                  if (attemptData?.loading) {
+                                                    return (
+                                                      <div className="flex items-center gap-2 text-[11px] text-slate-500 py-2">
+                                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                        Loading submitted answers...
+                                                      </div>
+                                                    );
+                                                  }
+                                                  if (attemptData?.questions?.length) {
+                                                    return (
+                                                      <ol className="list-decimal pl-5 space-y-3 text-[11px] text-slate-600 dark:text-slate-300">
+                                                        {attemptData.questions.map((q) => (
+                                                          <li key={q.question_index} className="space-y-1">
+                                                            <div>{q.question_text}</div>
+                                                            <div className="pl-1 space-y-0.5">
+                                                              {q.selected_option_text ? (
+                                                                <div
+                                                                  className={`font-semibold ${
+                                                                    q.is_correct
+                                                                      ? "text-emerald-600 dark:text-emerald-400"
+                                                                      : "text-rose-600 dark:text-rose-400"
+                                                                  }`}
+                                                                >
+                                                                  Selected: {q.selected_option_text}
+                                                                  {q.is_correct === false ? " (Incorrect)" : q.is_correct ? " (Correct)" : ""}
+                                                                </div>
+                                                              ) : (
+                                                                <div className="text-slate-400 font-medium italic">Not answered</div>
+                                                              )}
+                                                              {q.submitted_at && (
+                                                                <div className="text-[10px] text-slate-400 font-medium">
+                                                                  Submitted: {formatPortalTimestamp(q.submitted_at)}
+                                                                </div>
+                                                              )}
+                                                            </div>
+                                                          </li>
+                                                        ))}
+                                                      </ol>
+                                                    );
+                                                  }
+                                                  if (attemptData?.error) {
+                                                    return (
+                                                      <p className="text-[11px] text-rose-500 font-medium">
+                                                        Could not load answers: {attemptData.error}
+                                                      </p>
+                                                    );
+                                                  }
+                                                  return (
+                                                    <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                                                      {(account.assigned_questions || []).map((q: string, idx: number) => (
+                                                        <li key={idx}>{q}</li>
+                                                      ))}
+                                                    </ol>
+                                                  );
+                                                })()
+                                              ) : (account.assigned_questions || []).length > 0 ? (
+                                                <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                                                  {(account.assigned_questions || []).map((q: string, idx: number) => (
+                                                    <li key={idx}>{q}</li>
                                                   ))}
-                                                </tbody>
-                                              </table>
+                                                </ol>
+                                              ) : (
+                                                <p className="text-[11px] text-slate-400 font-medium italic">
+                                                  No assigned question text found in Resource_Question_Mapping.xlsx for this employee.
+                                                </p>
+                                              )}
                                             </div>
+                                            {account.tests?.length > 0 && (
+                                              <div className="border border-indigo-50 dark:border-slate-850 rounded-xl overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
+                                                <table className="w-full text-left border-collapse text-xs">
+                                                  <thead>
+                                                    <tr className="bg-slate-50 dark:bg-slate-900 border-b border-indigo-50 dark:border-slate-850 text-slate-500 font-bold uppercase tracking-wider text-[9px]">
+                                                      <th className="p-2.5">Topic / Subject</th>
+                                                      <th className="p-2.5">Difficulty</th>
+                                                      <th className="p-2.5">Questions</th>
+                                                      <th className="p-2.5">Score</th>
+                                                      <th className="p-2.5">Recording</th>
+                                                      <th className="p-2.5">Status</th>
+                                                      <th className="p-2.5">Date / Time</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-850/50">
+                                                    {account.tests.map((test: any) => (
+                                                      <tr key={test.id} className="hover:bg-slate-50/30 dark:hover:bg-slate-900/20">
+                                                        <td className="p-2.5">
+                                                          <div className="font-semibold text-slate-800 dark:text-slate-200">{test.topicTitle}</div>
+                                                          <div className="text-[9px] text-slate-400 font-medium">{test.subjectTitle}</div>
+                                                        </td>
+                                                        <td className="p-2.5 capitalize text-slate-600 dark:text-slate-400 font-medium">{test.difficulty}</td>
+                                                        <td className="p-2.5 text-slate-500 font-medium">{test.totalQuestions} Qs</td>
+                                                        <td className="p-2.5">
+                                                          <span className={`font-black ${portalScorePercent(test.score, test.scoreMax ?? 25) >= 70 ? "text-emerald-600" : (portalScorePercent(test.score, test.scoreMax ?? 25) >= 40 ? "text-amber-500" : "text-rose-500")}`}>
+                                                            {test.status === "completed"
+                                                              ? formatPortalScore(test.score, test.scoreMax ?? 25)
+                                                              : "—"}
+                                                          </span>
+                                                          {test.proctoring?.warningCount ? (
+                                                            <div className="text-[9px] text-amber-600 font-bold mt-0.5">
+                                                              {test.proctoring.warningCount} proctor warnings
+                                                              {test.proctoring.autoSubmitted ? " · auto-submitted" : ""}
+                                                            </div>
+                                                          ) : null}
+                                                        </td>
+                                                        <td className="p-2.5">
+                                                          {test.status === "completed" && test.videoUrl ? (
+                                                            <Button
+                                                              size="sm"
+                                                              variant="outline"
+                                                              className="h-7 px-2 text-[9px] font-bold"
+                                                              onClick={() =>
+                                                                handleDownloadTestVideo(
+                                                                  test.id,
+                                                                  portalEmployeeId(account),
+                                                                  portalEmployeeName(account)
+                                                                )
+                                                              }
+                                                            >
+                                                              <Download className="w-3 h-3 mr-1" />
+                                                              Download
+                                                            </Button>
+                                                          ) : (
+                                                            <span className="text-[9px] text-slate-400">—</span>
+                                                          )}
+                                                        </td>
+                                                        <td className="p-2.5">
+                                                          <Badge className={`border-0 text-[9px] px-1.5 py-0.5 font-bold ${getPortalTestStatusBadgeClass(mapBackendTestStatus(test.status))}`}>
+                                                            {getPortalTestStatusLabel(mapBackendTestStatus(test.status))}
+                                                          </Badge>
+                                                        </td>
+                                                        <td className="p-2.5 text-slate-550 font-medium">
+                                                          {test.completedAt
+                                                            ? new Date(test.completedAt).toLocaleString()
+                                                            : (test.startedAt ? `Started ${new Date(test.startedAt).toLocaleString()}` : "—")}
+                                                        </td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            )}
+                                            {account.tests?.some((t: any) => (t.proctoring?.violations || []).length > 0) && (
+                                              <div className="border border-amber-100 dark:border-amber-950/40 rounded-xl overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
+                                                <div className="px-3 py-2 bg-amber-50/80 dark:bg-amber-950/20 border-b border-amber-100 dark:border-amber-950/40">
+                                                  <h4 className="font-extrabold text-[11px] uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                                                    Proctoring Anomalies (with timestamps)
+                                                  </h4>
+                                                  <p className="text-[10px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">
+                                                    Face / attention / browser events recorded during the assessment (IST).
+                                                  </p>
+                                                </div>
+                                                <table className="w-full text-left border-collapse text-xs">
+                                                  <thead>
+                                                    <tr className="bg-slate-50 dark:bg-slate-900 border-b border-indigo-50 dark:border-slate-850 text-slate-500 font-bold uppercase tracking-wider text-[9px]">
+                                                      <th className="p-2.5">Timestamp</th>
+                                                      <th className="p-2.5">Anomaly</th>
+                                                      <th className="p-2.5">Category</th>
+                                                      <th className="p-2.5">Severity</th>
+                                                      <th className="p-2.5">Detail</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-850/50">
+                                                    {account.tests.flatMap((test: any) =>
+                                                      (test.proctoring?.violations || []).map(
+                                                        (v: any, idx: number) => (
+                                                          <tr key={`${test.id}-${idx}-${v.timestamp || idx}`}>
+                                                            <td className="p-2.5 whitespace-nowrap font-medium text-slate-700 dark:text-slate-300">
+                                                              {formatPortalTimestamp(v.timestamp) || "—"}
+                                                            </td>
+                                                            <td className="p-2.5 font-semibold text-slate-800 dark:text-slate-200">
+                                                              {v.type}
+                                                            </td>
+                                                            <td className="p-2.5 capitalize text-slate-500">
+                                                              {v.category || "—"}
+                                                            </td>
+                                                            <td className="p-2.5">
+                                                              <span
+                                                                className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                                                                  v.severity === "high"
+                                                                    ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                                                                    : v.severity === "medium"
+                                                                      ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                                                                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                                                                }`}
+                                                              >
+                                                                {v.severity || "low"}
+                                                              </span>
+                                                            </td>
+                                                            <td className="p-2.5 text-slate-500">
+                                                              {v.detail || "—"}
+                                                            </td>
+                                                          </tr>
+                                                        )
+                                                      )
+                                                    )}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            )}
                                           </div>
                                         </td>
                                       </tr>
@@ -3588,10 +3742,12 @@ export default function AdminResumeDashboard() {
                                   </React.Fragment>
                                 );
                               })}
-                            {allTestResults.length === 0 && (
+                            {filteredPortalEmployees.length === 0 && (
                               <tr>
-                                <td colSpan={8} className="text-center py-12 text-slate-400 italic">
-                                  No accounts found.
+                                <td colSpan={12} className="text-center py-12 text-slate-400 italic">
+                                  {resourcePortalEmployees.length === 0
+                                    ? "No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root."
+                                    : "No employees match the current search or test status filter."}
                                 </td>
                               </tr>
                             )}
@@ -4073,45 +4229,284 @@ export default function AdminResumeDashboard() {
             )}
           </div>
         </Card>
-      </div>
 
+        {/* Admin Controls Section */}
+        <div className="mt-8 space-y-4">
+          <div className="flex items-center gap-3 px-1">
+            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Admin Controls</span>
+            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+          </div>
 
-
-        </div>
-
-        {/* Reset Actions Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 items-start">
-          {/* RESET CANDIDATE SESSION CARD */}
-          <Card className="p-6 border-border shadow-md bg-card rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-500 to-orange-500" />
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
+          {/* INGESTION PIPELINE CONTROL CARD */}
+          <Card className="p-5 border-indigo-150 dark:border-slate-800 shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col h-full">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
             
-            <div className="mb-4">
-              <Badge className="bg-amber-100 text-amber-700 border-0 font-extrabold uppercase tracking-wider text-[9px] px-2.5 py-0.5">
-                Reset Candidate Session
-              </Badge>
+            <div className="flex justify-between items-start gap-3 pb-4 border-b border-border mb-4">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center shrink-0">
+                  <Settings className="w-4 h-4 text-primary" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Ingestion Pipeline</h3>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-1">Folder-driven automation panel</p>
+                </div>
+              </div>
+              <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
+                  pipelineStatus.includes("Error") ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400" :
+                  pipelineStatus.includes("Idle") ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" :
+                  "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
+                }`}>
+                  {pipelineStatus.includes("Idle") ? "Active" : "Processing"}
+                </Badge>
             </div>
 
-            <div className="space-y-4">
-              <div className="space-y-1.5">
+            <div className="space-y-4 flex-1 flex flex-col">
+              <div className="rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950/40 px-3 py-2.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="relative flex h-2 w-2 shrink-0">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      pipelineStatus.includes("Error") ? "bg-rose-450" :
+                      pipelineStatus.includes("Idle") ? "bg-emerald-450" :
+                      "bg-amber-450"
+                    }`} />
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                      pipelineStatus.includes("Error") ? "bg-rose-500" :
+                      pipelineStatus.includes("Idle") ? "bg-emerald-500" :
+                      "bg-amber-500"
+                    }`} />
+                  </div>
+                  <span className="text-[11px] font-bold text-muted-foreground truncate">{pipelineStatus}</span>
+                </div>
+                {activityLogs.length > 0 && (
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider shrink-0">Auto-Syncing</span>
+                )}
+              </div>
+
+              {jds.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                    Active Requirement (JD / BR)
+                  </label>
+                  <div className="flex gap-2">
+                    {adminEmail === "admin@infinite.com" ? (
+                      <select
+                        value={selectedSelectValue}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedJdId(val);
+                          if (val === "all") {
+                            setJdSavedText("");
+                            setJdText("");
+                          } else {
+                            const firstJd = jds.find(j => (j.rmEmail || "admin@infinite.com").toLowerCase().trim() === val.toLowerCase().trim());
+                            if (firstJd) {
+                              setJdSavedText(firstJd.jdText);
+                              setJdText(firstJd.jdText);
+                            } else {
+                              setJdSavedText("");
+                              setJdText("");
+                            }
+                          }
+                        }}
+                        className="w-0 flex-1 min-w-0 rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-[11px] font-bold text-slate-755 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 truncate"
+                      >
+                        <option value="all">📁 All Job Descriptions (View All Candidates)</option>
+                        {(() => {
+                          const seenEmails = new Set();
+                          return jds.reduce((acc: any[], j) => {
+                            const email = (j.rmEmail || "admin@infinite.com").toLowerCase().trim();
+                            if (email !== "admin@infinite.com" && !seenEmails.has(email)) {
+                              seenEmails.add(email);
+                              acc.push(
+                                <option key={email} value={email} title={email}>
+                                  {email}
+                                </option>
+                              );
+                            }
+                            return acc;
+                          }, []);
+                        })()}
+                      </select>
+                    ) : (
+                      <div className="flex-1 min-w-0 rounded-lg border border-border bg-slate-50/50 dark:bg-slate-950 px-2.5 py-2 text-[10px] font-bold text-slate-755 dark:text-slate-200 truncate select-none cursor-default">
+                        {adminEmail}
+                      </div>
+                    )}
+                    {selectedJdId && selectedJdId !== "all" && adminEmail === "admin@infinite.com" && (
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleDeleteJd(selectedJdId)}
+                        className="h-8 w-8 p-0 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg flex items-center justify-center border border-rose-100 dark:border-slate-800"
+                        title="Delete this Job Description"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                    Automated Folder Scanning
+                  </label>
+                  <p className="text-[9px] text-slate-400 font-medium mt-0.5">
+                    {isCloudDocsIngest
+                      ? "Scans Supabase docs-ingest storage and refreshes dashboard data"
+                      : "Scans local /docs folders and refreshes dashboard data"}
+                  </p>
+                  {isCloudDocsIngest && (
+                    <Badge className="mt-1 border-0 text-[8px] px-1.5 py-0 font-bold bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                      Cloud storage mode
+                    </Badge>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("requirements")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "requirements" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <ClipboardList className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Requirements</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/BR & JD</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("candidates")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "candidates" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <FileText className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Candidates</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/Resumes</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("employees")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "employees" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <Users className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Employees</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/Corp Pool</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("interviews")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "interviews" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <Video className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Sync & Refresh Interviews</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">Database & CSV</span>
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2 mt-auto pt-1">
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                  Unified File Upload
+                </label>
+                <select
+                  value={uploadCategory}
+                  onChange={(e) => setUploadCategory(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-[11px] font-bold text-slate-755 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 truncate"
+                >
+                  <option value="resume">📄 Candidate Resume</option>
+                  <option value="jd">💼 Job Description (JD)</option>
+                  <option value="br">📊 Business Requirement (BR)</option>
+                  <option value="employee">👥 Employee Pool Data</option>
+                  <option value="interview">📝 Interview CSV Sync</option>
+                </select>
+
+                <div
+                  onClick={() => unifiedFileInputRef.current?.click()}
+                  className="border-2 border-dashed border-border hover:border-indigo-400/50 dark:hover:border-slate-600 bg-slate-50/30 dark:bg-slate-950/30 hover:bg-indigo-50/10 dark:hover:bg-slate-900/20 rounded-xl p-4 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-1 group min-h-[88px]"
+                >
+                  <Upload className="w-5 h-5 text-primary group-hover:scale-110 transition-transform duration-200" />
+                  <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click to select file for upload</span>
+                  <span className="text-[9px] text-slate-400 font-semibold leading-snug">
+                    {uploadCategory === 'resume' && "Saves to /docs/Resumes & auto-screens"}
+                    {uploadCategory === 'jd' && "Saves to /docs/JD & parses details"}
+                    {uploadCategory === 'br' && "Saves to /docs/BR as excel template row"}
+                    {uploadCategory === 'employee' && "Saves to /docs/Corp Pool & updates match scores"}
+                    {uploadCategory === 'interview' && "Syncs and parses candidate_interview_data.csv"}
+                  </span>
+                  <input
+                    type="file"
+                    ref={unifiedFileInputRef}
+                    onChange={handleUnifiedUpload}
+                    className="hidden"
+                    accept={
+                      uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip' :
+                      uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt' :
+                      uploadCategory === 'br' ? '.xlsx,.csv' :
+                      uploadCategory === 'employee' ? '.csv,.xlsx,.pdf,.doc,.docx' :
+                      '.csv'
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <div className="flex flex-col gap-6 h-full">
+          {/* RESET CANDIDATE SESSION CARD */}
+          <Card className="p-5 border-border shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col flex-1">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-500 to-orange-500" />
+
+            <div className="flex items-center gap-2.5 pb-4 border-b border-border mb-4">
+              <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/40 flex items-center justify-center shrink-0">
+                <RefreshCcw className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Reset Candidate Session</h3>
+                <p className="text-[10px] text-slate-400 font-semibold mt-1">Clear interview progress for a candidate</p>
+              </div>
+            </div>
+
+            <div className="space-y-4 flex-1 flex flex-col">
+              <div className="space-y-2">
                 <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
                   Candidate Email Address
                 </label>
-                <p className="text-[10px] text-slate-500 font-semibold leading-normal">
-                  Enter the candidate's email to reset their interview progress and allow them to take the evaluation again.
+                <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
+                  Enter the candidate&apos;s email to reset their interview progress and allow them to take the evaluation again.
                 </p>
                 <input
                   type="email"
                   placeholder="e.g. candidate@domain.com"
                   value={resetEmailInput}
                   onChange={(e) => setResetEmailInput(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-amber-200/50"
                 />
               </div>
 
               <Button
                 onClick={handleResetEmailSessionClick}
                 disabled={isResettingEmail || !resetEmailInput.trim()}
-                className="w-full h-10 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl font-bold shadow-md shadow-orange-500/20 flex items-center justify-center gap-2 text-xs"
+                className="w-full h-10 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl font-bold shadow-md shadow-orange-500/20 flex items-center justify-center gap-2 text-xs mt-auto"
               >
                 {isResettingEmail ? (
                   <>
@@ -4124,114 +4519,47 @@ export default function AdminResumeDashboard() {
             </div>
           </Card>
 
-          {/* SESSION RESET ACTIVITY LOG CARD */}
-          <Card className="p-6 border-border shadow-md bg-card rounded-3xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-500 to-red-500" />
-            
-            <div className="flex justify-between items-center mb-4">
-              <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-0 font-extrabold uppercase tracking-wider text-[9px] px-2.5 py-0.5">
-                Reset Activity Log
-              </Badge>
-              {resetLogs.length > 0 && (
-                <Button
-                  variant="ghost"
-                  onClick={() => setShowClearLogsModal(true)}
-                  className="h-7 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-lg px-2 font-bold"
-                >
-                  Clear History
-                </Button>
-              )}
-            </div>
-
-            {isLogsLoading ? (
-              <div className="flex justify-center items-center py-6">
-                <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
-              </div>
-            ) : resetLogs.length === 0 ? (
-              <div className="text-center py-6 border border-dashed border-border rounded-2xl">
-                <p className="text-xs text-slate-500 font-semibold">No reset activity logged yet.</p>
-              </div>
-            ) : (
-              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                {resetLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 rounded-xl space-y-1.5 hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-xs font-bold text-foreground break-all select-all">
-                        {log.candidateEmail}
-                      </span>
-                      <Badge
-                        className={`border-0 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 flex-shrink-0 ${
-                          log.source === "Reset Form"
-                            ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                            : "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                        }`}
-                      >
-                        {log.source}
-                      </Badge>
-                    </div>
-                    
-                    <div className="flex items-center justify-between text-[10px] text-muted-foreground font-semibold">
-                      <span>
-                        By: <span className="text-primary">{log.resetBy}</span>
-                      </span>
-                      <span className="text-slate-400 dark:text-slate-550">
-                        {new Date(log.createdAt).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
           {/* PORTAL TAB CONFIGURATION CARD */}
-          <Card className="p-6 border-border shadow-md bg-card rounded-3xl relative overflow-hidden">
+          <Card className="p-5 border-border shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col flex-1">
             <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-violet-500 to-indigo-500" />
-            
-            <div className="mb-4">
-              <Badge className="bg-violet-100 text-violet-750 dark:bg-indigo-950/60 dark:text-indigo-300 border-0 font-extrabold uppercase tracking-wider text-[9px] px-2.5 py-0.5">
-                Employee Portal Tabs Configuration
-              </Badge>
+
+            <div className="flex items-center gap-2.5 pb-4 border-b border-border mb-4">
+              <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-indigo-950/50 flex items-center justify-center shrink-0">
+                <Settings className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Portal Configuration</h3>
+                <p className="text-[10px] text-slate-400 font-semibold mt-1">Employee portal feature toggles</p>
+              </div>
             </div>
 
-            <div className="space-y-4">
-              <p className="text-[10px] text-slate-500 font-semibold leading-normal">
-                Enable or disable dynamic feature tabs ("Effectiveness" and "Manager Console") in the Employee Learning Portal header.
-              </p>
-
-              <div className="pt-2">
-                <div className="flex items-center justify-between p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 rounded-2xl">
-                  <div className="space-y-0.5">
-                    <div className="text-xs font-bold text-foreground">Portal Tabs Visibility</div>
-                    <div className="text-[9px] text-slate-400 font-medium">Toggle Effectiveness & Manager Console</div>
-                  </div>
-                  <Button
-                    onClick={() => handleTogglePortalSetting("portalFeaturesEnabled")}
-                    disabled={isUpdatingSettings}
-                    size="sm"
-                    className={`h-7 px-3 text-[10px] font-black rounded-xl border ${
-                      portalSettings.portalFeaturesEnabled
-                        ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-500"
-                        : "bg-secondary hover:bg-slate-200 text-slate-500 border-slate-200 dark:border-slate-700"
-                    }`}
-                  >
-                    {portalSettings.portalFeaturesEnabled ? "ENABLED" : "DISABLED"}
-                  </Button>
+            <div className="space-y-3 flex-1 flex flex-col justify-center">
+              <div className="flex items-center justify-between gap-3 p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 rounded-xl">
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-xs font-bold text-foreground">System Logs Viewer</div>
+                  <div className="text-[9px] text-slate-400 font-medium leading-snug">Show logging panel at the bottom of this page</div>
                 </div>
+                <Button
+                  onClick={() => handleTogglePortalSetting("showSystemLogsViewer")}
+                  disabled={isUpdatingSettings}
+                  size="sm"
+                  className={`h-7 px-3 text-[10px] font-black rounded-lg border shrink-0 ${
+                    portalSettings.showSystemLogsViewer
+                      ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-500"
+                      : "bg-secondary hover:bg-slate-200 text-slate-500 border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  {portalSettings.showSystemLogsViewer ? "ENABLED" : "DISABLED"}
+                </Button>
               </div>
             </div>
           </Card>
+          </div>
+          </div>
         </div>
 
         {/* System Logs Section */}
+        {portalSettings.showSystemLogsViewer && (
         <Card className="p-6 border-indigo-150 dark:border-slate-800 shadow-md bg-card rounded-3xl relative overflow-hidden mt-8">
           <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
           
@@ -4355,8 +4683,78 @@ export default function AdminResumeDashboard() {
                 </div>
               )}
             </div>
+
+            {/* Reset Activity Log */}
+            <div className="pt-4 border-t border-border space-y-3">
+              <div className="flex justify-between items-center">
+                <div>
+                  <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-0 font-extrabold uppercase tracking-wider text-[9px] px-2.5 py-0.5">
+                    Reset Activity Log
+                  </Badge>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-1">Candidate session reset history</p>
+                </div>
+                {resetLogs.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => setShowClearLogsModal(true)}
+                    className="h-7 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-lg px-2 font-bold"
+                  >
+                    Clear History
+                  </Button>
+                )}
+              </div>
+
+              {isLogsLoading ? (
+                <div className="flex justify-center items-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
+                </div>
+              ) : resetLogs.length === 0 ? (
+                <div className="text-center py-6 border border-dashed border-border rounded-2xl">
+                  <p className="text-xs text-slate-500 font-semibold">No reset activity logged yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                  {resetLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 rounded-xl space-y-1.5 hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-xs font-bold text-foreground break-all select-all">
+                          {log.candidateEmail}
+                        </span>
+                        <Badge
+                          className={`border-0 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 flex-shrink-0 ${
+                            log.source === "Reset Form"
+                              ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                              : "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                          }`}
+                        >
+                          {log.source}
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground font-semibold">
+                        <span>
+                          By: <span className="text-primary">{log.resetBy}</span>
+                        </span>
+                        <span className="text-slate-400 dark:text-slate-550">
+                          {new Date(log.createdAt).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </Card>
+        )}
       </main>
 
       {showDetails && selectedResume && (
@@ -4564,6 +4962,51 @@ export default function AdminResumeDashboard() {
                 className="bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold shadow-md shadow-red-500/20 text-xs"
               >
                 Clear History
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {resetTargetEmployee && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in text-foreground">
+          <Card className="w-full max-w-md bg-card border border-indigo-150 dark:border-slate-800 shadow-2xl rounded-3xl overflow-hidden animate-scale-up">
+            <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCcw className="w-5 h-5 text-white" />
+                <span className="font-bold text-sm tracking-wide">Reset Employee Test</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetTargetEmployee(null)}
+                className="text-white/80 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-605 dark:text-slate-300 leading-relaxed font-semibold">
+                Reset the assigned test for{" "}
+                <span className="text-primary font-bold">{resetTargetEmployee.employeeName}</span>{" "}
+                (Emp ID: <span className="text-primary font-bold">{resetTargetEmployee.employeeId}</span>)?
+                Their previous answers and test progress will be cleared so they can start again.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-950/20 border-t border-slate-100 dark:border-slate-800 px-6 py-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setResetTargetEmployee(null)}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmResetEmployeeTest}
+                className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold shadow-md shadow-amber-500/20 text-xs"
+              >
+                Confirm Reset
               </Button>
             </div>
           </Card>

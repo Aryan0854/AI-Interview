@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, completeFirstTimeLogin, saveEmployeePassword, syncEmployeeToSupabase } from "@/lib/employee-auth";
+import { authenticateRequestAsync, completeFirstTimeLoginAsync, saveEmployeePasswordAsync, syncEmployeeToSupabase } from "@/lib/employee-auth";
 
 function validatePassword(password: string) {
   return password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
 }
 
 export async function POST(request: NextRequest) {
-  const auth = authenticateRequest(request);
+  const auth = await authenticateRequestAsync(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized access or expired session." }, { status: 401 });
   }
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     const action = String(body.action || "keep").toLowerCase();
 
     if (action === "keep") {
-      completeFirstTimeLogin(auth.employeeId);
+      await completeFirstTimeLoginAsync(auth.employeeId);
       await syncEmployeeToSupabase(auth.employee);
       return NextResponse.json({
         status: "ok",
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Password must be at least 8 characters long, contain uppercase, lowercase, number, and special character." }, { status: 400 });
       }
 
-      const saved = saveEmployeePassword(auth.employeeId, newPassword);
+      const saved = await saveEmployeePasswordAsync(auth.employeeId, newPassword);
       if (!saved) {
         return NextResponse.json({ error: "Failed to update password." }, { status: 500 });
       }
