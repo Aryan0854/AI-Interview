@@ -12,7 +12,8 @@ import {
   FileText, 
   ClipboardList, 
   Eye, 
-  Download, 
+  Download,
+  Play,
   Sparkles, 
   Upload, 
   Trash2, 
@@ -428,6 +429,7 @@ export default function AdminResumeDashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [videoPreview, setVideoPreview] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -812,28 +814,37 @@ export default function AdminResumeDashboard() {
     }
   };
 
+  const fetchTestVideoBlob = async (
+    testId: string,
+    employeeId: string,
+    employeeName?: string
+  ) => {
+    const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+    const res = await adminFetch(
+      `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}&inline=1`
+    );
+    if (!res.ok) {
+      let message = "Recording not available for this test.";
+      try {
+        const payload = await res.json();
+        if (payload?.error) message = payload.error;
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    if (!blob.size) throw new Error("Recording file is empty.");
+    return { blob, fileName };
+  };
+
   const handleDownloadTestVideo = async (
     testId: string,
     employeeId: string,
     employeeName?: string
   ) => {
     try {
-      const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
-      const res = await adminFetch(
-        `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}`
-      );
-      if (!res.ok) {
-        let message = "Recording not available for this test.";
-        try {
-          const payload = await res.json();
-          if (payload?.error) message = payload.error;
-        } catch {
-          // ignore
-        }
-        throw new Error(message);
-      }
-      const blob = await res.blob();
-      if (!blob.size) throw new Error("Recording file is empty.");
+      const { blob, fileName } = await fetchTestVideoBlob(testId, employeeId, employeeName);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -842,8 +853,29 @@ export default function AdminResumeDashboard() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+      setActionSuccess(
+        "Video downloaded. Open it in Chrome/Edge or VLC — Windows Media Player does not support WebM."
+      );
     } catch (err: any) {
       setActionError(err.message || "Failed to download test recording");
+    }
+  };
+
+  const handlePlayTestVideo = async (
+    testId: string,
+    employeeId: string,
+    employeeName?: string
+  ) => {
+    try {
+      if (videoPreview?.url) URL.revokeObjectURL(videoPreview.url);
+      const { blob, fileName } = await fetchTestVideoBlob(testId, employeeId, employeeName);
+      const url = URL.createObjectURL(blob);
+      setVideoPreview({
+        url,
+        title: employeeName || employeeId || fileName,
+      });
+    } catch (err: any) {
+      setActionError(err.message || "Failed to open test recording");
     }
   };
 
@@ -3480,7 +3512,29 @@ export default function AdminResumeDashboard() {
                                             disabled={!videoTest?.hasVideo}
                                             title={
                                               videoTest?.hasVideo
-                                                ? "Download completed test recording"
+                                                ? "Play completed test recording in browser"
+                                                : "Recording available after the test is completed"
+                                            }
+                                            onClick={() =>
+                                              videoTest &&
+                                              handlePlayTestVideo(
+                                                videoTest.testId,
+                                                portalEmployeeId(account),
+                                                portalEmployeeName(account)
+                                              )
+                                            }
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
+                                          >
+                                            <Play className="w-3.5 h-3.5 mr-1" />
+                                            Play
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={!videoTest?.hasVideo}
+                                            title={
+                                              videoTest?.hasVideo
+                                                ? "Download completed test recording (open in Chrome/Edge/VLC)"
                                                 : "Recording available after the test is completed"
                                             }
                                             onClick={() =>
@@ -3642,21 +3696,38 @@ export default function AdminResumeDashboard() {
                                                         </td>
                                                         <td className="p-2.5">
                                                           {test.status === "completed" && test.videoUrl ? (
-                                                            <Button
-                                                              size="sm"
-                                                              variant="outline"
-                                                              className="h-7 px-2 text-[9px] font-bold"
-                                                              onClick={() =>
-                                                                handleDownloadTestVideo(
-                                                                  test.id,
-                                                                  portalEmployeeId(account),
-                                                                  portalEmployeeName(account)
-                                                                )
-                                                              }
-                                                            >
-                                                              <Download className="w-3 h-3 mr-1" />
-                                                              Download
-                                                            </Button>
+                                                            <div className="flex flex-wrap gap-1">
+                                                              <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="h-7 px-2 text-[9px] font-bold"
+                                                                onClick={() =>
+                                                                  handlePlayTestVideo(
+                                                                    test.id,
+                                                                    portalEmployeeId(account),
+                                                                    portalEmployeeName(account)
+                                                                  )
+                                                                }
+                                                              >
+                                                                <Play className="w-3 h-3 mr-1" />
+                                                                Play
+                                                              </Button>
+                                                              <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="h-7 px-2 text-[9px] font-bold"
+                                                                onClick={() =>
+                                                                  handleDownloadTestVideo(
+                                                                    test.id,
+                                                                    portalEmployeeId(account),
+                                                                    portalEmployeeName(account)
+                                                                  )
+                                                                }
+                                                              >
+                                                                <Download className="w-3 h-3 mr-1" />
+                                                                Download
+                                                              </Button>
+                                                            </div>
                                                           ) : (
                                                             <span className="text-[9px] text-slate-400">—</span>
                                                           )}
@@ -4963,6 +5034,43 @@ export default function AdminResumeDashboard() {
               >
                 Clear History
               </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {videoPreview && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fade-in text-foreground">
+          <Card className="w-full max-w-3xl bg-card border border-indigo-150 dark:border-slate-800 shadow-2xl rounded-3xl overflow-hidden animate-scale-up">
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <Video className="w-5 h-5 shrink-0" />
+                <span className="font-bold text-sm tracking-wide truncate">
+                  Proctoring video — {videoPreview.title}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  URL.revokeObjectURL(videoPreview.url);
+                  setVideoPreview(null);
+                }}
+                className="text-white/80 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 bg-black">
+              <video
+                key={videoPreview.url}
+                src={videoPreview.url}
+                controls
+                autoPlay
+                className="w-full max-h-[70vh] rounded-xl bg-black"
+              />
+              <p className="text-[10px] text-slate-400 mt-3 text-center">
+                Use Play here or open downloads in Chrome/Edge/VLC. Windows Media Player cannot play WebM.
+              </p>
             </div>
           </Card>
         </div>

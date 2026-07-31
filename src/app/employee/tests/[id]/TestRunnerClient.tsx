@@ -19,21 +19,23 @@ const DEFAULT_TIME_LIMIT_SECONDS = 1800;
 
 function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
   if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
+  // Prefer VP8 — more compatible than VP9 for Chrome/Edge playback after download.
   const mimeTypes = [
-    "video/webm;codecs=vp9",
     "video/webm;codecs=vp8",
+    "video/webm;codecs=vp8,opus",
     "video/webm",
+    "video/webm;codecs=vp9",
   ];
   for (const type of mimeTypes) {
     if (MediaRecorder.isTypeSupported?.(type)) {
       return new MediaRecorder(stream, {
         mimeType: type,
-        videoBitsPerSecond: 400_000,
+        videoBitsPerSecond: 600_000,
       });
     }
   }
   try {
-    return new MediaRecorder(stream, { videoBitsPerSecond: 400_000 });
+    return new MediaRecorder(stream, { videoBitsPerSecond: 600_000 });
   } catch {
     return null;
   }
@@ -430,8 +432,9 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     return await new Promise<boolean>((resolve) => {
       recorder.onstop = async () => {
         try {
+          // Prefer a single contiguous WebM from all chunks (must include first init segment).
           const blob = new Blob(recordingChunksRef.current, {
-            type: recorder.mimeType || "video/webm",
+            type: recorder.mimeType || "video/webm;codecs=vp8",
           });
           if (blob.size <= 0) {
             console.warn("Proctoring recording blob is empty.");
@@ -451,6 +454,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         }
       };
 
+      intentionalRecorderStopRef.current = true;
       try {
         if (recorder.state === "recording") {
           recorder.requestData();
@@ -458,8 +462,14 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       } catch {
         // ignore
       }
-      intentionalRecorderStopRef.current = true;
-      recorder.stop();
+      // Stop after a short tick so the final requestData chunk is flushed first.
+      setTimeout(() => {
+        try {
+          if (recorder.state !== "inactive") recorder.stop();
+        } catch {
+          resolve(false);
+        }
+      }, 120);
     });
   }, [testId, token]);
 
@@ -490,7 +500,8 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         recorder.ondataavailable = (event) => {
           if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
         };
-        recorder.start(1000);
+        // Collect periodic chunks, but always keep every chunk from t=0 so the EBML header is present.
+        recorder.start(2000);
         recordingStartRef.current = Date.now();
       }
     } catch (err) {

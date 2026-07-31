@@ -68,6 +68,9 @@ export async function POST(
           return NextResponse.json({ error: "Recording file is empty." }, { status: 400 });
         }
 
+        // Re-save through repair path so junk bytes before EBML header are stripped.
+        await saveEmployeeTestVideo(testId, buffer);
+
         const videoUrl = await markVideoReady(testId, auth.employee);
         return NextResponse.json({ success: true, videoUrl });
       }

@@ -14,6 +14,31 @@ function localVideoPath(testId: string) {
   return join(getRuntimeUploadsRoot(), "employee_test_recordings", `${testId}.webm`);
 }
 
+/**
+ * MediaRecorder / upload glitches can leave junk bytes before the EBML header.
+ * WebM must start with 1A 45 DF A3 — trim any leading garbage so players can open it.
+ */
+export function repairWebmBuffer(buffer: Buffer): Buffer {
+  if (!buffer.length) return buffer;
+  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
+    return buffer;
+  }
+
+  const limit = Math.min(buffer.length - 4, 512 * 1024);
+  for (let i = 1; i < limit; i++) {
+    if (
+      buffer[i] === 0x1a &&
+      buffer[i + 1] === 0x45 &&
+      buffer[i + 2] === 0xdf &&
+      buffer[i + 3] === 0xa3
+    ) {
+      console.warn(`Repairing WebM: stripped ${i} leading bytes before EBML header`);
+      return buffer.subarray(i);
+    }
+  }
+  return buffer;
+}
+
 async function ensureRecordingsBucket() {
   const { data: buckets, error } = await supabaseServer.storage.listBuckets();
   if (error) throw error;
@@ -27,12 +52,13 @@ async function ensureRecordingsBucket() {
 }
 
 export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
-  if (!buffer.length) return false;
+  const cleaned = repairWebmBuffer(buffer);
+  if (!cleaned.length) return false;
 
   try {
     await ensureRecordingsBucket();
     const path = employeeTestVideoStoragePath(testId);
-    const { error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).upload(path, buffer, {
+    const { error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).upload(path, cleaned, {
       contentType: "video/webm",
       upsert: true,
     });
@@ -51,7 +77,7 @@ export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Pro
     await ensureRuntimeUploadsDir();
     const dir = join(getRuntimeUploadsRoot(), "employee_test_recordings");
     await mkdir(dir, { recursive: true });
-    await writeFile(localVideoPath(testId), buffer);
+    await writeFile(localVideoPath(testId), cleaned);
     return true;
   } catch (localErr) {
     console.error("Employee test video local save failed:", localErr);
@@ -122,7 +148,7 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
   try {
     const { data, error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).download(path);
     if (!error && data) {
-      const buffer = Buffer.from(await data.arrayBuffer());
+      const buffer = repairWebmBuffer(Buffer.from(await data.arrayBuffer()));
       if (buffer.length > 0) return buffer;
     }
   } catch {
@@ -134,7 +160,7 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
     try {
       const res = await fetch(publicUrl);
       if (res.ok) {
-        const buffer = Buffer.from(await res.arrayBuffer());
+        const buffer = repairWebmBuffer(Buffer.from(await res.arrayBuffer()));
         if (buffer.length > 0) return buffer;
       }
     } catch {
@@ -143,7 +169,7 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
   }
 
   try {
-    const local = await readFile(localVideoPath(testId));
+    const local = repairWebmBuffer(await readFile(localVideoPath(testId)));
     if (local.length > 0) return local;
   } catch {
     // fall through

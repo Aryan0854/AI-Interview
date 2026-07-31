@@ -15,6 +15,7 @@ export async function GET(
   try {
     const { testId } = await params;
     const requestedName = request.nextUrl.searchParams.get("filename");
+    const inline = request.nextUrl.searchParams.get("inline") === "1";
     const safeName =
       requestedName && /^[\w.\- ()]+$/i.test(requestedName) && requestedName.toLowerCase().endsWith(".webm")
         ? requestedName
@@ -30,6 +31,9 @@ export async function GET(
       );
     }
 
+    const disposition = inline
+      ? `inline; filename="${safeName}"`
+      : `attachment; filename="${safeName}"`;
     const fileSize = fileBuffer.length;
     const range = request.headers.get("range");
 
@@ -45,7 +49,7 @@ export async function GET(
           "Accept-Ranges": "bytes",
           "Content-Length": String(chunk.length),
           "Content-Type": "video/webm",
-          "Content-Disposition": `attachment; filename="${safeName}"`,
+          "Content-Disposition": disposition,
         },
       });
     }
@@ -55,7 +59,7 @@ export async function GET(
         "Content-Length": String(fileSize),
         "Content-Type": "video/webm",
         "Accept-Ranges": "bytes",
-        "Content-Disposition": `attachment; filename="${safeName}"`,
+        "Content-Disposition": disposition,
       },
     });
   } catch {
