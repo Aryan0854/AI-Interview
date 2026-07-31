@@ -4419,6 +4419,96 @@
       "created_at": "2026-07-27T19:26:05.869851+00:00",
       "topic_title": "CMG",
       "subject_title": "Product Assessment"
+    },
+    {
+      "id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "employee_id": "1041219",
+      "employee_code": "1041219",
+      "topic_id": "resource-product-assessment",
+      "subject_id": "resource-subject",
+      "difficulty": "medium",
+      "total_questions": 25,
+      "time_limit_seconds": 1800,
+      "status": "pending",
+      "current_question_index": 0,
+      "started_at": null,
+      "completed_at": null,
+      "in_progress": null,
+      "created_at": "2026-07-31T07:33:18.717863+00:00",
+      "topic_title": "EIR",
+      "subject_title": "Product Assessment"
+    },
+    {
+      "id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "employee_id": "1034988",
+      "employee_code": "1034988",
+      "topic_id": "resource-product-assessment",
+      "subject_id": "resource-subject",
+      "difficulty": "medium",
+      "total_questions": 25,
+      "time_limit_seconds": 1800,
+      "status": "pending",
+      "current_question_index": 0,
+      "started_at": null,
+      "completed_at": null,
+      "in_progress": null,
+      "created_at": "2026-07-31T07:33:18.717863+00:00",
+      "topic_title": "NDS",
+      "subject_title": "Product Assessment"
+    },
+    {
+      "id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "employee_id": "1040899",
+      "employee_code": "1040899",
+      "topic_id": "resource-product-assessment",
+      "subject_id": "resource-subject",
+      "difficulty": "medium",
+      "total_questions": 25,
+      "time_limit_seconds": 1800,
+      "status": "pending",
+      "current_question_index": 0,
+      "started_at": null,
+      "completed_at": null,
+      "in_progress": null,
+      "created_at": "2026-07-31T07:33:18.717863+00:00",
+      "topic_title": "NDS",
+      "subject_title": "Product Assessment"
+    },
+    {
+      "id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "employee_id": "1028155",
+      "employee_code": "1028155",
+      "topic_id": "resource-product-assessment",
+      "subject_id": "resource-subject",
+      "difficulty": "medium",
+      "total_questions": 25,
+      "time_limit_seconds": 1800,
+      "status": "pending",
+      "current_question_index": 0,
+      "started_at": null,
+      "completed_at": null,
+      "in_progress": null,
+      "created_at": "2026-07-31T07:33:18.717863+00:00",
+      "topic_title": "EIR",
+      "subject_title": "Product Assessment"
+    },
+    {
+      "id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "employee_id": "1035049",
+      "employee_code": "1035049",
+      "topic_id": "resource-product-assessment",
+      "subject_id": "resource-subject",
+      "difficulty": "medium",
+      "total_questions": 25,
+      "time_limit_seconds": 1800,
+      "status": "pending",
+      "current_question_index": 0,
+      "started_at": null,
+      "completed_at": null,
+      "in_progress": null,
+      "created_at": "2026-07-31T07:33:18.717863+00:00",
+      "topic_title": "EIR",
+      "subject_title": "Product Assessment"
     }
   ],
   "test_questions": [
@@ -44926,7 +45016,7 @@
       "id": "9011fdf1-94de-4ba1-97d5-ef6863d9acb8",
       "test_id": "95f7b667-4309-47ec-932b-625d867d9ec7",
       "question_index": 0,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -45250,7 +45340,7 @@
       "id": "08f9067c-e2c6-4b32-a348-aeb51821d4aa",
       "test_id": "95f7b667-4309-47ec-932b-625d867d9ec7",
       "question_index": 18,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -45358,7 +45448,7 @@
       "id": "b25c3b77-9253-4ca2-b4d5-1c9b834253af",
       "test_id": "95f7b667-4309-47ec-932b-625d867d9ec7",
       "question_index": 24,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -45412,7 +45502,7 @@
       "id": "d6969183-e1b1-4377-901a-7aa7f98b7667",
       "test_id": "5b035d28-d91a-40b0-b67a-e8911348955b",
       "question_index": 2,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -45520,7 +45610,7 @@
       "id": "39768ab6-e810-4853-8e2d-84a5bc836956",
       "test_id": "5b035d28-d91a-40b0-b67a-e8911348955b",
       "question_index": 8,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -45700,7 +45790,7 @@
       "id": "fc631731-a6b2-4039-b0d6-e9cfdaee2d50",
       "test_id": "5b035d28-d91a-40b0-b67a-e8911348955b",
       "question_index": 18,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -73186,7 +73276,7 @@
       "id": "6d2315e4-0f65-4136-b34d-818455c7cc97",
       "test_id": "1b17f7ab-5bab-4340-b534-16c8643e9818",
       "question_index": 20,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -73204,7 +73294,7 @@
       "id": "a4b80d50-f20a-4335-ba0d-8641c56b30e5",
       "test_id": "1b17f7ab-5bab-4340-b534-16c8643e9818",
       "question_index": 21,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -73258,7 +73348,7 @@
       "id": "cae800d9-4e8d-488a-940a-5a3d0ed01b13",
       "test_id": "1b17f7ab-5bab-4340-b534-16c8643e9818",
       "question_index": 24,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -82276,7 +82366,7 @@
       "id": "37479341-ebdd-4d4e-b45c-9d49c4c69f7e",
       "test_id": "953eeb05-725d-4432-9cde-b12488b6f14e",
       "question_index": 0,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -82456,7 +82546,7 @@
       "id": "1ba96ae8-c34d-49bf-987b-3efde3737e5f",
       "test_id": "953eeb05-725d-4432-9cde-b12488b6f14e",
       "question_index": 10,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -82672,7 +82762,7 @@
       "id": "665e12c8-f8ad-4e40-8767-155a9f60414f",
       "test_id": "953eeb05-725d-4432-9cde-b12488b6f14e",
       "question_index": 22,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -86794,7 +86884,7 @@
       "id": "142330e1-b29c-4a8a-aa70-f8934fa02806",
       "test_id": "ed5e7bd4-2932-47e9-9b8b-b9f8583f5ce5",
       "question_index": 1,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -86992,7 +87082,7 @@
       "id": "0b87b7c8-45a9-4aef-9f06-44f274b503e5",
       "test_id": "ed5e7bd4-2932-47e9-9b8b-b9f8583f5ce5",
       "question_index": 12,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -87208,7 +87298,7 @@
       "id": "33298684-153d-4e73-8721-e4fd66dbc791",
       "test_id": "ed5e7bd4-2932-47e9-9b8b-b9f8583f5ce5",
       "question_index": 24,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -87820,7 +87910,7 @@
       "id": "2a3503fc-7598-4f6a-b082-c33c8a4a4dcf",
       "test_id": "e08c0bdb-7352-4e79-bf65-6410ddea5586",
       "question_index": 8,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -87892,7 +87982,7 @@
       "id": "43ca5631-386d-4f18-8de5-badcc981b3c9",
       "test_id": "e08c0bdb-7352-4e79-bf65-6410ddea5586",
       "question_index": 12,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -87910,7 +88000,7 @@
       "id": "e06d84c1-ea0f-481c-af63-c7a7a9a83838",
       "test_id": "e08c0bdb-7352-4e79-bf65-6410ddea5586",
       "question_index": 13,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -89116,7 +89206,7 @@
       "id": "ee340ff8-7c17-4a40-afec-e21eb739cd9c",
       "test_id": "89e99e38-f806-4abc-bb7a-b97d1143d4fc",
       "question_index": 5,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -89152,7 +89242,7 @@
       "id": "c1ce17cf-f8ca-414f-b998-1fd3a82c0eb2",
       "test_id": "89e99e38-f806-4abc-bb7a-b97d1143d4fc",
       "question_index": 7,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -89350,7 +89440,7 @@
       "id": "b6f67e70-19d6-4a6f-8144-f2b4710a0c36",
       "test_id": "89e99e38-f806-4abc-bb7a-b97d1143d4fc",
       "question_index": 18,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -90394,7 +90484,7 @@
       "id": "c56d8365-e2a8-42a6-8701-8518e36a28d0",
       "test_id": "1ec65f8b-8ffa-4a1e-af1a-3692dfd34b7b",
       "question_index": 1,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -90610,7 +90700,7 @@
       "id": "d958705f-6b5b-4958-ab9c-4d9fb53c8cff",
       "test_id": "1ec65f8b-8ffa-4a1e-af1a-3692dfd34b7b",
       "question_index": 13,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -90682,7 +90772,7 @@
       "id": "38983ec3-cbfa-414d-87fc-a742cc90ca0d",
       "test_id": "1ec65f8b-8ffa-4a1e-af1a-3692dfd34b7b",
       "question_index": 17,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -91006,7 +91096,7 @@
       "id": "f5f28a78-d1c4-4916-a671-d429ef8c7aad",
       "test_id": "2801c8e5-b7ea-45e1-abc5-c277775fd635",
       "question_index": 10,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -91168,7 +91258,7 @@
       "id": "1560dd62-cde9-47b6-a2d2-ba46c5c34a7c",
       "test_id": "2801c8e5-b7ea-45e1-abc5-c277775fd635",
       "question_index": 19,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -91240,7 +91330,7 @@
       "id": "ffe6b6cd-2de2-4616-8e95-2786f82d2f3d",
       "test_id": "2801c8e5-b7ea-45e1-abc5-c277775fd635",
       "question_index": 23,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -93130,7 +93220,7 @@
       "id": "101308ed-4136-4dc6-8791-dd1065e8bbe2",
       "test_id": "e18cea76-736e-43d2-ba01-56fd2ff778cb",
       "question_index": 3,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -93454,7 +93544,7 @@
       "id": "c6bca400-47d9-4a28-83f9-994ba640fb01",
       "test_id": "e18cea76-736e-43d2-ba01-56fd2ff778cb",
       "question_index": 21,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -93472,7 +93562,7 @@
       "id": "fa6d40a7-6129-478e-a769-931e8a4e63f9",
       "test_id": "e18cea76-736e-43d2-ba01-56fd2ff778cb",
       "question_index": 22,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -96298,7 +96388,7 @@
       "id": "6c1482da-372a-4fe6-9f6b-c89eb2cee409",
       "test_id": "73f4dbca-079b-417c-a72e-c4d75fbca5e0",
       "question_index": 4,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -96316,7 +96406,7 @@
       "id": "65feb10a-757e-4c50-9b44-b97fef26101b",
       "test_id": "73f4dbca-079b-417c-a72e-c4d75fbca5e0",
       "question_index": 5,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -96460,7 +96550,7 @@
       "id": "fe0780ea-3dbc-43e4-b8ab-5308622d14c0",
       "test_id": "73f4dbca-079b-417c-a72e-c4d75fbca5e0",
       "question_index": 13,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -97144,7 +97234,7 @@
       "id": "d3c2fdf2-3e0d-44ad-89c5-ac87aebf8b0f",
       "test_id": "df697ce7-a48f-41ad-a3b0-bee172065002",
       "question_index": 1,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -97198,7 +97288,7 @@
       "id": "354f25aa-5fcb-4952-a701-aa7bdf6f67d8",
       "test_id": "df697ce7-a48f-41ad-a3b0-bee172065002",
       "question_index": 4,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -97504,7 +97594,7 @@
       "id": "f88e4d72-a445-4be6-bf6a-cc501d7d3990",
       "test_id": "df697ce7-a48f-41ad-a3b0-bee172065002",
       "question_index": 21,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -105730,7 +105820,7 @@
       "id": "7545c2da-a258-4660-8f23-75f4b399fea0",
       "test_id": "7373fd1e-9c6e-410f-a899-db6c328b2ab9",
       "question_index": 3,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -105766,7 +105856,7 @@
       "id": "6c900d63-a090-4eb1-b3bc-d8beb5c69445",
       "test_id": "7373fd1e-9c6e-410f-a899-db6c328b2ab9",
       "question_index": 5,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -106018,7 +106108,7 @@
       "id": "6291a2fa-cfab-479a-81d3-eaa7ec6f99fb",
       "test_id": "7373fd1e-9c6e-410f-a899-db6c328b2ab9",
       "question_index": 19,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -114262,7 +114352,7 @@
       "id": "be594f93-1f3d-4c4f-9606-e29f6d257457",
       "test_id": "87fba1c3-337f-47c3-9803-0e5404ed3728",
       "question_index": 2,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -114406,7 +114496,7 @@
       "id": "191749d0-e010-440b-897d-8dd04a0a12bc",
       "test_id": "87fba1c3-337f-47c3-9803-0e5404ed3728",
       "question_index": 10,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -114640,7 +114730,7 @@
       "id": "c9990fd2-1845-4a84-8125-5c63a6fc0749",
       "test_id": "87fba1c3-337f-47c3-9803-0e5404ed3728",
       "question_index": 23,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -115666,7 +115756,7 @@
       "id": "cff51d5e-fea0-404f-bd44-7a6b445239be",
       "test_id": "a67b2546-d0cf-401b-885e-bdc004df2239",
       "question_index": 5,
-      "question_text": "In Nokia’s 5G core, NRD is primarily used for:",
+      "question_text": "In Nokia\u2019s 5G core, NRD is primarily used for:",
       "options": [
         "Network function registration and discovery.",
         "Voice transcoding.",
@@ -115882,7 +115972,7 @@
       "id": "cc566490-cd4b-449e-b131-f77a48818d0e",
       "test_id": "a67b2546-d0cf-401b-885e-bdc004df2239",
       "question_index": 17,
-      "question_text": "Which design goal is central to NRD’s cloud-native approach?",
+      "question_text": "Which design goal is central to NRD\u2019s cloud-native approach?",
       "options": [
         "Scalability and automation.",
         "Fixed legacy compatibility only.",
@@ -115936,7 +116026,7 @@
       "id": "8ff2caf9-2cd9-4134-91ed-f2afcc4cfcbc",
       "test_id": "a67b2546-d0cf-401b-885e-bdc004df2239",
       "question_index": 20,
-      "question_text": "What operational benefit does NRD’s container-based design support?",
+      "question_text": "What operational benefit does NRD\u2019s container-based design support?",
       "options": [
         "Horizontal scaling.",
         "Manual call routing.",
@@ -121421,6 +121511,2252 @@
       "topic_id": "resource-product-assessment",
       "topic_title": "CMG",
       "created_at": "2026-07-27T19:26:05.869851+00:00"
+    },
+    {
+      "id": "27223c0c-7016-42dc-b37a-3e7a20bfb523",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 0,
+      "question_text": "[EIR Basic] When 5GEIR wants to update its NF profile with NRF, which HTTP method is used first, with PUT used only if it fails?",
+      "options": [
+        "A. PATCH",
+        "B. OPTIONS",
+        "C. DELETE",
+        "D. GET"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "d8a5c6a4-def9-4789-bba2-e58cc77ce415",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 1,
+      "question_text": "[Deployment & Troubleshooting] Which command is used to list existing PVCs in a specific namespace during this troubleshooting?",
+      "options": [
+        "A. kubectl -n <namespace> get pvc",
+        "B. kubectl -n <namespace> get nodes",
+        "C. kubectl -n <namespace> get svc",
+        "D. kubectl -n <namespace> get secrets"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "aadb0b61-c1df-4840-8857-e410df47f2b1",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 2,
+      "question_text": "[EIR Basic] Which enumeration value indicates the PEI is allowed but its usage is being tracked?",
+      "options": [
+        "A. REVOKED",
+        "B. WHITELISTED",
+        "C. BLACKLISTED",
+        "D. GREYLISTED"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "830d2ecb-1567-4855-b5ff-3cc2a08a0457",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 3,
+      "question_text": "[Deployment & Troubleshooting] Which optional final step in the NCD workflow involves running automated test suites via a dedicated GUI?",
+      "options": [
+        "A. Manual regression testing via spreadsheet",
+        "B. Harbor replication verification",
+        "C. Automated test suite execution using the CCTF GUI",
+        "D. OCI signing verification"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "9db60dea-aca5-480e-a8bf-640fc1c05f08",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 4,
+      "question_text": "[EIR Basic] An engineer wants to check periodic measurements such as requests received and services abnormally terminated. Which log and typical interval apply?",
+      "options": [
+        "A. Alarm log, written every hour",
+        "B. Error log, written every second",
+        "C. Statistics log (af03_stats_log.current), written every 15 or 30 minutes",
+        "D. Config log, written once a day"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "ca73bd12-1533-43bd-86b7-80a88d3597ea",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 5,
+      "question_text": "[EIR Planning] Which document content area would define database-specific parameters for the deployment?",
+      "options": [
+        "A. DBConfiguration (within LLD)",
+        "B. CIQ Point code",
+        "C. DNP VLAN section",
+        "D. HLD Scalability section"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "ff32b263-12dd-461b-ab37-2a29620bc029",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 6,
+      "question_text": "[Deployment & Troubleshooting] Which three components make up the NCD product?",
+      "options": [
+        "A. NEAR, ORB, and NCOM only",
+        "B. NCD Pipeline, Harbor, and SWDP",
+        "C. SEaDOC, NEAR, and CCTF",
+        "D. NCD Pipeline, NCD Repo, and NCD Test Framework"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "556216d0-4f40-4d9a-b373-e3075984615b",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 7,
+      "question_text": "[EIR Planning] To begin downloading artifacts in Plato, which menu item should be navigated to first?",
+      "options": [
+        "A. Projects",
+        "B. Config blueprint",
+        "C. Release notes",
+        "D. Dashboard"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "a0467078-3d31-4cdd-86dd-d0152690fe6f",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 8,
+      "question_text": "[EIR Basic] What is the final step of the basic One-EIR call flow?",
+      "options": [
+        "A. Raising a critical alarm",
+        "B. Returning a checkIMEI response to the requesting Signalling Network address",
+        "C. Rebooting the FE pod",
+        "D. Deleting the device record"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "aaded19e-643a-4aec-b1c3-abf3a7f72e48",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 9,
+      "question_text": "[EIR Basic] Which pod acts as an intermediary between application FEs and external peers like STP, using SCTP for GSM/SIGTRAN traffic?",
+      "options": [
+        "A. Diameter Load Balancer (EIR4gLB pod)",
+        "B. NIM Pod",
+        "C. SIGTRAN Load Balancer (EIR3GLB pod)",
+        "D. HTTP/2 Load Balancer"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "1dc8e75b-6cb4-439e-85c4-1d2f52dc8f1c",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 10,
+      "question_text": "[Deployment & Troubleshooting] Which command is used to delete the identified stale PVCs in the namespace?",
+      "options": [
+        "A. kubectl -n <namespace> delete deployment",
+        "B. kubectl -n <namespace> delete pvc <pvc_names_space_separated>",
+        "C. kubectl -n <namespace> delete pod --all",
+        "D. kubectl -n <namespace> delete configmap"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "95b0caa6-d2d5-4532-81e6-831feca521f9",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 11,
+      "question_text": "[EIR Basic] A legacy manufacturer registered a batch of device codes rather than individual codes. Which colored list category historically covers this?",
+      "options": [
+        "A. Grey",
+        "B. White",
+        "C. Red",
+        "D. Black"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "8108088a-2415-41b7-861a-47c92c97fb56",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 12,
+      "question_text": "[Deployment & Troubleshooting] A team wants to understand which component validates software entitlement and delivery. Which Nokia CI/CD component is this?",
+      "options": [
+        "A. Harbor",
+        "B. NCOM",
+        "C. ORB",
+        "D. SWDP (Software Delivery Platform)"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "af3b12e8-3045-41a1-a74c-30f857102348",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 13,
+      "question_text": "[EIR Basic] In the basic call flow, what is the first action performed when a checkIMEI request message arrives?",
+      "options": [
+        "A. The device is deleted",
+        "B. IMSI and IMEI are extracted from the message",
+        "C. An alarm is raised automatically",
+        "D. The response is immediately sent back"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "87069058-9ec6-4db9-ba6c-a12448950c02",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 14,
+      "question_text": "[EIR Basic] For redundancy, how are Diameter LB pods typically deployed?",
+      "options": [
+        "A. Never redundant",
+        "B. In pairs",
+        "C. In groups of five",
+        "D. As a single instance only"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "e3b39ece-49c9-4aaa-89f3-d06a1d2ffcca",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 15,
+      "question_text": "[EIR Basic] Which pod acts as an intermediary between application FEs and external peers such as MME/DRA, using TCP with stack-level load balancing?",
+      "options": [
+        "A. Diameter Load Balancer (EIR4gLB Pod)",
+        "B. HTTP/2 Load Balancer",
+        "C. SIGTRAN Load Balancer (EIR3GLB pod)",
+        "D. 3GPP LI Pod"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "2525e08a-7591-4c53-a4e2-c60f553c2257",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 16,
+      "question_text": "[Deployment & Troubleshooting] As part of LDAP connectivity troubleshooting, what should be verified regarding the R-DSA and the EIR application pod?",
+      "options": [
+        "A. That the R-DSA is reachable from the One-EIR application pod and its IP is configured in /etc/hosts",
+        "B. That the R-DSA has a valid TLS certificate only",
+        "C. That the R-DSA is running the latest Kubernetes version",
+        "D. That the R-DSA has more than 10 CPU cores"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "9b2e5bfc-5fb6-41ef-a6d1-720f323d5ccc",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 17,
+      "question_text": "[EIR Basic] An architect wants to understand why a centralized HTTP/2 LB was introduced for 5GEIR. Which of the following is a benefit?",
+      "options": [
+        "A. It removes the need for NRF registration",
+        "B. It reduces the number of IP addresses required for the HTTP/2 interface",
+        "C. It increases the number of required worker VLANs",
+        "D. It replaces the need for SIGTRAN entirely"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "87416645-7261-4899-b9ca-c6454ab9dd98",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 18,
+      "question_text": "[EIR Planning] After identifying the full package version from the release note, where should the same version be verified as available?",
+      "options": [
+        "A. In the CIQ template",
+        "B. Under Config blueprint in the Plato tool",
+        "C. In the NCOM dashboard",
+        "D. In the DNP document"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "706b44d1-ab3d-4faa-9afa-0d59ba97a98f",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 19,
+      "question_text": "[EIR Planning] Which portal is used to log in and search for the One-EIR Cloud product before downloading the release note?",
+      "options": [
+        "A. Harbor",
+        "B. NCOM",
+        "C. Plato",
+        "D. NOLS"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "803c8b22-4de6-4a45-8fc9-4539a3509354",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 20,
+      "question_text": "[Deployment & Troubleshooting] After generic SW artifacts are uploaded to NEAR, what is the next step in the NCD workflow?",
+      "options": [
+        "A. Automated CNF deployment begins immediately",
+        "B. CCTF test suite executes",
+        "C. Operator specific deployment artifacts are prepared as per operator lab configuration",
+        "D. Post-deployment health checks run"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "3b1cc900-b596-40c4-ade3-5bcaba160ce4",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 21,
+      "question_text": "[Deployment & Troubleshooting] On what platform is the NCD cloud pipeline based?",
+      "options": [
+        "A. Microsoft Azure DevOps (SaaS)",
+        "B. AWS CodePipeline",
+        "C. Jenkins on-premises only",
+        "D. GitLab CI only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "7d721783-0b9c-454f-ae33-79d4f60619a8",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 22,
+      "question_text": "[Deployment & Troubleshooting] Which workflow step involves creating, digitally signing, and distributing an operator specific OCI release bundle?",
+      "options": [
+        "A. Optional CCTF test execution",
+        "B. Replication of OCI bundle from NCD Harbor",
+        "C. Automated deployment via Azure pipeline",
+        "D. Operator specific OCI release Bundle creation, digital signing, and distribution to NEAR pull cluster"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "315a707d-920b-4493-9319-6a0545c1c152",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 23,
+      "question_text": "[Deployment & Troubleshooting] Which log path and file should be checked on the DCO pod to investigate the Dispatcher reconciler error for the LB pod?",
+      "options": [
+        "A. /var/log/kube-apiserver.log",
+        "B. /opt/sdf/log/af02_alarm_log",
+        "C. /logstore/entrypointlog/dco path, file hssdco.log",
+        "D. /opt/vaultagent/log/vaultagent.log"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "5fec2dc4-fce4-4e5f-9d9d-72031d669ac0",
+      "test_id": "fdf176f9-d8e7-47da-84f9-2676206b5c07",
+      "question_index": 24,
+      "question_text": "[EIR Planning] What is the main focus of the CIQ document, as distinct from the DNP?",
+      "options": [
+        "A. Which artifacts need to be downloaded from Plato",
+        "B. What information is required from the customer to successfully deploy the solution",
+        "C. How each component will be implemented and configured",
+        "D. How the network infrastructure will support the deployment"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "67865f05-5227-4363-8396-7c8600e09c9e",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 0,
+      "question_text": "[Deployment & Troubleshooting] After deployment, an engineer wants to verify that SDL services are running on all VMs. Which command should be used?",
+      "options": [
+        "A. top",
+        "B. df -kh",
+        "C. systemctl -l | grep nokia",
+        "D. free -m"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "cb6179d2-d837-4721-aefb-75c72c1a8720",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 1,
+      "question_text": "[Basic NDS] A customer migration project specifically requires synchronization between legacy and SDL databases. Which VM is mandatory?",
+      "options": [
+        "A. Telemetry VM",
+        "B. Storage VM",
+        "C. Sync VM",
+        "D. Access VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "296b268c-6114-4fdd-a643-329cd34c4b9b",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 2,
+      "question_text": "[Basic NDS] A network architect wants to understand which VM hosts the OAM interface used for administration. Which VM should be identified?",
+      "options": [
+        "A. Storage VM",
+        "B. Access VM",
+        "C. OPS VM",
+        "D. Sync VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "b665fba0-484b-45b6-98ab-af5c4d4942e3",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 3,
+      "question_text": "[Deployment & Troubleshooting] Where can active SDL alarms be verified?",
+      "options": [
+        "A. /var/log/messages",
+        "B. /tmp/alarm.log",
+        "C. /opt/nokia/sdl-telemetry/live/ActiveAlarmTable.txt",
+        "D. /etc/alarm.txt"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "079ef2b5-7776-4810-b48b-b63e8bacc201",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 4,
+      "question_text": "[Planning & Artifact Preparation] The customer introduces an additional network interface after TPD generation. Which activity is necessary?",
+      "options": [
+        "A. Health check only",
+        "B. Alarm verification only",
+        "C. Artifact review and regeneration if required",
+        "D. User recreation"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "0d619ea7-a408-4ca6-8a87-985ebe1f1609",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 5,
+      "question_text": "[Basic NDS] A customer wants to move from traditional VNF architecture to cloud-native deployment. Which SDL architecture supports this model?",
+      "options": [
+        "A. One-NDS",
+        "B. Traditional SDL VNF",
+        "C. SDL CNF",
+        "D. Bare-Metal Legacy Platform"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "c543fca1-87fb-4ac7-8db3-b058378ecb82",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 6,
+      "question_text": "[Deployment & Troubleshooting] A customer reports LDAP connectivity issues. Which command can verify connectivity?",
+      "options": [
+        "A. sdl hc -t all",
+        "B. pcs status",
+        "C. curl -kv http://accessip:16611",
+        "D. top"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "68635d3d-ac07-4fc6-a4d3-228255a7a860",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 7,
+      "question_text": "[Deployment & Troubleshooting] SDL bootstrap is suspected to be stuck. Which script should be executed?",
+      "options": [
+        "A. get_health_check_report.py",
+        "B. sdl_check_vnf_bootstrap_status.py",
+        "C. pcs status",
+        "D. sdl hc -t all"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "45c46703-3bf2-498e-b359-ce9dc943ae39",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 8,
+      "question_text": "[Basic NDS] Data retrieval is successful, but routing of customer requests appears incorrect. Which VM routes requests to storage nodes?",
+      "options": [
+        "A. OPS VM",
+        "B. Access VM",
+        "C. Telemetry VM",
+        "D. Sync VM"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "3714bfd3-9b8e-445c-9c3b-da5ed6ecc165",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 9,
+      "question_text": "[Deployment & Troubleshooting] A complete health assessment of SDL is required. Which command should be executed?",
+      "options": [
+        "A. pcs status",
+        "B. top",
+        "C. sdl hc -t all",
+        "D. free -m"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "47e89d59-d5d9-49b2-a5d4-4c10575bec30",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 10,
+      "question_text": "[Deployment & Troubleshooting] Newly created application users cannot authenticate against SDL. What should be verified first?",
+      "options": [
+        "A. Telemetry Alarms",
+        "B. Storage Replication",
+        "C. User creation and password configuration on OPS VM",
+        "D. Static routes"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "0059478c-7041-415f-af58-664ee0aac8af",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 11,
+      "question_text": "[Deployment & Troubleshooting] Filesystem utilization alarms are generated. Which command provides disk usage information?",
+      "options": [
+        "A. top",
+        "B. df -kh",
+        "C. uname -a",
+        "D. free -m"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "6b56f72e-24fb-4aa0-94af-8a6152326a03",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 12,
+      "question_text": "[Planning & Artifact Preparation] At what stage should NTP details be validated?",
+      "options": [
+        "A. Post-deployment",
+        "B. Troubleshooting phase",
+        "C. Planning and artifact preparation phase",
+        "D. User creation phase"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "68e05d59-867a-4711-9473-78f24f940d1b",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 13,
+      "question_text": "[Planning & Artifact Preparation] During TPD preparation, subscriber volume exceeds the capacity assumptions. What should be done?",
+      "options": [
+        "A. Ignore and continue",
+        "B. Create users first",
+        "C. Re-evaluate sizing and update artifacts",
+        "D. Run health checks"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "6fc13600-0378-46ff-9912-64fdb9134200",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 14,
+      "question_text": "[Basic NDS] During a capacity planning workshop, the customer expects subscriber growth to double within a year. Which SDL components are typically scaled to handle increased load?",
+      "options": [
+        "A. OPS and Telemetry VMs",
+        "B. Diagnostic and NTF VMs",
+        "C. Access and Storage VMs",
+        "D. Sync and OPS VMs"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "680f154b-e0c7-4960-a542-e4733c26680c",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 15,
+      "question_text": "[Deployment & Troubleshooting] After running a health check report, what should ideally be displayed?",
+      "options": [
+        "A. WARNING",
+        "B. CRITICAL",
+        "C. HEALTHY",
+        "D. UNKNOWN"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "99b082f6-0520-47f5-8440-0220daf11125",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 16,
+      "question_text": "[Planning & Artifact Preparation] A customer updates network architecture after the design has been finalized. Which documents may require updates?",
+      "options": [
+        "A. Only CIQ",
+        "B. Only LLD",
+        "C. Only TPD",
+        "D. DND, LLD, and TPD"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "8aa93b78-06e7-4ad1-a212-7abd8425c769",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 17,
+      "question_text": "[Deployment & Troubleshooting] In SDL version 23, do we require a Rocky VM for password encryption?",
+      "options": [
+        "A. Yes",
+        "B. No"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "439ba259-967c-48fc-bd2f-ff733018909a",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 18,
+      "question_text": "[Basic NDS] A service request requires monitoring SDL KPIs and generating alarms. Which VM is responsible?",
+      "options": [
+        "A. Diagnostic VM",
+        "B. Telemetry VM",
+        "C. Access VM",
+        "D. Sync VM"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "0c988c39-6b03-430d-b72b-7b56d5bf4fdd",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 19,
+      "question_text": "[Planning & Artifact Preparation] Which artifact generally contains low-level deployment details?",
+      "options": [
+        "A. CIQ",
+        "B. LLD",
+        "C. PM Report",
+        "D. Alarm Report"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "78b37fee-02af-4330-9a24-40341f231d7b",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 20,
+      "question_text": "[Basic NDS] A storage node failure occurs. Which SDL component is responsible for data durability and recovery?",
+      "options": [
+        "A. OPS VM",
+        "B. Storage VM",
+        "C. Access VM",
+        "D. Telemetry VM"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "372a7a2c-0d66-4518-abc3-66d10d04d795",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 21,
+      "question_text": "[Deployment & Troubleshooting] Artefacts (Csar, extension and Instantiation) are generated from which Orchestration folder?",
+      "options": [
+        "A. Encryption Folder",
+        "B. Encryption files",
+        "C. Preparations Tool",
+        "D. None of the Above"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "2d60d38d-1198-47fb-921b-897cafd713cb",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 22,
+      "question_text": "[Basic NDS] A migration from One-NDS to SDL is ongoing, and data consistency between old and new platforms is critical. Which VM plays the key role?",
+      "options": [
+        "A. Access VM",
+        "B. Storage VM",
+        "C. Sync VM",
+        "D. Telemetry VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "74fcae75-d08b-455f-ba94-308647911b23",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 23,
+      "question_text": "[Basic NDS] NetAct is not receiving PM/FM statistics although subscriber operations are functioning normally. Which VM should be checked?",
+      "options": [
+        "A. OPS VM",
+        "B. Storage VM",
+        "C. Telemetry VM",
+        "D. Access VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "91d4e68d-46ca-40a1-8c7a-c507721deb4b",
+      "test_id": "7b1f66ea-2993-40d1-946d-7c98240fc8cd",
+      "question_index": 24,
+      "question_text": "[Basic NDS] An L2 engineer is performing root cause analysis after repeated service outages. Which VM provides diagnostic tools and health checks?",
+      "options": [
+        "A. Access VM",
+        "B. Telemetry VM",
+        "C. Diagnostic VM",
+        "D. Sync VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "4fe0105e-0217-4c52-9f47-0eefaf0914c3",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 0,
+      "question_text": "[Deployment & Troubleshooting] A customer reports LDAP connectivity issues. Which command can verify connectivity?",
+      "options": [
+        "A. sdl hc -t all",
+        "B. pcs status",
+        "C. curl -kv http://accessip:16611",
+        "D. top"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "694ced7f-7a88-4af6-a5ec-a33d877ec8be",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 1,
+      "question_text": "[Basic NDS] A storage node failure occurs. Which SDL component is responsible for data durability and recovery?",
+      "options": [
+        "A. OPS VM",
+        "B. Storage VM",
+        "C. Access VM",
+        "D. Telemetry VM"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "6f90141b-b694-4d8d-ade9-ca3d838f0d7a",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 2,
+      "question_text": "[Deployment & Troubleshooting] A customer suspects static routes are missing after deployment. What should be verified?",
+      "options": [
+        "A. LDAP Ports",
+        "B. Replication Status",
+        "C. SDL Static Route Configuration",
+        "D. User Accounts"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "3253a922-7827-44bb-aeef-d0b75fd39958",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 3,
+      "question_text": "[Basic NDS] A customer asks which VM acts as the main entry point for LDAP and REST requests. What is your response?",
+      "options": [
+        "A. OPS VM",
+        "B. Storage VM",
+        "C. Access VM",
+        "D. Telemetry VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "b9de9f1b-6829-44a9-8afd-1adcb6fa05fc",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 4,
+      "question_text": "[Basic NDS] A customer wants to move from traditional VNF architecture to cloud-native deployment. Which SDL architecture supports this model?",
+      "options": [
+        "A. One-NDS",
+        "B. Traditional SDL VNF",
+        "C. SDL CNF",
+        "D. Bare-Metal Legacy Platform"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "564340e1-6d8a-4c85-8b24-76d91fda5c77",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 5,
+      "question_text": "[Basic NDS] An L2 engineer is performing root cause analysis after repeated service outages. Which VM provides diagnostic tools and health checks?",
+      "options": [
+        "A. Access VM",
+        "B. Telemetry VM",
+        "C. Diagnostic VM",
+        "D. Sync VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "d17f258d-3cf9-46d8-906e-ff7635052004",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 6,
+      "question_text": "[Deployment & Troubleshooting] Several components appear in UNKNOWN state. Which information source should be checked first?",
+      "options": [
+        "A. PM Report",
+        "B. Alarm Table",
+        "C. SDL Topology Output",
+        "D. User Database"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "4405b2b9-6768-456a-a757-80c253c4751f",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 7,
+      "question_text": "[Deployment & Troubleshooting] Filesystem utilization alarms are generated. Which command provides disk usage information?",
+      "options": [
+        "A. top",
+        "B. df -kh",
+        "C. uname -a",
+        "D. free -m"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "78606f5c-b551-44fc-b7c3-cbf58ae793d2",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 8,
+      "question_text": "[Planning & Artifact Preparation] During artifact preparation, incorrect gateway details are identified. What issue is most likely during deployment?",
+      "options": [
+        "A. User creation failure",
+        "B. Routing failure",
+        "C. Alarm generation failure",
+        "D. Database corruption"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "ea91ce01-a228-47ae-8dca-0359e69cc35b",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 9,
+      "question_text": "[Basic NDS] During a capacity planning workshop, the customer expects subscriber growth to double within a year. Which SDL components are typically scaled to handle increased load?",
+      "options": [
+        "A. OPS and Telemetry VMs",
+        "B. Diagnostic and NTF VMs",
+        "C. Access and Storage VMs",
+        "D. Sync and OPS VMs"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "cdf0e839-e04d-4043-a828-f31ab03df781",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 10,
+      "question_text": "[Basic NDS] A migration from One-NDS to SDL is ongoing, and data consistency between old and new platforms is critical. Which VM plays the key role?",
+      "options": [
+        "A. Access VM",
+        "B. Storage VM",
+        "C. Sync VM",
+        "D. Telemetry VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "0772b629-768f-40d6-8992-dd51a8ccd24f",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 11,
+      "question_text": "[Deployment & Troubleshooting] In SDL version 23, do we require a Rocky VM for password encryption?",
+      "options": [
+        "A. Yes",
+        "B. No"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "08b519d0-7228-4ca1-8e19-1ee78eae2ee7",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 12,
+      "question_text": "[Basic NDS] A customer migration project specifically requires synchronization between legacy and SDL databases. Which VM is mandatory?",
+      "options": [
+        "A. Telemetry VM",
+        "B. Storage VM",
+        "C. Sync VM",
+        "D. Access VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "80bdb802-6eed-48a8-b900-7da6d493c048",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 13,
+      "question_text": "[Deployment & Troubleshooting] A complete health assessment of SDL is required. Which command should be executed?",
+      "options": [
+        "A. pcs status",
+        "B. top",
+        "C. sdl hc -t all",
+        "D. free -m"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "0565426c-efde-4744-acbf-161259486624",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 14,
+      "question_text": "[Planning & Artifact Preparation] A deployment fails because network mappings do not match customer requirements. Which planning phase should have prevented this?",
+      "options": [
+        "A. User creation",
+        "B. CIQ validation and DND review",
+        "C. Alarm verification",
+        "D. Health check execution"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "5b840794-e0f4-49aa-894b-61f7f9f9ff40",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 15,
+      "question_text": "[Basic NDS] A network architect wants to understand which VM hosts the OAM interface used for administration. Which VM should be identified?",
+      "options": [
+        "A. Storage VM",
+        "B. Access VM",
+        "C. OPS VM",
+        "D. Sync VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "3cc8f48a-0166-4e09-90d5-6f23eb935ff0",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 16,
+      "question_text": "[Deployment & Troubleshooting] Newly created application users cannot authenticate against SDL. What should be verified first?",
+      "options": [
+        "A. Telemetry Alarms",
+        "B. Storage Replication",
+        "C. User creation and password configuration on OPS VM",
+        "D. Static routes"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "4701fe28-f7c1-4906-8fe4-4be13d30a999",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 17,
+      "question_text": "[Planning & Artifact Preparation] During TPD preparation, subscriber volume exceeds the capacity assumptions. What should be done?",
+      "options": [
+        "A. Ignore and continue",
+        "B. Create users first",
+        "C. Re-evaluate sizing and update artifacts",
+        "D. Run health checks"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "2074808c-4de5-44d6-a30e-8930a9307d87",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 18,
+      "question_text": "[Deployment & Troubleshooting] SDL bootstrap is suspected to be stuck. Which script should be executed?",
+      "options": [
+        "A. get_health_check_report.py",
+        "B. sdl_check_vnf_bootstrap_status.py",
+        "C. pcs status",
+        "D. sdl hc -t all"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "31d81bf9-28b8-49ea-95c6-69e11a7c1daa",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 19,
+      "question_text": "[Deployment & Troubleshooting] After running a health check report, what should ideally be displayed?",
+      "options": [
+        "A. WARNING",
+        "B. CRITICAL",
+        "C. HEALTHY",
+        "D. UNKNOWN"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "79e5b462-41fc-4feb-95a6-df15bce5a2eb",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 20,
+      "question_text": "[Deployment & Troubleshooting] Artefacts (Csar, extension and Instantiation) are generated from which Orchestration folder?",
+      "options": [
+        "A. Encryption Folder",
+        "B. Encryption files",
+        "C. Preparations Tool",
+        "D. None of the Above"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "41628196-626d-4b48-8260-a1e24ac87c58",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 21,
+      "question_text": "[Planning & Artifact Preparation] The customer introduces an additional network interface after TPD generation. Which activity is necessary?",
+      "options": [
+        "A. Health check only",
+        "B. Alarm verification only",
+        "C. Artifact review and regeneration if required",
+        "D. User recreation"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "aa16dbb5-1bd4-4574-9679-256c3cdcead3",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 22,
+      "question_text": "[Basic NDS] Subscriber records are not being replicated between database nodes. Which VM is most likely involved?",
+      "options": [
+        "A. Telemetry VM",
+        "B. OPS VM",
+        "C. Storage VM",
+        "D. NTF VM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "fb17f3aa-1177-4892-8d6d-a93c9648e571",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 23,
+      "question_text": "[Basic NDS] A service request requires monitoring SDL KPIs and generating alarms. Which VM is responsible?",
+      "options": [
+        "A. Diagnostic VM",
+        "B. Telemetry VM",
+        "C. Access VM",
+        "D. Sync VM"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Basic SDL",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "d82e30dd-e601-4682-8986-66a46f89b8b5",
+      "test_id": "b1d7bac4-f918-469a-8ef9-3e8d0f872a61",
+      "question_index": 24,
+      "question_text": "[Planning & Artifact Preparation] The customer provided an incomplete network design sheet without VLAN details. Which document should be revisited first?",
+      "options": [
+        "A. TPD",
+        "B. CIQ",
+        "C. Alarm Report",
+        "D. Health Check Report"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Planning & Artifact Preparation",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "8ed1385a-f7bd-4f87-8d9d-14391ca81250",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 0,
+      "question_text": "[EIR Basic] Which mechanism protects SIGTRAN Load Balancer pods from overload by discarding excess SIGTRAN traffic?",
+      "options": [
+        "A. Diameter Gapping",
+        "B. Rate limiting via NRF",
+        "C. Http2 Gapping",
+        "D. TCAP Gapping"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "930c48d3-2b0a-4c6d-a865-28efeb091669",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 1,
+      "question_text": "[EIR Basic] An operator wants to add or remove IMEIs and apply policy control manually. Which part of the EIR architecture is used for this?",
+      "options": [
+        "A. The Diameter Load Balancer",
+        "B. The HTTP/2 Load Balancer",
+        "C. The SIGTRAN Load Balancer",
+        "D. The Admin Part on the left side of the architecture"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "06ceaf61-e07c-4156-a70c-e1010d0f97f2",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 2,
+      "question_text": "[EIR Planning] Which script is required to be present in the same directory as secret_provision_default.json to generate the secret-provision.tar file?",
+      "options": [
+        "A. populate_secret_template.py",
+        "B. provisionEir.py",
+        "C. secretsCli.py",
+        "D. uploadFiles.py"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "3f2d48b7-3d5f-4692-a854-c1d2e8bb8509",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 3,
+      "question_text": "[Deployment & Troubleshooting] Which command is used to delete the identified stale PVCs in the namespace?",
+      "options": [
+        "A. kubectl -n <namespace> delete deployment",
+        "B. kubectl -n <namespace> delete pvc <pvc_names_space_separated>",
+        "C. kubectl -n <namespace> delete pod --all",
+        "D. kubectl -n <namespace> delete configmap"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "a83e1d45-6ea8-4808-9b66-9a9841368e52",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 4,
+      "question_text": "[Deployment & Troubleshooting] What is the recommended action for the x509 certificate signed by unknown authority error during ZTS upgrade?",
+      "options": [
+        "A. Raise the issue with the NCOM team to update the certificate",
+        "B. Roll back to a previous ZTS version manually",
+        "C. Delete and recreate the namespace",
+        "D. Restart all worker nodes"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "45474087-20bc-47ff-86e9-b6b57e2be1a5",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 5,
+      "question_text": "[EIR Basic] Regarding IMEI structure, which 8-digit component identifies the exact make, model, and manufacturer of a device?",
+      "options": [
+        "A. CD/SD (Check Digit/Spare Digit)",
+        "B. PLMN ID",
+        "C. TAC (Type Allocation Code)",
+        "D. SNR (Serial Number)"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "d0212607-6985-40da-a130-50fb164e05eb",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 6,
+      "question_text": "[Deployment & Troubleshooting] On what platform is the NCD cloud pipeline based?",
+      "options": [
+        "A. Microsoft Azure DevOps (SaaS)",
+        "B. AWS CodePipeline",
+        "C. Jenkins on-premises only",
+        "D. GitLab CI only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "57f49e71-a986-44e7-b6f0-2fffbc5f7e2a",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 7,
+      "question_text": "[Deployment & Troubleshooting] The team observes that when the Primary NRF goes down, the Secondary NRF fails to register, and EIR keeps retrying registration with the primary and times out on NF heartbeat. What is the recommended fix?",
+      "options": [
+        "A. Add the 'timeout' status code to the RetryActionTable for NRFRegistration, NFHeartBeat, and NFUpdate APIs",
+        "B. Disable NRF registration entirely",
+        "C. Manually restart the EIR namespace every time this occurs",
+        "D. Increase the NRF instance count to unlimited"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "7b7ddcc0-85c2-4401-adfc-55d05cf35a8a",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 8,
+      "question_text": "[EIR Planning] Which planning document would be the first point of reference to understand the overall call flows supported by the solution at a high level?",
+      "options": [
+        "A. DNP",
+        "B. CIQ",
+        "C. LLD",
+        "D. HLD"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "a989f5c1-67c7-479c-ae7e-436118bb33e7",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 9,
+      "question_text": "[EIR Basic] An engineer wants to check periodic measurements such as requests received and services abnormally terminated. Which log and typical interval apply?",
+      "options": [
+        "A. Alarm log, written every hour",
+        "B. Error log, written every second",
+        "C. Statistics log (af03_stats_log.current), written every 15 or 30 minutes",
+        "D. Config log, written once a day"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "c37219bf-5a41-4e76-9ef7-026ba5e04f05",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 10,
+      "question_text": "[EIR Basic] A design reviewer looks at the EIR CNF PODs table. Which details are included for each POD according to this table?",
+      "options": [
+        "A. Functional description, POD type (statefulset/deployment), redundancy model, anti-affinity, and containers",
+        "B. Only the POD's IP address",
+        "C. Only CPU usage",
+        "D. Only the deployment date"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "78f28fdd-e3b3-45d4-8002-f63f05b07ca5",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 11,
+      "question_text": "[EIR Basic] An engineer needs to find the daily alarm log for the One-EIR system. Where is this log located and how is it named?",
+      "options": [
+        "A. /opt/nokia/eir/alarm_today.log",
+        "B. /opt/sdf/log/af02_alarm_log.ddmmyyyy",
+        "C. /etc/eir/alarm.txt",
+        "D. /var/log/eir/alarms.log"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "0ab7da2f-d42a-416d-bea7-45329915f27f",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 12,
+      "question_text": "[Deployment & Troubleshooting] Which component acts as the central repository for software artifacts in the Nokia CI/CD solution?",
+      "options": [
+        "A. NEAR",
+        "B. ORB",
+        "C. NCOM",
+        "D. Harbor"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "d650acb1-e590-4676-a09b-941454675f50",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 13,
+      "question_text": "[EIR Planning] What must be accepted and selected (along with country and store selection) before the release note can be downloaded from NOLS?",
+      "options": [
+        "A. Only the country selection",
+        "B. Terms acceptance, country selection, and store selection",
+        "C. Only the terms acceptance",
+        "D. Nothing needs to be selected"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "a9fed228-8ea9-405a-89e2-79a04e32f938",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 14,
+      "question_text": "[Deployment & Troubleshooting] A customer reports that connectivity from the One-EIR Application towards the backend on port 16611 is not established. What is the first troubleshooting step?",
+      "options": [
+        "A. Check the HTTP/2 LB gapping configuration",
+        "B. Restart the entire EIR namespace",
+        "C. Check the SOAP trigger configuration",
+        "D. Ensure routes are configured under ldaplan from the application pods"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "097f33c3-3ce1-4b5f-8ca9-3597e490d3c5",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 15,
+      "question_text": "[EIR Basic] Which of the following is part of the NF profile sent during NRF registration?",
+      "options": [
+        "A. Only the software version number",
+        "B. Only the operator's billing account ID",
+        "C. NF type, NF instance ID, FQDN or IP address, supported NF services, and PLMN ID",
+        "D. Only the NF's IP address"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "a7588d62-888a-4365-84e4-ad16803411d1",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 16,
+      "question_text": "[EIR Planning] Which document content area would define database-specific parameters for the deployment?",
+      "options": [
+        "A. DBConfiguration (within LLD)",
+        "B. CIQ Point code",
+        "C. DNP VLAN section",
+        "D. HLD Scalability section"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "9a4379bf-c654-4761-a714-874e0a766c57",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 17,
+      "question_text": "[EIR Planning] Which command is used to generate the secret-provision.tar file from the secret_provision_default.json file?",
+      "options": [
+        "A. kubectl apply -f secret_provision_default.json",
+        "B. helm3 install secrets secret_provision_default.json",
+        "C. /usr/bin/python secretsCli.py upload --file secret_provision_default.json",
+        "D. /usr/bin/python secretsCli.py prepareAll --jsonfile secret_provision_default.json"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "8a98ec68-0e78-482f-963e-a143ad6a5629",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 18,
+      "question_text": "[EIR Basic] A sudden spike in external 5G traffic threatens to overload the HTTP/2 LB pods. Which mechanism protects against this?",
+      "options": [
+        "A. Http2 Gapping",
+        "B. SIGTRAN Load Balancer only",
+        "C. TCAP Gapping only",
+        "D. Diameter Gapping only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "31bb6f02-74d5-4498-8ea4-5c5bdc678898",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 19,
+      "question_text": "[Deployment & Troubleshooting] If secrets are found to be missing, provisioned with an incorrect vnfid, or the secret-provision.tar is absent, what should be done?",
+      "options": [
+        "A. Re-provision the secrets manually",
+        "B. Ignore the error, it resolves automatically",
+        "C. Delete the vaultagent Pod permanently",
+        "D. Restart the entire CaaS cluster"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "15b7ca62-d00b-4daa-8c3b-c5a28ec30218",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 20,
+      "question_text": "[Deployment & Troubleshooting] After a successful bulkUpload of secrets, which command lists the uploaded secrets to confirm success?",
+      "options": [
+        "A. helm3 list secrets",
+        "B. sscli verifySec --all",
+        "C. sscli listSec --VnfId <namespace> --RelVer 23 --AppId EIR --NeType REGISTERS",
+        "D. kubectl get secrets -A"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "a1eb18c5-35b0-4206-94a1-b90a961ff37d",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 21,
+      "question_text": "[Deployment & Troubleshooting] Which LANs should have routes verified as part of STP and DRA connectivity troubleshooting?",
+      "options": [
+        "A. Only the ZTS OAM LAN",
+        "B. Only the LI LAN",
+        "C. STP LAN (slb1-ip1, slb2-ip2, etc.) and DRA LAN (dlb1-ip1, dlb1-ip2, etc.)",
+        "D. Only the Internal LAN"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "bc6a37b4-28f5-4753-9b65-45d8d1ff8897",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 22,
+      "question_text": "[Deployment & Troubleshooting] An NCOM-triggered ZTS upgrade fails with 'x509: certificate signed by unknown authority'. What is the underlying cause?",
+      "options": [
+        "A. A missing PVC",
+        "B. A DNS misconfiguration",
+        "C. An incorrect Helm chart version",
+        "D. A CaaS certificate issue between NCOM and NCS"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "0767db7e-8304-4ec4-b77c-e2d100b45dad",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 23,
+      "question_text": "[EIR Basic] In an example statistics log snippet, which of the following counters would be recorded alongside EIR white/grey/black answers?",
+      "options": [
+        "A. HTTP response code 404 count",
+        "B. VLAN tag mismatches",
+        "C. DNS resolution failures",
+        "D. EIR database query timeouts"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "ed335431-d787-4a39-8a54-69fb4208d3d1",
+      "test_id": "600b23f1-3b34-4ca2-8a9a-308ebd1f2be9",
+      "question_index": 24,
+      "question_text": "[EIR Basic] Besides reducing IP requirements, which additional benefit does the centralized HTTP/2 LB provide?",
+      "options": [
+        "A. It disables SBI traffic entirely",
+        "B. It eliminates the need for application FE pods",
+        "C. It overcomes the issue of uneven load balancing and removes additional LAN requirements on worker VMs",
+        "D. It removes the need for NIM"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "3b2d5a08-9381-438e-ab40-d8240d9f3870",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 0,
+      "question_text": "[EIR Basic] An operator wants to add or remove IMEIs and apply policy control manually. Which part of the EIR architecture is used for this?",
+      "options": [
+        "A. The Diameter Load Balancer",
+        "B. The HTTP/2 Load Balancer",
+        "C. The SIGTRAN Load Balancer",
+        "D. The Admin Part on the left side of the architecture"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "1df8b383-cbdd-4f6a-822e-3e19fcbad288",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 1,
+      "question_text": "[Deployment & Troubleshooting] Which parameters should be confirmed as configured with a value of 1 during STP/DRA troubleshooting?",
+      "options": [
+        "A. MinInstance and MaxInstance",
+        "B. minActASPs and minAppNodes",
+        "C. LDAPTimeout and LDAPReconnectTimer",
+        "D. TargetRate and GappingAlgo"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "aaa210d8-131b-48da-83c3-81b2d511e927",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 2,
+      "question_text": "[Deployment & Troubleshooting] As part of LDAP connectivity troubleshooting, what should be verified regarding the R-DSA and the EIR application pod?",
+      "options": [
+        "A. That the R-DSA is reachable from the One-EIR application pod and its IP is configured in /etc/hosts",
+        "B. That the R-DSA has a valid TLS certificate only",
+        "C. That the R-DSA is running the latest Kubernetes version",
+        "D. That the R-DSA has more than 10 CPU cores"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "e6a63d38-e5e0-4970-83e0-76e5c8453e92",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 3,
+      "question_text": "[EIR Basic] A network architect reviews the EIR CNF architecture diagram and identifies core network elements it interacts with. Which of the following are core elements shown?",
+      "options": [
+        "A. Only DNS servers",
+        "B. Only billing servers",
+        "C. NRF/SCP, AMF, MME, MSC",
+        "D. Only firewalls"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "13d5c9d9-8997-48a3-8dbf-a5b5cec17f63",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 4,
+      "question_text": "[EIR Planning] When creating a project for the Helm file, which prefill option should be selected if NCS is used instead of NCP?",
+      "options": [
+        "A. No prefill option applies to Helm",
+        "B. The highlighted (first) prefill option for NCS",
+        "C. A completely custom manual entry",
+        "D. The second prefill option always"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "cbd84d37-2a6c-4748-a8d8-917e7e64ff51",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 5,
+      "question_text": "[EIR Basic] Which mechanism protects SIGTRAN Load Balancer pods from overload by discarding excess SIGTRAN traffic?",
+      "options": [
+        "A. Diameter Gapping",
+        "B. Rate limiting via NRF",
+        "C. Http2 Gapping",
+        "D. TCAP Gapping"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "75737f8d-0af5-46ca-b76e-a3c07080eb82",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 6,
+      "question_text": "[EIR Basic] Regarding IMEI structure, which 8-digit component identifies the exact make, model, and manufacturer of a device?",
+      "options": [
+        "A. CD/SD (Check Digit/Spare Digit)",
+        "B. PLMN ID",
+        "C. TAC (Type Allocation Code)",
+        "D. SNR (Serial Number)"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "90db64f1-ca6c-453e-a3e2-c22993699ee0",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 7,
+      "question_text": "[Deployment & Troubleshooting] An NCOM-triggered ZTS upgrade fails with 'x509: certificate signed by unknown authority'. What is the underlying cause?",
+      "options": [
+        "A. A missing PVC",
+        "B. A DNS misconfiguration",
+        "C. An incorrect Helm chart version",
+        "D. A CaaS certificate issue between NCOM and NCS"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "5160f850-7699-4652-beb2-f4aefb3b0ea5",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 8,
+      "question_text": "[EIR Basic] A sudden spike in external 5G traffic threatens to overload the HTTP/2 LB pods. Which mechanism protects against this?",
+      "options": [
+        "A. Http2 Gapping",
+        "B. SIGTRAN Load Balancer only",
+        "C. TCAP Gapping only",
+        "D. Diameter Gapping only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "b3824f43-ca2a-4215-a3ab-47d5fa9b50f5",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 9,
+      "question_text": "[EIR Planning] Which document is described as the primary source of deployment parameters, capturing network details, IP addressing, and integration details from the customer?",
+      "options": [
+        "A. Customer Information Questionnaire (CIQ)",
+        "B. Release note document",
+        "C. High-Level Design (HLD)",
+        "D. Low-Level Design (LLD)"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "9b1c87ba-7354-4003-8066-3d7c6ab3033c",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 10,
+      "question_text": "[EIR Basic] If applicable, what does the One-EIR process do with policing data during the call flow, potentially creating a new device record?",
+      "options": [
+        "A. Deletes all existing records",
+        "B. Ignores the request",
+        "C. Restarts the FE pod",
+        "D. Updates policing data in the BE-DSAs (may create device if data not found)"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "49e610e9-1032-4bcd-a9b9-915cbf511983",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 11,
+      "question_text": "[EIR Basic] Which pod acts as an intermediary between application FEs and external peers like STP, using SCTP for GSM/SIGTRAN traffic?",
+      "options": [
+        "A. Diameter Load Balancer (EIR4gLB pod)",
+        "B. NIM Pod",
+        "C. SIGTRAN Load Balancer (EIR3GLB pod)",
+        "D. HTTP/2 Load Balancer"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "ff7fba66-3d3c-4771-8c66-bfa67918ed54",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 12,
+      "question_text": "[EIR Basic] In an Http2 Gapping configuration example, what TargetRate value is shown for protecting the LB pods?",
+      "options": [
+        "A. 1800",
+        "B. 2250",
+        "C. 6300",
+        "D. 200"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "938e7c37-03f1-46bb-ad86-d6d1af47f19e",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 13,
+      "question_text": "[Deployment & Troubleshooting] On what platform is the NCD cloud pipeline based?",
+      "options": [
+        "A. Microsoft Azure DevOps (SaaS)",
+        "B. AWS CodePipeline",
+        "C. Jenkins on-premises only",
+        "D. GitLab CI only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "3b0b152b-04ae-4863-9eaf-ae1cd8e7109d",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 14,
+      "question_text": "[EIR Basic] When 5GEIR wants to update its NF profile with NRF, which HTTP method is used first, with PUT used only if it fails?",
+      "options": [
+        "A. PATCH",
+        "B. OPTIONS",
+        "C. DELETE",
+        "D. GET"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "1ff63bfd-a113-4d48-9e9c-28477364b2b4",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 15,
+      "question_text": "[Deployment & Troubleshooting] Which optional final step in the NCD workflow involves running automated test suites via a dedicated GUI?",
+      "options": [
+        "A. Manual regression testing via spreadsheet",
+        "B. Harbor replication verification",
+        "C. Automated test suite execution using the CCTF GUI",
+        "D. OCI signing verification"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "e0d39817-8f1d-4834-bf35-16a85709123f",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 16,
+      "question_text": "[EIR Planning] Which LLD content items specifically cover 4G and 3G EIR configuration separately?",
+      "options": [
+        "A. SOAPConfiguration and ADWConfiguration",
+        "B. Eir4gConfiguration and Eir3gConfiguration",
+        "C. SiteConfiguration and FEMappingTables",
+        "D. DBConfiguration and StackConfiguration"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "dcb04247-eb57-48a7-9a41-3654be9f3f80",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 17,
+      "question_text": "[EIR Planning] Which document content area would define database-specific parameters for the deployment?",
+      "options": [
+        "A. DBConfiguration (within LLD)",
+        "B. CIQ Point code",
+        "C. DNP VLAN section",
+        "D. HLD Scalability section"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "a5108999-f716-4a45-ae58-aba6c86df27d",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 18,
+      "question_text": "[EIR Planning] Which document provides the detailed technical implementation of the EIR solution, including node-level configuration and Kubernetes resources?",
+      "options": [
+        "A. Low-Level Design (LLD)",
+        "B. High-Level Design (HLD)",
+        "C. CIQ",
+        "D. DNP"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Planning",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "576504b1-5626-4f63-97a0-bc6ce155d0f2",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 19,
+      "question_text": "[Deployment & Troubleshooting] Which command is used to confirm that port 16611 is established for LDAP connectivity?",
+      "options": [
+        "A. telnet 16611 status",
+        "B. curl -v http://16611",
+        "C. ping 16611",
+        "D. netstat -an | grep 16611"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "9a65f165-c948-4d08-928c-d565da284e97",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 20,
+      "question_text": "[Deployment & Troubleshooting] During an EIR upgrade, the 3Glb and 4Glb pods fail to be created even after manual scale down/up and DCO pod restarts. What was found to be the root cause?",
+      "options": [
+        "A. The EIR tenant security rule was missing the seccomp rule",
+        "B. The NRF registration had failed",
+        "C. The namespace quota was exceeded",
+        "D. The Helm chart was corrupted"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "2cfaf277-2a27-4da7-a31a-85c2199746c6",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 21,
+      "question_text": "[Deployment & Troubleshooting] A ZTSL chart upgrade fails, and a rollback job pod named similarly to 'setcli-rollback-job-xchmm' needs investigation. Which command should be used to check its logs?",
+      "options": [
+        "A. kubectl -n <namespace> describe svc",
+        "B. kubectl -n <namespace> logs <failure job>",
+        "C. kubectl -n <namespace> top pod",
+        "D. kubectl -n <namespace> get events"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "e9dd4cb9-a894-42f8-8a6f-40a6ea2a7554",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 22,
+      "question_text": "[Deployment & Troubleshooting] What is the recommended action to resolve the CreateContainerConfigError caused by a missing ztshooklcmpasswdsecret?",
+      "options": [
+        "A. Disable the pre-install hook permanently",
+        "B. Downgrade the Kubernetes version",
+        "C. Create the ztshooklcmpasswdsecret and retrigger the deployment",
+        "D. Delete the entire namespace and start over"
+      ],
+      "correct_option_index": 2,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "b39b4f1b-6265-4711-a97c-f51c0dfad952",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 23,
+      "question_text": "[EIR Basic] A design reviewer looks at the EIR CNF PODs table. Which details are included for each POD according to this table?",
+      "options": [
+        "A. Functional description, POD type (statefulset/deployment), redundancy model, anti-affinity, and containers",
+        "B. Only the POD's IP address",
+        "C. Only CPU usage",
+        "D. Only the deployment date"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "EIR Basic",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "35a7f31a-c97e-44d4-bfca-817298388eb0",
+      "test_id": "db369b95-1c28-4cfb-928c-e73940885d88",
+      "question_index": 24,
+      "question_text": "[Deployment & Troubleshooting] A customer reports that connectivity from the One-EIR Application towards the backend on port 16611 is not established. What is the first troubleshooting step?",
+      "options": [
+        "A. Check the HTTP/2 LB gapping configuration",
+        "B. Restart the entire EIR namespace",
+        "C. Check the SOAP trigger configuration",
+        "D. Ensure routes are configured under ldaplan from the application pods"
+      ],
+      "correct_option_index": 3,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "Deployment & Troubleshooting",
+      "created_at": "2026-07-31T07:33:18.717863+00:00"
     }
   ],
   "test_attempts": []

@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { join } from "path";
+import { readFile } from "fs/promises";
 import { derivePortalTestStatus, type PortalTestStatus } from "@/lib/portal-test-status";
 import { readPersistedJson } from "@/lib/runtime-data";
 
@@ -41,6 +42,13 @@ export interface ResourcePortalEmployee {
 
 const MAPPING_FILE = join(process.cwd(), "Resource_Question_Mapping.xlsx");
 const CREDENTIALS_FILE = join(process.cwd(), "Employee_User_Credentials.xlsx");
+const ACCOUNTS_FILE = join(process.cwd(), "src", "data", "employee-accounts.json");
+
+type PortalProfileRow = Omit<ResourcePortalEmployee, "test_id" | "test_status" | "score" | "tests">;
+
+let mappingCache: { at: number; rows: PortalProfileRow[] } | null = null;
+let credentialsCache: { at: number; rows: PortalProfileRow[] } | null = null;
+const EXCEL_CACHE_MS = 5 * 60 * 1000;
 
 function normalizeEmployeeId(value: string | null | undefined): string {
   return String(value ?? "").trim();
@@ -61,7 +69,46 @@ function clean(value: ExcelJS.CellValue): string {
   return String(value).trim();
 }
 
-export async function loadResourceQuestionMapping(): Promise<Omit<ResourcePortalEmployee, "test_id" | "test_status" | "score" | "tests">[]> {
+/** Fast roster from employee-accounts.json (preferred over Excel for admin load). */
+export async function loadPortalRosterFromAccounts(): Promise<PortalProfileRow[]> {
+  try {
+    const raw = await readFile(ACCOUNTS_FILE, "utf8");
+    const store = JSON.parse(raw) as {
+      employees?: Array<{
+        employee_id?: string;
+        full_name?: string;
+        email?: string;
+        role?: string;
+        department?: string;
+        product?: string;
+        product_qb_eligible?: boolean;
+      }>;
+    };
+    return (store.employees ?? [])
+      .filter((e) => e.product_qb_eligible === true && e.employee_id)
+      .map((e) => ({
+        employee_id: String(e.employee_id),
+        full_name: e.full_name || String(e.employee_id),
+        role: e.role || "employee",
+        domain: e.department || "",
+        product: e.product || "",
+        email: e.email || "",
+        ddh: "",
+        emp_status: "Confirmed",
+        remarks: "",
+        assigned_questions: [],
+        assigned_question_count: 0,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export async function loadResourceQuestionMapping(): Promise<PortalProfileRow[]> {
+  if (mappingCache && Date.now() - mappingCache.at < EXCEL_CACHE_MS) {
+    return mappingCache.rows;
+  }
+
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(MAPPING_FILE);
   const sheet = workbook.worksheets[0];
@@ -78,7 +125,7 @@ export async function loadResourceQuestionMapping(): Promise<Omit<ResourcePortal
     (idx) => idx !== undefined
   );
 
-  const rowMap = new Map<string, Omit<ResourcePortalEmployee, "test_id" | "test_status" | "score" | "tests">>();
+  const rowMap = new Map<string, PortalProfileRow>();
 
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return;
@@ -125,7 +172,6 @@ export async function loadResourceQuestionMapping(): Promise<Omit<ResourcePortal
       return;
     }
 
-    // Duplicate Emp ID in spreadsheet — keep the row with more assigned questions.
     const mergedQuestions = Array.from(
       new Set([...existing.assigned_questions, ...entry.assigned_questions])
     );
@@ -146,12 +192,15 @@ export async function loadResourceQuestionMapping(): Promise<Omit<ResourcePortal
     });
   });
 
-  return Array.from(rowMap.values());
+  const rows = Array.from(rowMap.values());
+  mappingCache = { at: Date.now(), rows };
+  return rows;
 }
 
-type PortalProfileRow = Omit<ResourcePortalEmployee, "test_id" | "test_status" | "score" | "tests">;
-
 export async function loadEmployeeCredentialsRoster(): Promise<PortalProfileRow[]> {
+  if (credentialsCache && Date.now() - credentialsCache.at < EXCEL_CACHE_MS) {
+    return credentialsCache.rows;
+  }
   try {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(CREDENTIALS_FILE);
@@ -194,6 +243,7 @@ export async function loadEmployeeCredentialsRoster(): Promise<PortalProfileRow[
       });
     });
 
+    credentialsCache = { at: Date.now(), rows };
     return rows;
   } catch {
     return [];
@@ -214,7 +264,7 @@ function mergePortalProfileRow(rosterRow: PortalProfileRow, mappingRow?: PortalP
     emp_status: mappingRow.emp_status || rosterRow.emp_status,
     remarks: mappingRow.remarks || rosterRow.remarks,
     assigned_questions: mappingRow.assigned_questions,
-    assigned_question_count: mappingRow.assigned_question_count,
+    assigned_question_count: mappingRow.assigned_question_count || rosterRow.assigned_question_count,
   };
 }
 
@@ -222,10 +272,23 @@ export async function loadEmployeeTestManifest(): Promise<Record<string, string>
   try {
     const raw = await readPersistedJson("employee_test_manifest.json");
     if (!raw) return {};
-    const manifest = JSON.parse(raw) as Array<{ employee_id: string; test_id: string }>;
+    const manifest = JSON.parse(raw) as Array<{ employee_id: string; test_id: string; question_count?: number }>;
     return Object.fromEntries(manifest.map((item) => [String(item.employee_id).trim(), item.test_id]));
   } catch {
     return {};
+  }
+}
+
+async function loadManifestRows(): Promise<
+  Array<{ employee_id: string; test_id: string; question_count?: number; product?: string; full_name?: string }>
+> {
+  try {
+    const raw = await readPersistedJson("employee_test_manifest.json");
+    if (!raw) return [];
+    const manifest = JSON.parse(raw);
+    return Array.isArray(manifest) ? manifest : [];
+  } catch {
+    return [];
   }
 }
 
@@ -234,10 +297,17 @@ export function mergeResourcePortalData(
   allTestResults: any[],
   manifest: Record<string, string>
 ): ResourcePortalEmployee[] {
+  const testsByEmployee = new Map<string, any[]>();
+  for (const test of allTestResults) {
+    const key = normalizeEmployeeId(test.employeeId);
+    if (!key) continue;
+    const list = testsByEmployee.get(key) || [];
+    list.push(test);
+    testsByEmployee.set(key, list);
+  }
+
   return mappingRows.map((row) => {
-    const empTests = allTestResults.filter(
-      (test) => normalizeEmployeeId(test.employeeId) === normalizeEmployeeId(row.employee_id)
-    );
+    const empTests = testsByEmployee.get(normalizeEmployeeId(row.employee_id)) || [];
     const manifestTestId = manifest[row.employee_id] ?? manifest[normalizeEmployeeId(row.employee_id)] ?? null;
     const primaryTest =
       empTests.find((test) => test.id === manifestTestId) ??
@@ -261,7 +331,7 @@ export function mergeResourcePortalData(
       ...row,
       test_id: primaryTest?.id ?? manifestTestId,
       test_status: derivePortalTestStatus({
-        assignedQuestionCount: row.assigned_question_count,
+        assignedQuestionCount: row.assigned_question_count || (manifestTestId ? 25 : 0),
         testId: primaryTest?.id ?? manifestTestId,
         rawStatus: primaryTest?.status ?? null,
         answeredCount,
@@ -288,30 +358,52 @@ export function mergeResourcePortalData(
   });
 }
 
+/**
+ * Build portal employee rows.
+ * Always merges Resource_Question_Mapping.xlsx so assigned question text is visible in admin.
+ * Uses accounts JSON for the roster when present (fast), Excel as fallback.
+ */
 export async function buildResourcePortalEmployees(
   allTestResults: any[],
   manifest: Record<string, string>
 ): Promise<ResourcePortalEmployee[]> {
-  const [rosterRows, mappingRows] = await Promise.all([
+  const [accountRows, rosterRows, mappingRows, manifestRows] = await Promise.all([
+    loadPortalRosterFromAccounts(),
     loadEmployeeCredentialsRoster(),
     loadResourceQuestionMapping(),
+    loadManifestRows(),
   ]);
 
   const mappingById = new Map(
     mappingRows.map((row) => [normalizeEmployeeId(row.employee_id), row])
   );
+  const questionCountById = new Map(
+    manifestRows.map((row) => [normalizeEmployeeId(row.employee_id), row.question_count ?? 25])
+  );
 
-  const profileRows =
-    rosterRows.length > 0
-      ? rosterRows.map((row) => mergePortalProfileRow(row, mappingById.get(normalizeEmployeeId(row.employee_id))))
-      : mappingRows;
+  let profileRows: PortalProfileRow[] = [];
 
-  if (rosterRows.length > 0) {
-    const rosterIds = new Set(rosterRows.map((row) => normalizeEmployeeId(row.employee_id)));
-    for (const row of mappingRows) {
-      if (!rosterIds.has(normalizeEmployeeId(row.employee_id))) {
-        profileRows.push(row);
+  if (accountRows.length > 0) {
+    profileRows = accountRows.map((row) => {
+      const mapped = mappingById.get(normalizeEmployeeId(row.employee_id));
+      const merged = mergePortalProfileRow(row, mapped);
+      if (!merged.assigned_question_count) {
+        merged.assigned_question_count =
+          questionCountById.get(normalizeEmployeeId(row.employee_id)) || merged.assigned_questions.length;
       }
+      return merged;
+    });
+  } else if (rosterRows.length > 0) {
+    profileRows = rosterRows.map((row) => mergePortalProfileRow(row, mappingById.get(normalizeEmployeeId(row.employee_id))));
+  } else {
+    profileRows = mappingRows;
+  }
+
+  // Include any mapping-only employees not already in roster/accounts.
+  const existingIds = new Set(profileRows.map((row) => normalizeEmployeeId(row.employee_id)));
+  for (const row of mappingRows) {
+    if (!existingIds.has(normalizeEmployeeId(row.employee_id))) {
+      profileRows.push(row);
     }
   }
 

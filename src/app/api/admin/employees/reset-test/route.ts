@@ -6,7 +6,7 @@ import { writeLog } from "@/lib/structured-logger";
 import { cacheStore } from "@/lib/cache-store";
 import { deleteEmployeeTestVideo } from "@/lib/employee-test-video";
 import { resetTestInSupabase } from "@/services/employee-test-supabase-sync";
-import { allowLocalTestsFallback, useSupabasePrimary } from "@/lib/db-mode";
+import { allowLocalTestsFallback } from "@/lib/db-mode";
 
 /**
  * POST /api/admin/employees/reset-test
@@ -57,6 +57,9 @@ export async function POST(request: NextRequest) {
 
     const existingQuestions = await localTestsDb.getQuestions(resolvedTestId);
 
+    // Delete recording first so a retake always starts clean.
+    await deleteEmployeeTestVideo(resolvedTestId);
+
     // Postgres is source of truth in production.
     await resetTestInSupabase(resolvedTestId);
 
@@ -81,6 +84,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Best-effort second delete in case upload raced with reset.
     await deleteEmployeeTestVideo(resolvedTestId);
     cacheStore.invalidate("employees");
 

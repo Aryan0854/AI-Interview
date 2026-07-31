@@ -6,7 +6,7 @@ import { refreshEmployees, EmployeeRecord, calculateSkillMatch } from '@/service
 import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
-import { allowLocalTestsFallback, useSupabasePrimary } from '@/lib/db-mode';
+import { allowLocalTestsFallback } from '@/lib/db-mode';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   const activeJdId = searchParams.get('activeJdId') || undefined;
   const isExport = searchParams.get('export') === 'true';
 
-  const cached = cacheStore.get("employees", 5000, activeJdId);
+  const cached = cacheStore.get("employees", 30000, activeJdId);
   if (cached && !isExport) {
     return NextResponse.json(cached);
   }
@@ -85,10 +85,12 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Query MCQ test results from Supabase (production source of truth)
+  // Query MCQ test results from Supabase (production source of truth),
+  // with a hard timeout so a slow DB cannot block the portal indefinitely.
   const testResultsMap = new Map<string, { status: string; score: number; completedAt: string | null }[]>();
   const allTestResults: any[] = [];
 
+  const loadSupabaseResults = async () => {
   try {
     const { data: viewRows, error: viewError } = await supabase
       .from("employee_test_results")
@@ -185,19 +187,37 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error("Failed to fetch test results from Supabase:", err);
   }
+  };
 
-  // Dev-only: overlay local JSON when not running Supabase-primary
-  if (!useSupabasePrimary() && allowLocalTestsFallback()) {
+  await Promise.race([
+    loadSupabaseResults(),
+    new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+  ]);
+
+  // Overlay / fill from local JSON when allowed (also used as prod fallback if Supabase timed out)
+  if (allowLocalTestsFallback() || allTestResults.length === 0) {
   try {
     const localTests = await localTestsDb.loadDB().catch(() => null);
     if (localTests) {
-      const localAttempts = localTests.test_attempts || [];
+      const attemptsByTest = new Map<string, any[]>();
+      for (const attempt of localTests.test_attempts || []) {
+        const list = attemptsByTest.get(attempt.test_id) || [];
+        list.push(attempt);
+        attemptsByTest.set(attempt.test_id, list);
+      }
 
-      localTests.tests.forEach(test => {
-        const empId = test.employee_id;
+      const employeesById = new Map(
+        employees
+          .filter((e) => e.employee_id)
+          .map((e) => [String(e.employee_id).trim().toUpperCase(), e])
+      );
+      const resultIndexById = new Map(allTestResults.map((t, idx) => [t.id, idx]));
+
+      localTests.tests.forEach((test) => {
+        const empId = test.employee_code || test.employee_id;
         if (!empId) return;
 
-        const testAttempts = localAttempts.filter((a) => a.test_id === test.id);
+        const testAttempts = attemptsByTest.get(test.id) || [];
         const answeredCount = testAttempts.length;
         const correctCount = LocalTestsDb.scoreFromAttempts(testAttempts, test);
         const totalQs = test.total_questions ?? 25;
@@ -206,8 +226,8 @@ export async function GET(request: NextRequest) {
           test.score_percent ??
           (totalQs > 0 ? Math.round((correctCount / totalQs) * 100) : 0);
 
-        const existingIdx = allTestResults.findIndex((t) => t.id === test.id);
-        if (existingIdx >= 0) {
+        const existingIdx = resultIndexById.get(test.id);
+        if (existingIdx !== undefined) {
           allTestResults[existingIdx] = {
             ...allTestResults[existingIdx],
             status: test.status,
@@ -215,11 +235,14 @@ export async function GET(request: NextRequest) {
             correctCount,
             score,
             scorePercent,
-            videoUrl: test.session_recording_url || allTestResults[existingIdx].videoUrl || null,
+            // Local row is authoritative — do not keep a stale Supabase video URL.
+            videoUrl: test.session_recording_url || null,
+            proctoring: test.proctoring || null,
+            startedAt: test.started_at,
             completedAt: test.completed_at,
           };
         } else {
-          const matchingEmp = employees.find(e => e.employee_id === empId);
+          const matchingEmp = employeesById.get(String(empId).trim().toUpperCase());
           allTestResults.push({
             id: test.id,
             employeeUuid: empId,
@@ -241,6 +264,7 @@ export async function GET(request: NextRequest) {
             startedAt: test.started_at,
             completedAt: test.completed_at
           });
+          resultIndexById.set(test.id, allTestResults.length - 1);
         }
 
         const list = testResultsMap.get(empId) || [];

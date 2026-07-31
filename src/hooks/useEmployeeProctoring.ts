@@ -54,6 +54,7 @@ export function useEmployeeProctoring(options: {
   const [showProctorWarning, setShowProctorWarning] = useState<string | null>(null);
   const lastTriggerRef = useRef<Record<string, number>>({});
   const autoSubmitTriggeredRef = useRef(false);
+  const everHadFullscreenRef = useRef(false);
   const onAutoSubmitRef = useRef(onAutoSubmit);
   onAutoSubmitRef.current = onAutoSubmit;
 
@@ -88,7 +89,7 @@ export function useEmployeeProctoring(options: {
 
   const violationMessage = useCallback((violationType: string, count: number) => {
     if (count >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS) {
-      return "You have exceeded the maximum of 3 security violations. Your assessment is being automatically submitted.";
+      return `You have exceeded the maximum of ${EMPLOYEE_PROCTOR_MAX_VIOLATIONS} security violations. Your assessment is being automatically submitted.`;
     }
     const messages: Record<string, string> = {
       "Tab Switch Detected": "You switched browser tabs or minimized the window. This is prohibited during the test.",
@@ -241,7 +242,11 @@ export function useEmployeeProctoring(options: {
     };
 
     const handleFullscreenChange = () => {
-      if (!isFullscreenActive()) {
+      if (isFullscreenActive()) {
+        everHadFullscreenRef.current = true;
+        return;
+      }
+      if (everHadFullscreenRef.current) {
         triggerProctorWarning("Fullscreen Mode Exited");
       }
     };
@@ -283,8 +288,16 @@ export function useEmployeeProctoring(options: {
   // ── Fullscreen watchdog ─────────────────────────────────────────
   useEffect(() => {
     if (phase !== "running") return;
+    if (isFullscreenActive()) {
+      everHadFullscreenRef.current = true;
+    }
     const id = setInterval(() => {
-      if (!isFullscreenActive()) {
+      const active = isFullscreenActive();
+      if (active) {
+        everHadFullscreenRef.current = true;
+        return;
+      }
+      if (everHadFullscreenRef.current) {
         triggerProctorWarning("Fullscreen Mode Exited");
         void requestFullscreen();
       }
@@ -349,7 +362,7 @@ export function useEmployeeProctoring(options: {
 
   // ── Face + gaze tracking (clmtrackr) ────────────────────────────
   useEffect(() => {
-    if (phase !== "running" || !clmReady) return;
+    if (phase !== "running" || !clmReady || !camStream) return;
 
     type ClmTracker = {
       init: (m: unknown) => void;
@@ -452,7 +465,7 @@ export function useEmployeeProctoring(options: {
         // ignore
       }
     };
-  }, [phase, clmReady, triggerProctorWarning, videoRef]);
+  }, [phase, clmReady, camStream, triggerProctorWarning, videoRef]);
 
   return {
     warningCount,

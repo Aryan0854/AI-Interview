@@ -70,18 +70,39 @@ function portalVideoTest(account: {
   test_status?: string | null;
   tests?: Array<{ id: string; videoUrl?: string | null; status?: string }>;
 }): { testId: string; hasVideo: boolean } | null {
-  const withVideo = account.tests?.find((t) => t.videoUrl);
-  if (withVideo) return { testId: withVideo.id, hasVideo: true };
+  // Only treat a recording as downloadable after a completed attempt with a real URL.
+  const completedWithVideo = account.tests?.find(
+    (t) => t.status === "completed" && !!t.videoUrl
+  );
+  if (completedWithVideo) {
+    return { testId: completedWithVideo.id, hasVideo: true };
+  }
 
-  const completed =
-    account.tests?.find((t) => t.status === "completed") ??
-    (account.test_status === "completed" && account.test_id
-      ? { id: account.test_id, videoUrl: null, status: "completed" }
-      : null);
-  if (completed) return { testId: completed.id, hasVideo: true };
+  if (account.test_status === "completed" && account.test_id) {
+    const primary = account.tests?.find((t) => t.id === account.test_id);
+    if (primary?.videoUrl) {
+      return { testId: primary.id, hasVideo: true };
+    }
+  }
 
   if (account.test_id) return { testId: account.test_id, hasVideo: false };
   return null;
+}
+
+function sanitizeDownloadPart(value: string): string {
+  return String(value || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
+function portalVideoFileName(employeeId: string, employeeName: string): string {
+  const idPart = sanitizeDownloadPart(employeeId) || "employee";
+  const namePart = sanitizeDownloadPart(employeeName);
+  return namePart ? `${idPart}-${namePart}.webm` : `${idPart}.webm`;
 }
 
 function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
@@ -328,7 +349,7 @@ export default function AdminResumeDashboard() {
   const [showClearLogsModal, setShowClearLogsModal] = useState(false);
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<"employee" | "suitable" | "unsuitable" | "outbox" | "requirements" | "logs" | "employee-portal">("employee");
+  const [activeTab, setActiveTab] = useState<"employee" | "suitable" | "unsuitable" | "outbox" | "requirements" | "logs" | "employee-portal">("requirements");
   const [allTestResults, setAllTestResults] = useState<any[]>([]);
   const [resourcePortalEmployees, setResourcePortalEmployees] = useState<any[]>([]);
   const [resettingTestId, setResettingTestId] = useState<string | null>(null);
@@ -791,9 +812,16 @@ export default function AdminResumeDashboard() {
     }
   };
 
-  const handleDownloadTestVideo = async (testId: string, employeeId: string) => {
+  const handleDownloadTestVideo = async (
+    testId: string,
+    employeeId: string,
+    employeeName?: string
+  ) => {
     try {
-      const res = await adminFetch(`/api/admin/employee-tests/${testId}/video`);
+      const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+      const res = await adminFetch(
+        `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}`
+      );
       if (!res.ok) {
         let message = "Recording not available for this test.";
         try {
@@ -809,7 +837,7 @@ export default function AdminResumeDashboard() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${employeeId.replace(/\s+/g, "_")}.webm`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -921,22 +949,33 @@ export default function AdminResumeDashboard() {
 
       // 2. Fetch all other states in parallel using computed default JD ID
       const sendJdId = (initialJdId && !initialJdId.includes("@")) ? initialJdId : "all";
+      const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T | null> =>
+        Promise.race([
+          promise,
+          new Promise<null>((resolve) =>
+            setTimeout(() => {
+              console.warn(`[admin] ${label} timed out after ${ms}ms`);
+              resolve(null);
+            }, ms)
+          ),
+        ]);
+
       const [resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] = await Promise.all([
-        fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`),
-        fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`),
-        fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`),
-        fetch("/api/admin/reset_logs"),
-        fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`),
-        fetch("/api/portal_settings").catch(() => null)
+        withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 20000, "resumes"),
+        withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
+        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`), 20000, "employees"),
+        withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
+        withTimeout(fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`), 15000, "logs"),
+        withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
       ]);
 
       const [resumesData, emailsData, employeesData, resetLogsData, logsData, settingsData] = await Promise.all([
-        resumesRes.json(),
-        emailsRes.json(),
-        employeesRes.json(),
-        resetLogsRes.json(),
-        logsRes.json(),
-        settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({})
+        resumesRes ? resumesRes.json().catch(() => ({})) : Promise.resolve({}),
+        emailsRes ? emailsRes.json().catch(() => ({})) : Promise.resolve({}),
+        employeesRes ? employeesRes.json().catch(() => ({})) : Promise.resolve({}),
+        resetLogsRes ? resetLogsRes.json().catch(() => ({})) : Promise.resolve({}),
+        logsRes ? logsRes.json().catch(() => ({})) : Promise.resolve({}),
+        settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
       ]);
 
       // 3. Batch state updates together
@@ -3441,16 +3480,15 @@ export default function AdminResumeDashboard() {
                                             disabled={!videoTest?.hasVideo}
                                             title={
                                               videoTest?.hasVideo
-                                                ? account.test_status === "completed"
-                                                  ? "Download test recording"
-                                                  : "Download test recording"
-                                                : "Recording available after test submission"
+                                                ? "Download completed test recording"
+                                                : "Recording available after the test is completed"
                                             }
                                             onClick={() =>
                                               videoTest &&
                                               handleDownloadTestVideo(
                                                 videoTest.testId,
-                                                portalEmployeeId(account)
+                                                portalEmployeeId(account),
+                                                portalEmployeeName(account)
                                               )
                                             }
                                             className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
@@ -3554,12 +3592,16 @@ export default function AdminResumeDashboard() {
                                                     </ol>
                                                   );
                                                 })()
-                                              ) : (
+                                              ) : (account.assigned_questions || []).length > 0 ? (
                                                 <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
                                                   {(account.assigned_questions || []).map((q: string, idx: number) => (
                                                     <li key={idx}>{q}</li>
                                                   ))}
                                                 </ol>
+                                              ) : (
+                                                <p className="text-[11px] text-slate-400 font-medium italic">
+                                                  No assigned question text found in Resource_Question_Mapping.xlsx for this employee.
+                                                </p>
                                               )}
                                             </div>
                                             {account.tests?.length > 0 && (
@@ -3598,7 +3640,7 @@ export default function AdminResumeDashboard() {
                                                           ) : null}
                                                         </td>
                                                         <td className="p-2.5">
-                                                          {test.videoUrl ? (
+                                                          {test.status === "completed" && test.videoUrl ? (
                                                             <Button
                                                               size="sm"
                                                               variant="outline"
@@ -3606,7 +3648,8 @@ export default function AdminResumeDashboard() {
                                                               onClick={() =>
                                                                 handleDownloadTestVideo(
                                                                   test.id,
-                                                                  portalEmployeeId(account)
+                                                                  portalEmployeeId(account),
+                                                                  portalEmployeeName(account)
                                                                 )
                                                               }
                                                             >

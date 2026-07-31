@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequest, isAssessmentOnlyEmployee } from "@/lib/employee-auth";
 import { findTopic } from "@/data/learning-curriculum";
 import { localTestsDb } from "@/services/local-tests-db";
 import { isMissingTestsTableError, getFallbackQuestions, fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
@@ -16,6 +16,12 @@ export async function POST(
     const auth = authenticateRequest(request);
     if (!auth?.employeeId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (isAssessmentOnlyEmployee(auth.employee)) {
+      return NextResponse.json(
+        { error: "Other learning tests are disabled. Please take your assigned product assessment only." },
+        { status: 403 }
+      );
     }
     const employeeId = auth.employeeId;
 

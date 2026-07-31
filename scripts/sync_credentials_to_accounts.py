@@ -56,7 +56,7 @@ def load_credentials():
             "role": str(row[col["Role"]] or "employee").strip() or "employee",
             "department": str(row[col["Domain"]] or row[col["Product"]] or "SDM").strip() or "SDM",
             "product": str(row[col["Product"]] or "").strip(),
-            "assessment_only": False,
+            "assessment_only": True,
             "product_qb_eligible": True,
         }
     return list(users_by_id.values()), set(users_by_id.keys())
@@ -101,7 +101,7 @@ def main():
                 "department": user["department"],
                 "role": user["role"],
                 "product": user.get("product", ""),
-                "assessment_only": False,
+                "assessment_only": True,
                 "product_qb_eligible": True,
                 "is_first_login": True,
                 "password_hash": password_hash,
@@ -134,8 +134,8 @@ def main():
         if existing.get("product_qb_eligible") is not True:
             existing["product_qb_eligible"] = True
             changed = True
-        if existing.get("assessment_only") is not False:
-            existing["assessment_only"] = False
+        if existing.get("assessment_only") is not True:
+            existing["assessment_only"] = True
             changed = True
             full_portal_enabled += 1
 

@@ -107,8 +107,17 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
     pathname === "/employee/learn" || pathname.startsWith("/employee/learn/");
   const isDashboardActive = pathname === "/employee/dashboard" || pathname.startsWith("/employee/tests/");
 
+  const isOnLiveTest = pathname.startsWith("/employee/tests/");
+
   useEffect(() => {
     if (loading) return;
+    // Do not idle-logout during a live assessment — reading questions can look idle
+    // and would kick people out mid-exam (and conflict with proctoring).
+    if (isOnLiveTest) {
+      setIsIdle(false);
+      setCountdown(30);
+      return;
+    }
 
     let idleTimer: any;
 
@@ -119,7 +128,7 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
       setCountdown(30);
       clearTimeout(idleTimer);
       
-      // Start 3 minute idle timeout (180,000 ms)
+      // Start 3 minute idle timeout (180,000 ms) — dashboard / learn only
       idleTimer = setTimeout(() => {
         setIsIdle(true);
       }, 180000);
@@ -140,11 +149,11 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
         window.removeEventListener(event, resetTimer);
       });
     };
-  }, [loading]);
+  }, [loading, isOnLiveTest]);
 
   useEffect(() => {
     let countdownTimer: any;
-    if (isIdle) {
+    if (isIdle && !isOnLiveTest) {
       countdownTimer = setInterval(() => {
         setCountdown(prev => {
           if (prev <= 1) {
@@ -157,7 +166,7 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
       }, 1000);
     }
     return () => clearInterval(countdownTimer);
-  }, [isIdle]);
+  }, [isIdle, isOnLiveTest]);
 
   if (loading) {
     return (
@@ -252,7 +261,7 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
       </header>
       <main>{children}</main>
 
-      {isIdle && (
+      {isIdle && !isOnLiveTest && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/65 backdrop-blur-sm animate-fade-in">
           <Card className="w-full max-w-sm p-6 bg-card border border-amber-250 dark:border-amber-900/50 shadow-2xl rounded-3xl text-center transform scale-100 transition-all duration-300">
             <div className="flex flex-col items-center gap-3">

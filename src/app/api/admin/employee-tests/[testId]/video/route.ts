@@ -14,6 +14,11 @@ export async function GET(
 
   try {
     const { testId } = await params;
+    const requestedName = request.nextUrl.searchParams.get("filename");
+    const safeName =
+      requestedName && /^[\w.\- ()]+$/i.test(requestedName) && requestedName.toLowerCase().endsWith(".webm")
+        ? requestedName
+        : `${testId}.webm`;
     const fileBuffer = await readEmployeeTestVideo(testId);
     if (!fileBuffer) {
       return NextResponse.json(
@@ -40,7 +45,7 @@ export async function GET(
           "Accept-Ranges": "bytes",
           "Content-Length": String(chunk.length),
           "Content-Type": "video/webm",
-          "Content-Disposition": `attachment; filename="${testId}.webm"`,
+          "Content-Disposition": `attachment; filename="${safeName}"`,
         },
       });
     }
@@ -50,7 +55,7 @@ export async function GET(
         "Content-Length": String(fileSize),
         "Content-Type": "video/webm",
         "Accept-Ranges": "bytes",
-        "Content-Disposition": `attachment; filename="${testId}.webm"`,
+        "Content-Disposition": `attachment; filename="${safeName}"`,
       },
     });
   } catch {

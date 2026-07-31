@@ -4897,7 +4897,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -4931,7 +4931,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -4948,7 +4948,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -4982,7 +4982,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5016,7 +5016,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5033,7 +5033,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5050,7 +5050,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5084,7 +5084,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5101,7 +5101,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5118,7 +5118,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5203,7 +5203,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5237,7 +5237,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5254,7 +5254,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5271,7 +5271,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5288,7 +5288,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5322,7 +5322,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5373,7 +5373,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5390,7 +5390,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5424,7 +5424,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5441,7 +5441,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5458,7 +5458,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -5798,7 +5798,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -6155,7 +6155,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -6206,7 +6206,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -6257,7 +6257,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "EIR",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -6291,7 +6291,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -6308,7 +6308,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -6325,7 +6325,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -7498,7 +7498,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8297,7 +8297,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8348,7 +8348,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8365,7 +8365,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8382,7 +8382,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8399,7 +8399,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8484,7 +8484,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NDS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8518,7 +8518,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8535,7 +8535,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8603,7 +8603,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8620,7 +8620,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8637,7 +8637,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8654,7 +8654,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8722,7 +8722,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8790,7 +8790,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8841,7 +8841,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -8926,7 +8926,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9045,7 +9045,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9096,7 +9096,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9113,7 +9113,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9147,7 +9147,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9351,7 +9351,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NDS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9402,7 +9402,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9419,7 +9419,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9436,7 +9436,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9606,7 +9606,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9708,7 +9708,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9725,7 +9725,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9759,7 +9759,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9793,7 +9793,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "SDL",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9878,7 +9878,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9929,7 +9929,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9980,7 +9980,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -9997,7 +9997,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "EIR",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10133,7 +10133,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10167,7 +10167,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10235,7 +10235,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "EIR",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10269,7 +10269,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10354,7 +10354,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10473,7 +10473,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10609,7 +10609,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10660,7 +10660,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10711,7 +10711,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10864,7 +10864,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10898,7 +10898,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10915,7 +10915,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10932,7 +10932,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "UDM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -10983,7 +10983,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11051,7 +11051,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11204,7 +11204,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11340,7 +11340,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11391,7 +11391,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11425,7 +11425,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "HLR-HSS",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11680,7 +11680,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11714,7 +11714,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11748,7 +11748,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11782,7 +11782,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11799,7 +11799,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11816,7 +11816,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11833,7 +11833,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11850,7 +11850,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11867,7 +11867,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11884,7 +11884,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11935,7 +11935,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11952,7 +11952,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -11986,7 +11986,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12003,7 +12003,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12020,7 +12020,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12037,7 +12037,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12071,7 +12071,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12105,7 +12105,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12122,7 +12122,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12173,7 +12173,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12224,7 +12224,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12241,7 +12241,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12258,7 +12258,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12275,7 +12275,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12292,7 +12292,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12309,7 +12309,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12326,7 +12326,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12360,7 +12360,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12377,7 +12377,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12394,7 +12394,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12411,7 +12411,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12428,7 +12428,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12445,7 +12445,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12479,7 +12479,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12496,7 +12496,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12513,7 +12513,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12547,7 +12547,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12581,7 +12581,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12598,7 +12598,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12632,7 +12632,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12666,7 +12666,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12683,7 +12683,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12700,7 +12700,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12717,7 +12717,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12734,7 +12734,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12751,7 +12751,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12768,7 +12768,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12785,7 +12785,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12802,7 +12802,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12819,7 +12819,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12836,7 +12836,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12887,7 +12887,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12904,7 +12904,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12921,7 +12921,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12938,7 +12938,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12972,7 +12972,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -12989,7 +12989,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13006,7 +13006,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13040,7 +13040,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13057,7 +13057,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13074,7 +13074,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13091,7 +13091,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13108,7 +13108,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13142,7 +13142,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13159,7 +13159,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13176,7 +13176,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13193,7 +13193,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13210,7 +13210,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13227,7 +13227,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13278,7 +13278,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13346,7 +13346,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13380,7 +13380,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13414,7 +13414,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13431,7 +13431,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13448,7 +13448,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13482,7 +13482,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13499,7 +13499,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13516,7 +13516,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13533,7 +13533,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13567,7 +13567,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13584,7 +13584,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13601,7 +13601,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13635,7 +13635,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13652,7 +13652,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13669,7 +13669,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13686,7 +13686,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13703,7 +13703,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13754,7 +13754,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13822,7 +13822,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13839,7 +13839,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13856,7 +13856,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13873,7 +13873,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13907,7 +13907,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13924,7 +13924,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13958,7 +13958,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -13975,7 +13975,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14026,7 +14026,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14060,7 +14060,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14111,7 +14111,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14128,7 +14128,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14145,7 +14145,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14179,7 +14179,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14196,7 +14196,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14247,7 +14247,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14281,7 +14281,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14298,7 +14298,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14315,7 +14315,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14332,7 +14332,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14400,7 +14400,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14434,7 +14434,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14451,7 +14451,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14468,7 +14468,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14485,7 +14485,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14519,7 +14519,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14536,7 +14536,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14553,7 +14553,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14570,7 +14570,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14587,7 +14587,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14604,7 +14604,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14621,7 +14621,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14638,7 +14638,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14655,7 +14655,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14672,7 +14672,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14689,7 +14689,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14706,7 +14706,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14723,7 +14723,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14740,7 +14740,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14774,7 +14774,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14791,7 +14791,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14808,7 +14808,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14825,7 +14825,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14859,7 +14859,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14927,7 +14927,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14944,7 +14944,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14961,7 +14961,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14978,7 +14978,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -14995,7 +14995,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15012,7 +15012,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15029,7 +15029,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15046,7 +15046,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15063,7 +15063,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15080,7 +15080,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15097,7 +15097,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15114,7 +15114,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15148,7 +15148,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15165,7 +15165,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15182,7 +15182,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15199,7 +15199,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15216,7 +15216,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15233,7 +15233,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15250,7 +15250,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15284,7 +15284,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15301,7 +15301,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15318,7 +15318,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15335,7 +15335,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15369,7 +15369,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15386,7 +15386,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15403,7 +15403,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15437,7 +15437,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15471,7 +15471,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15505,7 +15505,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15522,7 +15522,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15556,7 +15556,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15573,7 +15573,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15590,7 +15590,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15607,7 +15607,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15624,7 +15624,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15675,7 +15675,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15709,7 +15709,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "NRD",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15743,7 +15743,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15828,7 +15828,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15862,7 +15862,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15896,7 +15896,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15981,7 +15981,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -15998,7 +15998,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16066,7 +16066,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16134,7 +16134,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16355,7 +16355,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16372,7 +16372,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16389,7 +16389,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16555,7 +16555,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16572,7 +16572,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16589,7 +16589,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMM",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     },
     {
@@ -16606,7 +16606,7 @@
       "skill_level": "beginner",
       "ai_readiness_score": 0,
       "product": "CMG",
-      "assessment_only": false,
+      "assessment_only": true,
       "product_qb_eligible": true
     }
   ]

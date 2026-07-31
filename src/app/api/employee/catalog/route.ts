@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest, isProductQbEmployee, PRODUCT_ASSESSMENT_TOPIC_ID } from "@/lib/employee-auth";
+import {
+  authenticateRequest,
+  isAssessmentOnlyEmployee,
+  isProductQbEmployee,
+  PRODUCT_ASSESSMENT_TOPIC_ID,
+} from "@/lib/employee-auth";
 import { buildPortalCatalogFromSubjects, buildLearningTopicsForEmployee } from "@/data/learning-subjects";
 
 /**
@@ -16,10 +21,14 @@ export async function GET(request: NextRequest) {
     }
 
     const productQbEligible = isProductQbEmployee(auth.employee);
-    const topics = buildLearningTopicsForEmployee({
+    const assessmentOnly = isAssessmentOnlyEmployee(auth.employee);
+    let topics = buildLearningTopicsForEmployee({
       productQbEligible,
       product: auth.employee.product,
     });
+    if (assessmentOnly) {
+      topics = topics.filter((topic) => topic.id === PRODUCT_ASSESSMENT_TOPIC_ID);
+    }
 
     const catalog = topics.map((subject) => {
       if (subject.id === PRODUCT_ASSESSMENT_TOPIC_ID) {

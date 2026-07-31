@@ -1,11 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
-import {
-  authenticateRequest,
-  isProductQbEmployee,
-  PRODUCT_ASSESSMENT_TOPIC_ID,
-} from "@/lib/employee-auth";
+import { authenticateRequest, isAssessmentOnlyEmployee, isProductQbEmployee, PRODUCT_ASSESSMENT_TOPIC_ID } from "@/lib/employee-auth";
 import { buildLearningTopicsForEmployee } from "@/data/learning-subjects";
 import { localTestsDb } from "@/services/local-tests-db";
 import { supabase } from "@/lib/db";
@@ -22,12 +18,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const topics = buildLearningTopicsForEmployee({
-      productQbEligible: isProductQbEmployee(auth.employee),
+    const productQbEligible = isProductQbEmployee(auth.employee);
+    const assessmentOnly = isAssessmentOnlyEmployee(auth.employee);
+
+    let topics = buildLearningTopicsForEmployee({
+      productQbEligible,
       product: auth.employee.product,
     });
 
-    if (isProductQbEmployee(auth.employee)) {
+    if (assessmentOnly) {
+      topics = topics.filter((topic) => topic.id === PRODUCT_ASSESSMENT_TOPIC_ID);
+    }
+
+    if (productQbEligible) {
       const localTest = await localTestsDb.getTest(auth.employeeId, PRODUCT_ASSESSMENT_TOPIC_ID);
       const testId = localTest?.id ?? null;
 

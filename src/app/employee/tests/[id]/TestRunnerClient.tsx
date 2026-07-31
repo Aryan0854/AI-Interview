@@ -464,10 +464,13 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   }, [testId, token]);
 
   const handleStartTest = async () => {
-    await requestFullscreen();
+    try {
+      await requestFullscreen();
+    } catch (err) {
+      console.warn("Fullscreen request failed:", err);
+    }
     if (!isFullscreenActive()) {
-      alert("Fullscreen mode is required to start this assessment. Please allow fullscreen and try again.");
-      return;
+      console.warn("Fullscreen not active; continuing without it.");
     }
 
     try {
@@ -480,23 +483,18 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       const recorder = createMediaRecorder(stream);
       if (!recorder) {
         stream.getTracks().forEach((track) => track.stop());
-        alert(
-          "Could not start proctoring video recording. Please use Chrome or Edge, allow camera access, and try again."
-        );
-        return;
+        console.warn("MediaRecorder unavailable; continuing without video recording.");
+      } else {
+        mediaRecorderRef.current = recorder;
+        recordingChunksRef.current = [];
+        recorder.ondataavailable = (event) => {
+          if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
+        };
+        recorder.start(1000);
+        recordingStartRef.current = Date.now();
       }
-
-      mediaRecorderRef.current = recorder;
-      recordingChunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
-      };
-      recorder.start(1000);
-      recordingStartRef.current = Date.now();
     } catch (err) {
-      console.warn("Failed to access webcam:", err);
-      alert("Proctoring camera access is required to take this test. Please enable camera access in your browser settings and click Start again.");
-      return;
+      console.warn("Failed to access webcam; continuing without camera:", err);
     }
 
     // If starting fresh (pending), update status and started_at in backend
@@ -662,19 +660,26 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           </h1>
           <p className="text-sm text-muted-foreground font-semibold max-w-md mx-auto leading-relaxed">
             {test?.status === "in_progress"
-              ? "Re-enter the assessment window. Fullscreen mode and camera access will be reactivated."
-              : "By proceeding, you agree to grant camera access for real-time face tracking. Exiting fullscreen or switching tabs will trigger violation warnings."}
+              ? "Re-enter the assessment window. Allow fullscreen and camera if prompted for stronger proctoring."
+              : "Camera and fullscreen are recommended for proctoring. You can still start if either is unavailable. Tab switching and other integrity checks still apply."}
           </p>
         </div>
 
         <div className="bg-slate-50 dark:bg-slate-950 p-6 rounded-2xl border border-slate-100 dark:border-slate-900/60 max-w-md mx-auto text-left space-y-4">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-850 dark:text-slate-200">Rules &amp; Guidelines:</h3>
           <ul className="text-xs font-semibold text-muted-foreground space-y-2 list-disc list-inside">
-            <li>Camera and fullscreen must stay active for the entire session.</li>
+            <li>
+              Use <span className="text-foreground font-bold">Google Chrome</span> or{" "}
+              <span className="text-foreground font-bold">Microsoft Edge</span> only. Safari/Firefox may fail recording.
+            </li>
+            <li>
+              Allow <span className="text-foreground font-bold">webcam</span> when prompted. Camera and fullscreen are
+              recommended for proctoring; you can still start if either is unavailable.
+            </li>
             <li>Tab switch, minimize, refresh, copy/paste, and DevTools are blocked.</li>
-            <li>Face must remain visible; looking away triggers warnings.</li>
-            <li>Session is video-recorded and violations are logged server-side.</li>
-            <li>3 strikes auto-submits your assessment.</li>
+            <li>If camera is on, keep your face visible; looking away can trigger warnings.</li>
+            <li>Session may be video-recorded when camera access is granted.</li>
+            <li>5 strikes auto-submits your assessment.</li>
           </ul>
         </div>
 
@@ -872,7 +877,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
               Warning Strike: {warningCount} / 3
             </div>
             <p className="text-xs text-slate-400">
-              Note: Reaching 3 strikes will automatically submit your assessment.
+              Note: Reaching 5 strikes will automatically submit your assessment.
             </p>
             {warningCount >= 3 ? (
               <Button
