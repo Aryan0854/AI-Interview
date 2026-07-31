@@ -17,6 +17,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 ROOT = Path(__file__).resolve().parents[1]
 MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
 QUESTION_BANK_FILE = ROOT / "Question Bank-20th July '26.xlsx"
+QB_SOURCE_FILE = ROOT / "QB-new.xlsx"
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 LOCAL_TESTS_FILE = ROOT / "uploads" / "local_tests_db.json"
 MANIFEST_FILE = ROOT / "uploads" / "employee_test_manifest.json"
@@ -54,68 +55,87 @@ def dedupe_questions(questions: list[str]) -> list[str]:
     return unique
 
 
+def strip_category_prefix(text: str) -> str:
+    return re.sub(r"^\[[^\]]+\]\s*", "", clean_str(text))
+
+
 def load_question_bank():
-    wb = openpyxl.load_workbook(QUESTION_BANK_FILE, data_only=True)
+    """Load MCQ bank from generated Question Bank export."""
     bank: dict[str, dict] = {}
 
-    for sheet_name in wb.sheetnames:
-        sheet = wb[sheet_name]
-        rows = list(sheet.iter_rows(values_only=True))
-        if not rows:
-            continue
+    def flush_current(current, current_key):
+        if not current or len(current["options"]) < 2:
+            return
+        key = normalize_text(current["question_text"])
+        if key not in bank:
+            bank[key] = current.copy()
 
-        header = [clean_str(c) for c in rows[0]]
-        col = {h.lower(): i for i, h in enumerate(header)}
-
-        q_col = next((col[k] for k in col if "question" in k), None)
-        opt_col = next((col[k] for k in col if "option" in k), None)
-        correct_col = next((col[k] for k in col if "correct" in k), None)
-        prod_col = next((col[k] for k in col if "product" in k), None)
-
-        if q_col is None or opt_col is None:
-            continue
-
-        current_key = None
-        current = None
-
-        def flush():
-            nonlocal current, current_key
-            if not current or len(current["options"]) < 2:
-                return
-            key = normalize_text(current["question_text"])
-            if key and key not in bank:
-                bank[key] = current.copy()
-
-        for row in rows[1:]:
-            q_text = clean_str(row[q_col]) if q_col < len(row) else ""
-            option = clean_str(row[opt_col]) if opt_col is not None and opt_col < len(row) else ""
-            if not q_text or not option:
+    # Try generated question bank export first
+    if QUESTION_BANK_FILE.exists():
+        wb = openpyxl.load_workbook(QUESTION_BANK_FILE, data_only=True)
+        for sheet_name in wb.sheetnames:
+            sheet = wb[sheet_name]
+            rows = list(sheet.iter_rows(values_only=True))
+            if not rows:
                 continue
 
-            key = normalize_text(q_text)
-            if key != current_key:
-                flush()
-                current_key = key
-                product = clean_str(row[prod_col]) if prod_col is not None and prod_col < len(row) else sheet_name
-                current = {
-                    "question_text": q_text,
-                    "options": [],
-                    "correct_option_index": 0,
-                    "explanation": "Imported from Question Bank.",
-                    "difficulty": "medium",
-                    "product": product or sheet_name,
-                    "topic_title": product or sheet_name,
-                }
+            header = [clean_str(c) for c in rows[0]]
+            col = {h.lower(): i for i, h in enumerate(header)}
 
-            current["options"].append(option)
-            if correct_col is not None and correct_col < len(row):
-                correctness = clean_str(row[correct_col]).lower()
-                if correctness in {"correct", "true", "yes"}:
-                    current["correct_option_index"] = len(current["options"]) - 1
+            q_col = next((col[k] for k in col if k == "question" or k.endswith("question")), None)
+            opt_col = next((col[k] for k in col if "option" in k), None)
+            correct_col = next((col[k] for k in col if "correct" in k), None)
+            prod_col = next((col[k] for k in col if "product" in k), None)
+            cat_col = next((col[k] for k in col if "category" in k), None)
 
-        flush()
+            if q_col is None or opt_col is None:
+                continue
 
-    return bank
+            current_key = None
+            current = None
+
+            for row in rows[1:]:
+                q_text = clean_str(row[q_col]) if q_col < len(row) else ""
+                option = clean_str(row[opt_col]) if opt_col is not None and opt_col < len(row) else ""
+                if not q_text or not option:
+                    continue
+
+                key = normalize_text(q_text)
+                if key != current_key:
+                    flush_current(current, current_key)
+                    current_key = key
+                    product = clean_str(row[prod_col]) if prod_col is not None and prod_col < len(row) else sheet_name
+                    category = clean_str(row[cat_col]) if cat_col is not None and cat_col < len(row) else ""
+                    plain = q_text
+                    display = f"[{category}] {plain}" if category else plain
+                    current = {
+                        "question_text": display,
+                        "plain_text": plain,
+                        "options": [],
+                        "correct_option_index": 0,
+                        "explanation": "Imported from Question Bank.",
+                        "difficulty": "medium",
+                        "product": product or sheet_name,
+                        "category": category,
+                        "topic_title": category or product or sheet_name,
+                    }
+
+                current["options"].append(option)
+                if correct_col is not None and correct_col < len(row):
+                    correctness = clean_str(row[correct_col]).lower()
+                    if correctness in {"correct", "true", "yes"}:
+                        current["correct_option_index"] = len(current["options"]) - 1
+
+            flush_current(current, current_key)
+
+    # Index by display text and plain text for mapping lookup
+    alias_bank: dict[str, dict] = {}
+    for item in bank.values():
+        alias_bank[normalize_text(item["question_text"])] = item
+        plain = item.get("plain_text") or strip_category_prefix(item["question_text"])
+        alias_bank[normalize_text(plain)] = item
+
+    return alias_bank
 
 
 def load_mapping_rows():
@@ -229,9 +249,15 @@ def build_tests(employees, bank):
         matched = []
         missing = []
         for q_text in emp["assigned_questions"]:
-            item = bank.get(normalize_text(q_text))
+            lookup = normalize_text(strip_category_prefix(q_text))
+            item = bank.get(normalize_text(q_text)) or bank.get(lookup)
             if item:
-                matched.append(item)
+                matched.append(
+                    {
+                        **item,
+                        "question_text": q_text,
+                    }
+                )
                 stats["questions_matched"] += 1
             else:
                 missing.append(q_text)
@@ -275,7 +301,7 @@ def build_tests(employees, bank):
                     "explanation": q["explanation"],
                     "difficulty": q["difficulty"],
                     "topic_id": TOPIC_ID,
-                    "topic_title": q["topic_title"],
+                    "topic_title": q.get("category") or q["topic_title"],
                     "created_at": now,
                 }
             )

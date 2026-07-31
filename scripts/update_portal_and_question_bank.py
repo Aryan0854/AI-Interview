@@ -1,8 +1,9 @@
 """
-Update Employee Portal mapping from resources spreadsheet, then assign questions from QB.xlsx.
+Update Employee Portal mapping from resources spreadsheet, then assign questions from QB-new.xlsx.
 
 Step 1: Merge employee records into Resource_Question_Mapping.xlsx
-Step 2: Build Question Bank from QB.xlsx and assign questions per employee product
+Step 2: Build Question Bank from QB-new.xlsx and assign 25 questions per employee product
+        using product-specific random / stratified sampling rules.
 """
 from __future__ import annotations
 
@@ -11,23 +12,29 @@ import json
 import random
 import re
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 import openpyxl
 from openpyxl import Workbook
 
+from qb_new_parser import (
+    QUESTIONS_PER_EMPLOYEE,
+    assign_display_questions,
+    mcq_to_export_rows,
+    parse_qb_new_xlsx,
+    resolve_qb_product_key,
+)
+
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCES_FILE = ROOT / "resources less than 3.5 rating - latest.xlsx"
-QB_FILE = ROOT / "QB.xlsx"
+QB_FILE = ROOT / "QB-new.xlsx"
 MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
 QUESTION_BANK_FILE = ROOT / "Question Bank-20th July '26.xlsx"
 LOG_FILE = ROOT / "uploads" / "portal_qb_update_log.json"
 
-QUESTIONS_PER_EMPLOYEE = 25
 ASSIGNED_COLS = [f"Assigned Question {i}" for i in range(1, QUESTIONS_PER_EMPLOYEE + 1)]
 
 OUTPUT_HEADER = [
@@ -43,35 +50,6 @@ OUTPUT_HEADER = [
     "Remarks",
 ]
 
-PRODUCT_KEY_ALIASES = {
-    "HLR HSS": "HLR/HSS",
-    "HSS HLR": "HLR/HSS",
-    "HLR-HSS": "HLR/HSS",
-    "HLR/HSS": "HLR/HSS",
-    "HSS": "HLR/HSS",
-    "HLR": "HLR/HSS",
-    "UDM": "AUSF/UDM",
-    "AUSF UDM": "AUSF/UDM",
-    "AUSF/UDM": "AUSF/UDM",
-    "SDL DEPLOYMENT AND UPGRADE": "SDL",
-    "SDL": "SDL",
-    "CMG": "CMG",
-    "CMM": "CMM",
-    "NRD": "NRD",
-    "AAA": "AAA",
-    "CSD": "CSD",
-    "NPC": "NPC",
-    "NCC": "NCC",
-    "CFX": "CFX",
-    "MRF": "MRF",
-    "NN": "NN",
-    "CBIS": "CBIS",
-    "NCOM": "NCOM",
-    "NCP": "NCP",
-    "CBAM": "CBAM",
-    "NCD": "NCD",
-}
-
 
 def clean(val) -> str:
     if val is None:
@@ -79,18 +57,13 @@ def clean(val) -> str:
     return str(val).strip()
 
 
-def normalize_token(s: str) -> str:
-    s = clean(s).upper()
-    s = re.sub(r"[^A-Z0-9/]+", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
-
-
 def normalize_question_key(question: str) -> str:
-    return re.sub(r"\s+", " ", clean(question)).lower()
+    text = clean(question)
+    text = re.sub(r"^\[[^\]]+\]\s*", "", text)
+    return re.sub(r"\s+", " ", text).lower()
 
 
 def dedupe_questions(questions: list[str]) -> list[str]:
-    """Return questions in original order, dropping exact/normalized duplicates."""
     seen: set[str] = set()
     unique: list[str] = []
     for question in questions:
@@ -103,21 +76,6 @@ def dedupe_questions(questions: list[str]) -> list[str]:
         seen.add(key)
         unique.append(q)
     return unique
-
-
-def resolve_qb_product_key(raw_product: str) -> str | None:
-    if not raw_product:
-        return None
-    token = normalize_token(raw_product)
-    if token in PRODUCT_KEY_ALIASES:
-        return PRODUCT_KEY_ALIASES[token]
-    compact = token.replace(" ", "")
-    for alias, key in PRODUCT_KEY_ALIASES.items():
-        if compact == alias.replace(" ", "").replace("/", ""):
-            return key
-    if token in {"EIR", "NDS"}:
-        return None
-    return raw_product.strip()
 
 
 def load_existing_mapping() -> dict[str, dict]:
@@ -187,126 +145,36 @@ def load_resources_employees() -> list[dict]:
     return employees
 
 
-def parse_qb_xlsx() -> tuple[dict[str, list[str]], list[dict]]:
-    """Return question pools by product key and full MCQ records for question bank export."""
-    wb = openpyxl.load_workbook(QB_FILE, data_only=True)
-    rows = list(wb.active.iter_rows(values_only=True))
-
-    grouped: dict[tuple[str, str], dict] = {}
-    for row in rows:
-        cells = list(row) + [None] * 5
-        domain, product, question, option_text, correctness = [clean(c) for c in cells[:5]]
-        if product == "Product" or product.lower() == "product name" or not question or not option_text:
-            continue
-        if not product and domain and not question:
-            continue
-        prod_key = resolve_qb_product_key(product) or product
-        q_norm = normalize_question_key(question)
-        key = (prod_key, q_norm)
-        entry = grouped.setdefault(
-            key,
-            {
-                "domain": domain,
-                "product": prod_key,
-                "question_text": question,
-                "options": [],
-                "correct_option_index": 0,
-            },
-        )
-        entry["options"].append(option_text)
-        if correctness.lower() == "correct":
-            entry["correct_option_index"] = len(entry["options"]) - 1
-
-    pools: dict[str, list[str]] = defaultdict(list)
-    mcq_records: list[dict] = []
-    seen_questions: set[tuple[str, str]] = set()
-
-    for (prod_key, _q_norm), item in grouped.items():
-        if len(item["options"]) < 2:
-            continue
-        question = clean(item["question_text"])
-        dedupe_key = (prod_key, normalize_question_key(question))
-        if dedupe_key in seen_questions:
-            continue
-        seen_questions.add(dedupe_key)
-        pools[prod_key].append(question)
-        mcq_records.append(item)
-
-    for prod_key in pools:
-        pools[prod_key] = dedupe_questions(pools[prod_key])
-
-    return dict(pools), mcq_records
-
-
-def get_question_pool(emp_product: str, pools: dict[str, list[str]]) -> tuple[list[str], str | None]:
+def get_question_pool(emp_product: str, pools: dict) -> tuple[list, str | None]:
     qb_key = resolve_qb_product_key(emp_product)
     if not qb_key:
         return [], f"No question bank mapping for product '{emp_product}'."
 
     if qb_key in pools and pools[qb_key]:
-        return dedupe_questions(list(pools[qb_key])), None
+        return pools[qb_key], None
 
     parts = [p.strip() for p in re.split(r"[/]", emp_product) if p.strip()]
-    combined: list[str] = []
+    combined = []
     for part in parts:
         pk = resolve_qb_product_key(part)
         if pk and pk in pools:
             combined.extend(pools[pk])
     if combined:
-        return dedupe_questions(combined), None
+        return combined, None
 
-    return [], f"Product '{emp_product}' not found in QB.xlsx."
-
-
-def assign_questions(
-    pool: list[str],
-    preserve: list[str] | None = None,
-    *,
-    employee_id: str | None = None,
-) -> tuple[list[str], str]:
-    limit = QUESTIONS_PER_EMPLOYEE
-    unique_pool = dedupe_questions(pool)
-
-    if preserve:
-        unique_preserve = dedupe_questions([q for q in preserve if q])
-        if len(unique_preserve) >= limit:
-            return (unique_preserve + [""] * limit)[:limit], ""
-
-    if not unique_pool:
-        return [""] * limit, "No questions available."
-
-    shuffled = list(unique_pool)
-    seed_source = employee_id or "default"
-    random.seed(f"{seed_source}:{limit}")
-    random.shuffle(shuffled)
-
-    available = min(len(shuffled), limit)
-    assigned = shuffled[:available]
-    if available >= limit:
-        return assigned, ""
-
-    return assigned + [""] * (limit - available), f"Only {available} distinct questions available for this product."
+    return [], f"Product '{emp_product}' not found in {QB_FILE.name}."
 
 
-def write_question_bank(mcq_records: list[dict]) -> int:
+def write_question_bank(mcq_records) -> int:
     wb = Workbook()
     ws = wb.active
     ws.title = "Question Bank"
-    ws.append(["Domain", "Product", "Question", "Option", "Correct"])
+    ws.append(["Domain", "Product", "Category", "Question", "Option", "Correct"])
 
     rows_written = 0
-    for item in sorted(mcq_records, key=lambda x: (x["product"], x["question_text"])):
-        for idx, option in enumerate(item["options"]):
-            ws.append(
-                [
-                    item["domain"],
-                    item["product"],
-                    item["question_text"],
-                    option,
-                    "Correct" if idx == item["correct_option_index"] else "Wrong",
-                ]
-            )
-            rows_written += 1
+    for row in mcq_to_export_rows(mcq_records):
+        ws.append(row)
+        rows_written += 1
 
     wb.save(QUESTION_BANK_FILE)
     return rows_written
@@ -390,9 +258,7 @@ def main() -> int:
     for emp in resources_employees:
         emp_id = emp["emp_id"]
         if not emp["emp_name"] or not emp["email"]:
-            skipped_portal.append(
-                {"emp_id": emp_id, "reason": "Missing required name or email"}
-            )
+            skipped_portal.append({"emp_id": emp_id, "reason": "Missing required name or email"})
             continue
 
         prior = existing.get(emp_id, {})
@@ -414,12 +280,12 @@ def main() -> int:
     log["portal_updated"] = portal_updated
     log["skipped"].extend(skipped_portal)
 
-    print("=== Step 2: Question Bank + assignments ===")
-    pools, mcq_records = parse_qb_xlsx()
+    print("=== Step 2: Question Bank + assignments (QB-new.xlsx) ===")
+    pools, mcq_records = parse_qb_new_xlsx(QB_FILE)
     qb_rows = write_question_bank(mcq_records)
     log["qb_records_written"] = qb_rows
     print(f"Wrote {qb_rows} option rows to {QUESTION_BANK_FILE.name}.")
-    print(f"QB products: {', '.join(sorted(pools.keys()))}")
+    print(f"QB products: {', '.join(f'{k}({len(v)})' for k, v in sorted(pools.items()))}")
 
     assignments_updated = 0
     assignment_failures: list[dict] = []
@@ -432,7 +298,12 @@ def main() -> int:
             assignment_failures.append({"emp_id": row["emp_id"], "product": row["product"], "reason": pool_err})
             continue
 
-        assigned, remark = assign_questions(pool, employee_id=row["emp_id"])
+        qb_key = resolve_qb_product_key(row["product"]) or row["product"]
+        assigned, remark = assign_display_questions(
+            qb_key,
+            pool,
+            employee_id=row["emp_id"],
+        )
         row["assigned_questions"] = assigned
         if remark:
             row["remarks"] = remark

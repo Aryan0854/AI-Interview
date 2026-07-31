@@ -7,6 +7,11 @@ import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-
 import { useSupabasePrimary } from "@/lib/db-mode";
 
 import { fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
+import {
+  canPatchTestProgress,
+  markProctorSessionStarted,
+  normalizeProctoring,
+} from "@/lib/employee-proctoring";
 
 async function getEmployeeUuid(employeeId: string): Promise<string> {
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employeeId);
@@ -134,37 +139,39 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     const employeeUuid = await getEmployeeUuid(auth.employeeId);
 
-    const updates: any = {};
+    const localTest = await localTestsDb.getTestById(id);
+    const existingTest =
+      localTest && employeeOwnsTest(localTest, auth.employeeId, employeeUuid)
+        ? localTest
+        : null;
+
+    if (!existingTest) {
+      return NextResponse.json({ error: "Test not found" }, { status: 404 });
+    }
+
+    const patchCheck = canPatchTestProgress(existingTest, { status, started_at });
+    if (!patchCheck.ok) {
+      return NextResponse.json({ error: patchCheck.error }, { status: 409 });
+    }
+
+    const updates: Record<string, unknown> = {};
     if (in_progress !== undefined) updates.in_progress = in_progress;
     if (current_question_index !== undefined) updates.current_question_index = current_question_index;
     if (status !== undefined) updates.status = status;
     if (started_at !== undefined) updates.started_at = started_at;
 
-    const localTest = await localTestsDb.getTestById(id);
-    if (localTest && employeeOwnsTest(localTest, auth.employeeId, employeeUuid)) {
-      const updated = await localTestsDb.updateTest(id, updates);
-      try {
-        await syncLocalTestStateToSupabase(id, auth.employee);
-      } catch (syncErr) {
-        console.warn("Failed to sync test progress to Supabase:", syncErr);
-      }
-      return NextResponse.json({ success: true, data: updated });
+    if (status === "in_progress" && started_at) {
+      const proctoring = markProctorSessionStarted(normalizeProctoring(existingTest.proctoring));
+      updates.proctoring = proctoring;
     }
 
+    const updated = await localTestsDb.updateTest(id, updates);
     try {
-      const { data, error } = await supabase
-        .from("tests")
-        .update(updates)
-        .eq("id", id)
-        .eq("employee_id", employeeUuid)
-        .select()
-        .single();
-      if (error) throw error;
-      return NextResponse.json({ success: true, data });
-    } catch (dbErr) {
-      console.warn("Supabase update progress failed:", dbErr);
-      return NextResponse.json({ error: "Failed to update test" }, { status: 500 });
+      await syncLocalTestStateToSupabase(id, auth.employee);
+    } catch (syncErr) {
+      console.warn("Failed to sync test progress to Supabase:", syncErr);
     }
+    return NextResponse.json({ success: true, data: updated });
   } catch (e: any) {
     console.error("PATCH /employee/tests/[id] error:", e);
     return NextResponse.json({ error: e.message || "Internal error" }, { status: 500 });

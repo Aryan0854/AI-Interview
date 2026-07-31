@@ -3,6 +3,7 @@ import { supabase } from "@/lib/db";
 import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import { syncSubmitToSupabase } from "@/services/employee-test-supabase-sync";
+import { canSubmitTest, normalizeProctoring } from "@/lib/employee-proctoring";
 
 /**
  * POST /api/employee/tests/:id/submit
@@ -27,10 +28,21 @@ export async function POST(
     }
 
     const localTest = await localTestsDb.getTestById(id);
-    const localQuestions = localTest ? await localTestsDb.getQuestions(id) : [];
-    const useLocal =
-      localTest &&
-      (localTest.employee_id === auth.employeeId || localQuestions.length > 0);
+    if (!localTest || localTest.employee_id !== auth.employeeId) {
+      return NextResponse.json({ error: "Test not found" }, { status: 404 });
+    }
+
+    if (localTest.status === "completed") {
+      return NextResponse.json({ error: "Test already submitted." }, { status: 409 });
+    }
+
+    const submitCheck = canSubmitTest(localTest);
+    if (!submitCheck.ok && submitCheck.code === "NOT_STARTED") {
+      return NextResponse.json({ error: submitCheck.error }, { status: 400 });
+    }
+
+    const localQuestions = await localTestsDb.getQuestions(id);
+    const useLocal = true;
 
     let attempts: any[] = [];
     let testRow: any = null;
@@ -189,6 +201,12 @@ export async function POST(
       score_total: totalQuestions,
       score_percent: accuracy,
       ai_analysis: aiAnalysis || null,
+      proctoring: {
+        ...normalizeProctoring(localTest.proctoring),
+        autoSubmitted:
+          normalizeProctoring(localTest.proctoring).autoSubmitted ||
+          body.autoSubmitted === true,
+      },
     };
 
     if (useLocal && localTest) {
