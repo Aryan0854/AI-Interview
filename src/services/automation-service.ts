@@ -1,5 +1,5 @@
 import { join, basename } from 'path';
-import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import ExcelJS from 'exceljs';
 import { supabase } from '@/lib/db';
@@ -7,6 +7,12 @@ import { resumeService } from '@/services/resume-service';
 import { extractJdDetails } from '@/lib/jd-to-br/aiService';
 import { writeLog } from '@/lib/structured-logger';
 import { interviewCSVService } from '@/services/interview-csv-service';
+import {
+  ensureDocsStorage,
+  listDocFiles,
+  readDocFileBuffer,
+  writeDocFile,
+} from '@/lib/docs-storage';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -27,20 +33,10 @@ export interface EmployeeRecord {
 }
 
 /**
- * Ensures the folders /docs/Resumes, /docs/BR-JD, and /docs/Corp Pool exist.
+ * Ensures doc ingestion storage (local folders or Supabase docs-ingest bucket).
  */
 export async function ensureDocsDirectories() {
-  const root = process.cwd();
-  const dirs = [
-    join(root, "docs", "Resumes"),
-    join(root, "docs", "BR"),
-    join(root, "docs", "JD"),
-    join(root, "docs", "Corp Pool"),
-    join(getUploadsRoot())
-  ];
-  for (const dir of dirs) {
-    await mkdir(dir, { recursive: true });
-  }
+  await ensureDocsStorage();
 }
 
 /**
@@ -197,12 +193,10 @@ export function brIdToUuid(brId: string): string {
  * 1. Requirements Refresh: Scans /docs/BR and /docs/JD
  */
 export async function refreshRequirements(): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
-  await ensureDocsDirectories();
-  const brPath = join(process.cwd(), "docs", "BR");
-  const jdPath = join(process.cwd(), "docs", "JD");
+  await ensureDocsStorage();
   
-  const brFiles = await readdir(brPath);
-  const jdFiles = await readdir(jdPath);
+  const brFiles = await listDocFiles("BR");
+  const jdFiles = await listDocFiles("JD");
   
   let processedBRs = 0;
   let convertedJDs = 0;
@@ -220,9 +214,8 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
   // Scenario A & C: Process available BR Excel files directly from docs/BR
   for (const file of xlsxBrFiles) {
     try {
-      const filePath = join(brPath, file);
       const workbook = new ExcelJS.Workbook();
-      const buffer = await readFile(filePath);
+      const buffer = await readDocFileBuffer("BR", file);
       await workbook.xlsx.load(buffer as any);
       
       const sheet = workbook.getWorksheet("BR _Raw Data") || workbook.worksheets[0];
@@ -383,8 +376,7 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
     }
     
     try {
-      const filePath = join(jdPath, file);
-      const buffer = await readFile(filePath);
+      const buffer = await readDocFileBuffer("JD", file);
       const jdText = await resumeService.extractTextFromBuffer(buffer);
       
       if (!jdText.trim()) continue;
@@ -433,7 +425,7 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
       // Save converted BR spreadsheet back to BR folder
       const outputBrName = `${base}_BR.xlsx`;
       const finalBuffer = await workbook.xlsx.writeBuffer();
-      await writeFile(join(brPath, outputBrName), finalBuffer as any);
+      await writeDocFile("BR", outputBrName, Buffer.from(finalBuffer as ArrayBuffer));
       
       const jdUuid = brIdToUuid(newAutoReqId);
       const newLocalJd = {
@@ -482,9 +474,8 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
  * 2. Candidates Refresh: Scans /docs/Resumes
  */
 export async function refreshCandidates(activeJdId?: string): Promise<{ success: boolean; processed: number; duplicates: number }> {
-  await ensureDocsDirectories();
-  const dirPath = join(process.cwd(), "docs", "Resumes");
-  const files = await readdir(dirPath);
+  await ensureDocsStorage();
+  const files = await listDocFiles("Resumes");
   
   let processed = 0;
   let duplicates = 0;
@@ -507,8 +498,7 @@ export async function refreshCandidates(activeJdId?: string): Promise<{ success:
   
   for (const file of resumeFiles) {
     try {
-      const filePath = join(dirPath, file);
-      const buffer = await readFile(filePath);
+      const buffer = await readDocFileBuffer("Resumes", file);
       
       // Compute hash
       const fileHash = createHash("sha256").update(buffer).digest("hex");
@@ -551,9 +541,8 @@ export async function refreshCandidates(activeJdId?: string): Promise<{ success:
  * 3. Employee Pool Refresh: Scans /docs/Corp Pool
  */
 export async function refreshEmployees(activeJdId?: string): Promise<{ success: boolean; loaded: number }> {
-  await ensureDocsDirectories();
-  const dirPath = join(process.cwd(), "docs", "Corp Pool");
-  const files = await readdir(dirPath);
+  await ensureDocsStorage();
+  const files = await listDocFiles("Corp Pool");
   
   let loaded = 0;
   const parsedEmployees: EmployeeRecord[] = [];
@@ -595,8 +584,7 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
   // A. Process Excel files
   for (const file of xlsxFiles) {
     try {
-      const filePath = join(dirPath, file);
-      const buffer = await readFile(filePath);
+      const buffer = await readDocFileBuffer("Corp Pool", file);
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer as any);
       
@@ -719,8 +707,7 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
   // B. Process CSV files
   for (const file of csvFiles) {
     try {
-      const filePath = join(dirPath, file);
-      const csvContent = await readFile(filePath, "utf8");
+      const csvContent = (await readDocFileBuffer("Corp Pool", file)).toString("utf8");
       const lines = csvContent.split("\n").filter(Boolean);
       if (lines.length <= 1) continue;
       

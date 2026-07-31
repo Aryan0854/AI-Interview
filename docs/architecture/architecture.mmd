@@ -1,0 +1,141 @@
+%% AI Interview Platform — Level 0 System Architecture
+%% Source: inferred from codebase (Next.js 16, Supabase, Gemini, OpenAI)
+%% Render: npx @mermaid-js/mermaid-cli -i architecture.mmd -o architecture.png -b white -w 3200
+
+flowchart LR
+  subgraph User["User Layer"]
+    direction TB
+    U1["Candidate Browser"]
+    U2["Employee Browser"]
+    U3["Admin Browser"]
+  end
+
+  subgraph Frontend["Frontend — Next.js 16 App Router"]
+    direction TB
+    F1["React 18 + Tailwind CSS"]
+    F2["Pages: / · /interview/[id] · /employee/* · /admin"]
+    F3["UI: Radix · Framer Motion · Recharts"]
+    F4["Auth Gates: AdminAuthGate · EmployeeAuthGate"]
+  end
+
+  subgraph Backend["Backend — Next.js API Routes"]
+    direction TB
+    B1["69 REST Routes · src/app/api/**"]
+    B2["Services Layer · 13 domain services"]
+    B3["Security: CSRF · Rate Limit · File Magic Bytes"]
+    B4["Custom HMAC JWT · employee-auth.ts"]
+    B5["No middleware.ts · No Server Actions"]
+  end
+
+  subgraph AI["AI Services"]
+    direction TB
+    G1["Google Gemini 2.0 Flash"]
+    G1a["Resume JD match analysis"]
+    G1b["Mock interview Q generation"]
+    G1c["Verbal & coding answer scoring"]
+    G1d["Code sandbox simulation"]
+    G1e["Employee MCQ generation"]
+    G1f["Learning quiz & result analysis"]
+    O1["OpenAI Chat Completions"]
+    O1a["JD → BR structured extraction"]
+    L1["LocalAIEngine · in-process heuristics"]
+    L1a["Resume analysis fallback"]
+    L1b["Enhancement when Gemini unavailable"]
+    G1 --> G1a & G1b & G1c & G1d & G1e & G1f
+    O1 --> O1a
+    L1 --> L1a & L1b
+  end
+
+  subgraph Supabase["Supabase"]
+    direction TB
+    PG["PostgreSQL · 21 tables + 1 view"]
+    ST["Storage Buckets"]
+    ST1["resumes"]
+    ST2["recordings"]
+    ST3["verifications"]
+    ST4["app-data"]
+    ST5["docs-ingest"]
+    RLS["RLS Policies · auth.uid()"]
+    PG --- ST
+    ST --> ST1 & ST2 & ST3 & ST4 & ST5
+    PG --> RLS
+  end
+
+  subgraph External["External & Local Integrations"]
+    direction TB
+    E1["SMTP · Nodemailer"]
+    E1a["Interview invites · Employee mail dispatch"]
+    E2["File Parsing · pdf-parse · mammoth · exceljs"]
+    E3["Biometrics · faceproj/compare_images.py"]
+    E3a["OpenCV Haar cascade · local Python"]
+    E4["Excel Mapping · Resource_Question_Mapping.xlsx"]
+    E1 --> E1a
+    E3 --> E3a
+  end
+
+  subgraph Deploy["Deployment Targets"]
+    direction TB
+    D1["Vercel · VERCEL=1"]
+    D2["Azure Container Apps · Dockerfile"]
+    D3["Local Dev · npm run dev"]
+  end
+
+  %% User → Frontend
+  U1 --> F1
+  U2 --> F1
+  U3 --> F1
+  F1 --> F2 --> F3
+  F2 --> F4
+
+  %% Frontend → Backend
+  F2 --> B1
+  F4 --> B4
+  B1 --> B2 --> B3
+
+  %% Candidate screening flow
+  U1 -->|"1 Email verify"| B1
+  B1 -->|"2 Upload PDF/DOCX"| E2
+  E2 -->|"3 Parse text"| B2
+  B2 -->|"4 Analyze"| G1
+  G1 -->|"fallback"| L1
+  B2 -->|"5 Persist"| PG
+  B2 -->|"5b File binary"| ST1
+  B2 -->|"6 Generate questions"| G1
+  B2 -->|"7 Evaluate answers"| G1
+  B2 -->|"8 Store attempts"| PG
+  B2 -->|"9 Proctor video"| ST2
+  B2 -->|"10 ID verify images"| ST3
+  B3 --> E3
+
+  %% Employee portal flow
+  U2 -->|"Login Employee ID"| B4
+  B4 --> B1
+  B1 -->|"Start test"| G1
+  B1 -->|"Submit MCQ"| PG
+  B1 -->|"Test video"| ST2
+
+  %% Admin flow
+  U3 -->|"Admin login @infinite.com"| B4
+  B1 -->|"Ingest BR/JD/Resumes"| ST5
+  B1 -->|"JD-to-BR pipeline"| O1
+  B1 -->|"Export Excel"| E2
+  B1 -->|"Dispatch email"| E1
+  B2 --> E4
+
+  %% Runtime data
+  B2 --> ST4
+
+  %% Deploy hosts Backend+Frontend monolith
+  Deploy --> Backend
+  Deploy --> Frontend
+  Backend --> Supabase
+  Backend --> AI
+  Backend --> External
+
+  style Frontend fill:#dbeafe,stroke:#2563eb
+  style Backend fill:#dcfce7,stroke:#16a34a
+  style Supabase fill:#fef3c7,stroke:#d97706
+  style AI fill:#fde68a,stroke:#ca8a04
+  style External fill:#fce7f3,stroke:#db2777
+  style User fill:#f3f4f6,stroke:#6b7280
+  style Deploy fill:#e0e7ff,stroke:#4f46e5

@@ -6,6 +6,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Trigger dev server restart to clear global HMR and singleton cache
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_CLOUD_DOCS_INGEST:
+      process.env.VERCEL === "1" ||
+      process.env.CONTAINER === "1" ||
+      process.env.DOCS_USE_CLOUD === "1"
+        ? "1"
+        : "0",
+  },
+  output: "standalone",
   serverExternalPackages: ['sqlite3', 'pdf-parse', 'mammoth', 'pdfjs-dist'],
   outputFileTracingIncludes: {
     '/api/**/*': ['./node_modules/pdf-parse/**/*'],

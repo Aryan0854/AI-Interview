@@ -1,11 +1,17 @@
-import { join } from "path";
-import { mkdir, readFile, writeFile } from "fs/promises";
 import crypto from "crypto";
 import { supabase } from "@/lib/db";
+import { allowLocalTestsFallback, useSupabasePrimary } from "@/lib/db-mode";
+import { readPersistedJson, writePersistedJson } from "@/lib/runtime-data";
+import { buildTestRow, resolveEmployeeUuid } from "@/services/employee-test-supabase-sync";
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
 
 export interface LocalTest {
   id: string;
   employee_id: string;
+  employee_code?: string;
   topic_id: string;
   subject_id: string;
   difficulty: string;
@@ -19,6 +25,16 @@ export interface LocalTest {
   created_at: string;
   topic_title?: string;
   subject_title?: string;
+  session_recording_url?: string;
+  score_correct?: number | null;
+  score_total?: number | null;
+  score_percent?: number | null;
+  ai_analysis?: string | null;
+  proctoring?: {
+    warningCount: number;
+    violations: Array<{ type: string; timestamp: string }>;
+    autoSubmitted: boolean;
+  };
 }
 
 export interface LocalTestQuestion {
@@ -89,7 +105,8 @@ export class LocalTestsDb {
     }
     return {
       id: row.id,
-      employee_id: row.employee_id,
+      employee_id: row.employee_code || row.employee_id,
+      employee_code: row.employee_code,
       topic_id: row.topic_id,
       subject_id: row.subject_id,
       difficulty: row.difficulty,
@@ -100,7 +117,15 @@ export class LocalTestsDb {
       started_at: row.started_at,
       completed_at: row.completed_at,
       in_progress: inProgress,
-      created_at: row.created_at
+      created_at: row.created_at,
+      topic_title: row.topic_title,
+      subject_title: row.subject_title,
+      session_recording_url: row.session_recording_url,
+      proctoring: row.proctoring,
+      score_correct: row.score_correct,
+      score_total: row.score_total,
+      score_percent: row.score_percent,
+      ai_analysis: row.ai_analysis,
     };
   }
 
@@ -134,35 +159,24 @@ export class LocalTestsDb {
     };
   }
 
-  private getStoragePath() {
-    const root = process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-    return join(root, "local_tests_db.json");
-  }
-
-  private async ensureStorageDirectory() {
-    const root = process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-    await mkdir(root, { recursive: true });
-  }
-
   async loadDB(): Promise<LocalDB> {
     if (this.dbCache) {
       return this.dbCache;
     }
-    const path = this.getStoragePath();
     try {
-      const raw = await readFile(path, "utf8");
-      const db = JSON.parse(raw);
-      this.dbCache = {
-        tests: Array.isArray(db.tests) ? db.tests : [],
-        test_questions: Array.isArray(db.test_questions) ? db.test_questions : [],
-        test_attempts: Array.isArray(db.test_attempts) ? db.test_attempts : [],
-      };
-      return this.dbCache;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        this.dbCache = { tests: [], test_questions: [], test_attempts: [] };
+      const raw = await readPersistedJson("local_tests_db.json");
+      if (raw) {
+        const db = JSON.parse(raw);
+        this.dbCache = {
+          tests: Array.isArray(db.tests) ? db.tests : [],
+          test_questions: Array.isArray(db.test_questions) ? db.test_questions : [],
+          test_attempts: Array.isArray(db.test_attempts) ? db.test_attempts : [],
+        };
         return this.dbCache;
       }
+      this.dbCache = { tests: [], test_questions: [], test_attempts: [] };
+      return this.dbCache;
+    } catch (error: any) {
       console.error("Failed to load local tests DB:", error);
       this.dbCache = { tests: [], test_questions: [], test_attempts: [] };
       return this.dbCache;
@@ -171,11 +185,89 @@ export class LocalTestsDb {
 
   private async saveDB(db: LocalDB) {
     this.dbCache = db;
-    await this.ensureStorageDirectory();
-    await writeFile(this.getStoragePath(), JSON.stringify(db, null, 2), "utf8");
+    await writePersistedJson("local_tests_db.json", JSON.stringify(db, null, 2));
+  }
+
+  private invalidateCache() {
+    this.dbCache = null;
+  }
+
+  private async saveLocalTestRow(test: LocalTest) {
+    const db = await this.loadDB();
+    const idx = db.tests.findIndex((t) => t.id === test.id);
+    if (idx === -1) {
+      db.tests.push(test);
+    } else {
+      db.tests[idx] = test;
+    }
+    await this.saveDB(db);
+  }
+
+  private async syncTestToSupabaseRow(test: LocalTest): Promise<void> {
+    const employeeUuid = await resolveEmployeeUuid(test.employee_id);
+    const row = buildTestRow(test, employeeUuid);
+    const { error } = await supabase.from("tests").upsert(row, { onConflict: "id" });
+    if (error) throw error;
+  }
+  static scoreFromAttempts(
+    attempts: LocalTestAttempt[],
+    test?: Pick<LocalTest, "score_correct" | "total_questions">
+  ): number {
+    if (test?.score_correct != null) return test.score_correct;
+    const latestByQuestion = new Map<string, LocalTestAttempt>();
+    for (const attempt of attempts) {
+      latestByQuestion.set(attempt.question_id, attempt);
+    }
+    return [...latestByQuestion.values()].filter((a) => a.is_correct).length;
   }
 
   async getTest(employeeId: string, topicId: string): Promise<LocalTest | null> {
+    const db = await this.loadDB();
+    const findLocal = () => {
+      const active = db.tests.find(
+        (t) =>
+          t.employee_id === employeeId &&
+          t.topic_id === topicId &&
+          (t.status === "in_progress" || t.status === "pending")
+      );
+      if (active) return active;
+
+      const sorted = db.tests
+        .filter((t) => t.employee_id === employeeId && t.topic_id === topicId)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return sorted[0] ?? null;
+    };
+
+    if (useSupabasePrimary()) {
+      try {
+        const empUuid = await this.resolveEmployeeUuid(employeeId);
+        const { data, error } = await supabase
+          .from("tests")
+          .select("*")
+          .eq("employee_id", empUuid)
+          .eq("topic_id", topicId);
+
+        if (error) throw error;
+        if (data && data.length > 0) {
+          const active = data.find((t) => t.status === "in_progress" || t.status === "pending");
+          const row = active ?? [...data].sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )[0];
+          return this.mapRowToTest(row);
+        }
+      } catch (dbErr) {
+        if (!allowLocalTestsFallback()) throw dbErr;
+        console.warn("LocalTestsDb.getTest Supabase failed, using local fallback:", dbErr);
+      }
+      return findLocal();
+    }
+
+    // Dev: imported product QB tests may live only in local JSON until synced.
+    if (topicId === "resource-product-assessment") {
+      const localTest = findLocal();
+      if (localTest) return localTest;
+    }
+
     try {
       const empUuid = await this.resolveEmployeeUuid(employeeId);
       const { data, error } = await supabase
@@ -185,7 +277,7 @@ export class LocalTestsDb {
         .eq("topic_id", topicId);
 
       if (error) throw error;
-      if (!data || data.length === 0) return null;
+      if (!data || data.length === 0) return findLocal();
 
       const active = data.find(t => t.status === "in_progress" || t.status === "pending");
       if (active) return this.mapRowToTest(active);
@@ -196,34 +288,48 @@ export class LocalTestsDb {
       return this.mapRowToTest(sorted[0]);
     } catch (dbErr) {
       console.warn("LocalTestsDb.getTest failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      const active = db.tests.find(
-        (t) => t.employee_id === employeeId && t.topic_id === topicId && (t.status === "in_progress" || t.status === "pending")
-      );
-      if (active) return active;
-
-      const completed = db.tests
-        .filter((t) => t.employee_id === employeeId && t.topic_id === topicId && t.status === "completed")
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return completed[0] ?? null;
+      return findLocal();
     }
   }
 
   async getTestById(testId: string): Promise<LocalTest | null> {
-    try {
-      const { data, error } = await supabase
-        .from("tests")
-        .select("*")
-        .eq("id", testId)
-        .maybeSingle();
+    if (useSupabasePrimary()) {
+      try {
+        const { data, error } = await supabase
+          .from("tests")
+          .select("*")
+          .eq("id", testId)
+          .maybeSingle();
 
-      if (error) throw error;
-      return data ? this.mapRowToTest(data) : null;
-    } catch (dbErr) {
-      console.warn("LocalTestsDb.getTestById failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      return db.tests.find((t) => t.id === testId) ?? null;
+        if (error) throw error;
+        if (data) return this.mapRowToTest(data);
+      } catch (dbErr) {
+        if (!allowLocalTestsFallback()) throw dbErr;
+        console.warn("LocalTestsDb.getTestById Supabase failed, using local fallback:", dbErr);
+      }
     }
+
+    const db = await this.loadDB();
+    const localTest = db.tests.find((t) => t.id === testId) ?? null;
+    if (localTest) return localTest;
+
+    if (!useSupabasePrimary()) {
+      try {
+        const { data, error } = await supabase
+          .from("tests")
+          .select("*")
+          .eq("id", testId)
+          .maybeSingle();
+
+        if (error) throw error;
+        return data ? this.mapRowToTest(data) : null;
+      } catch (dbErr) {
+        console.warn("LocalTestsDb.getTestById failed, falling back to local file:", dbErr);
+        return db.tests.find((t) => t.id === testId) ?? null;
+      }
+    }
+
+    return null;
   }
 
   async createTest(test: Omit<LocalTest, "id" | "created_at">): Promise<LocalTest> {
@@ -264,36 +370,59 @@ export class LocalTestsDb {
   }
 
   async updateTest(testId: string, updates: Partial<LocalTest>): Promise<LocalTest> {
-    try {
-      const payload: any = {};
-      if (updates.status !== undefined) payload.status = updates.status;
-      if (updates.difficulty !== undefined) payload.difficulty = updates.difficulty;
-      if (updates.current_question_index !== undefined) payload.current_question_index = updates.current_question_index;
-      if (updates.started_at !== undefined) payload.started_at = updates.started_at;
-      if (updates.completed_at !== undefined) payload.completed_at = updates.completed_at;
-      if (updates.in_progress !== undefined) payload.in_progress = updates.in_progress ? JSON.stringify(updates.in_progress) : null;
+    this.invalidateCache();
+    const current = await this.getTestById(testId);
+    if (!current) throw new Error("Test not found");
+    const updated: LocalTest = { ...current, ...updates };
 
-      const { data, error } = await supabase
-        .from("tests")
-        .update(payload)
-        .eq("id", testId)
-        .select()
-        .single();
-
-      if (error || !data) throw error || new Error("Update returned no data");
-      return this.mapRowToTest(data);
-    } catch (dbErr) {
-      console.warn("LocalTestsDb.updateTest failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      const idx = db.tests.findIndex((t) => t.id === testId);
-      if (idx === -1) throw new Error("Test not found");
-      db.tests[idx] = { ...db.tests[idx], ...updates };
-      await this.saveDB(db);
-      return db.tests[idx];
+    if (useSupabasePrimary()) {
+      await this.syncTestToSupabaseRow(updated);
+      if (allowLocalTestsFallback()) {
+        await this.saveLocalTestRow(updated);
+      }
+      return updated;
     }
+
+    const db = await this.loadDB();
+    const idx = db.tests.findIndex((t) => t.id === testId);
+    if (idx === -1) throw new Error("Test not found");
+    db.tests[idx] = updated;
+    await this.saveDB(db);
+
+    try {
+      await this.syncTestToSupabaseRow(updated);
+    } catch (dbErr) {
+      console.warn("LocalTestsDb.updateTest Supabase sync failed (local saved):", dbErr);
+    }
+
+    return updated;
   }
 
   async getQuestions(testId: string): Promise<LocalTestQuestion[]> {
+    if (useSupabasePrimary()) {
+      try {
+        const { data, error } = await supabase
+          .from("test_questions")
+          .select("*")
+          .eq("test_id", testId)
+          .order("question_index", { ascending: true });
+
+        if (error) throw error;
+        if (data && data.length > 0) {
+          return data.map((q) => this.mapRowToQuestion(q));
+        }
+      } catch (dbErr) {
+        if (!allowLocalTestsFallback()) throw dbErr;
+        console.warn("LocalTestsDb.getQuestions Supabase failed, using local fallback:", dbErr);
+      }
+    }
+
+    const db = await this.loadDB();
+    const localQuestions = db.test_questions
+      .filter((q) => q.test_id === testId)
+      .sort((a, b) => a.question_index - b.question_index);
+    if (localQuestions.length > 0) return localQuestions;
+
     try {
       const { data, error } = await supabase
         .from("test_questions")
@@ -305,10 +434,7 @@ export class LocalTestsDb {
       return (data || []).map(q => this.mapRowToQuestion(q));
     } catch (dbErr) {
       console.warn("LocalTestsDb.getQuestions failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      return db.test_questions
-        .filter((q) => q.test_id === testId)
-        .sort((a, b) => a.question_index - b.question_index);
+      return localQuestions;
     }
   }
 
@@ -364,53 +490,90 @@ export class LocalTestsDb {
   }
 
   async insertAttempts(attempts: Omit<LocalTestAttempt, "id" | "created_at">[]): Promise<LocalTestAttempt[]> {
-    try {
-      const payload = await Promise.all(attempts.map(async a => {
-        const empUuid = await this.resolveEmployeeUuid(a.employee_id);
-        return {
-          test_id: a.test_id,
-          employee_id: empUuid,
-          question_id: a.question_id,
-          selected_option_index: a.selected_option_index,
-          is_correct: a.is_correct,
-          time_taken_seconds: a.time_taken_seconds,
-          session_key: a.session_key
-        };
-      }));
+    if (attempts.length === 0) return [];
 
-      const { data, error } = await supabase
-        .from("test_attempts")
-        .insert(payload)
-        .select();
+    const testId = attempts[0].test_id;
+    const rows = attempts.map((a) => ({
+      ...a,
+      id: crypto.randomUUID(),
+      created_at: new Date().toISOString(),
+    }));
 
-      if (error || !data) throw error || new Error("Insert returned no data");
-      return data.map(a => this.mapRowToAttempt(a));
-    } catch (dbErr) {
-      console.warn("LocalTestsDb.insertAttempts failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      const rows = attempts.map((a) => ({
-        ...a,
-        id: crypto.randomUUID(),
-        created_at: new Date().toISOString(),
+    if (useSupabasePrimary()) {
+      const employeeUuid = await this.resolveEmployeeUuid(attempts[0].employee_id);
+      await supabase.from("test_attempts").delete().eq("test_id", testId);
+      const payload = attempts.map((a) => ({
+        test_id: a.test_id,
+        employee_id: employeeUuid,
+        question_id: a.question_id,
+        selected_option_index: a.selected_option_index,
+        is_correct: a.is_correct,
+        time_taken_seconds: a.time_taken_seconds,
+        session_key: a.session_key,
       }));
-      db.test_attempts.push(...rows);
-      await this.saveDB(db);
+      const { error } = await supabase.from("test_attempts").insert(payload);
+      if (error) throw error;
+
+      if (allowLocalTestsFallback()) {
+        this.invalidateCache();
+        const db = await this.loadDB();
+        db.test_attempts = db.test_attempts.filter((a) => a.test_id !== testId);
+        db.test_attempts.push(...rows);
+        await this.saveDB(db);
+      }
       return rows;
     }
+
+    this.invalidateCache();
+    const db = await this.loadDB();
+    db.test_attempts = db.test_attempts.filter((a) => a.test_id !== testId);
+    db.test_attempts.push(...rows);
+    await this.saveDB(db);
+
+    try {
+      const employeeUuid = await this.resolveEmployeeUuid(attempts[0].employee_id);
+      await supabase.from("test_attempts").delete().eq("test_id", testId);
+      const payload = attempts.map((a) => ({
+        test_id: a.test_id,
+        employee_id: employeeUuid,
+        question_id: a.question_id,
+        selected_option_index: a.selected_option_index,
+        is_correct: a.is_correct,
+        time_taken_seconds: a.time_taken_seconds,
+        session_key: a.session_key,
+      }));
+      const { error } = await supabase.from("test_attempts").insert(payload);
+      if (error) throw error;
+    } catch (dbErr) {
+      console.warn("LocalTestsDb.insertAttempts Supabase sync failed (local saved):", dbErr);
+    }
+
+    return rows;
   }
 
   async deleteAttempts(testId: string): Promise<void> {
+    if (useSupabasePrimary()) {
+      const { error } = await supabase.from("test_attempts").delete().eq("test_id", testId);
+      if (error) throw error;
+      if (allowLocalTestsFallback()) {
+        this.invalidateCache();
+        const db = await this.loadDB();
+        db.test_attempts = db.test_attempts.filter((a) => a.test_id !== testId);
+        await this.saveDB(db);
+      }
+      return;
+    }
+
+    this.invalidateCache();
+    const db = await this.loadDB();
+    db.test_attempts = db.test_attempts.filter((a) => a.test_id !== testId);
+    await this.saveDB(db);
+
     try {
-      const { error } = await supabase
-        .from("test_attempts")
-        .delete()
-        .eq("test_id", testId);
+      const { error } = await supabase.from("test_attempts").delete().eq("test_id", testId);
       if (error) throw error;
     } catch (dbErr) {
-      console.warn("LocalTestsDb.deleteAttempts failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      db.test_attempts = db.test_attempts.filter((a) => a.test_id !== testId);
-      await this.saveDB(db);
+      console.warn("LocalTestsDb.deleteAttempts Supabase sync failed (local cleared):", dbErr);
     }
   }
 
@@ -430,6 +593,22 @@ export class LocalTestsDb {
   }
 
   async getAllTestsForEmployee(employeeId: string): Promise<LocalTest[]> {
+    if (useSupabasePrimary()) {
+      try {
+        const empUuid = await this.resolveEmployeeUuid(employeeId);
+        const { data, error } = await supabase
+          .from("tests")
+          .select("*")
+          .eq("employee_id", empUuid);
+
+        if (error) throw error;
+        return (data || []).map((t) => this.mapRowToTest(t));
+      } catch (dbErr) {
+        if (!allowLocalTestsFallback()) throw dbErr;
+        console.warn("LocalTestsDb.getAllTestsForEmployee Supabase failed, using local fallback:", dbErr);
+      }
+    }
+
     try {
       const empUuid = await this.resolveEmployeeUuid(employeeId);
       const { data, error } = await supabase
@@ -438,15 +617,34 @@ export class LocalTestsDb {
         .eq("employee_id", empUuid);
 
       if (error) throw error;
-      return (data || []).map(t => this.mapRowToTest(t));
+      if (data && data.length > 0) {
+        return data.map((t) => this.mapRowToTest(t));
+      }
     } catch (dbErr) {
       console.warn("LocalTestsDb.getAllTestsForEmployee failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      return db.tests.filter((t) => t.employee_id === employeeId);
     }
+
+    const db = await this.loadDB();
+    return db.tests.filter((t) => t.employee_id === employeeId);
   }
 
   async getAllAttemptsForEmployee(employeeId: string): Promise<LocalTestAttempt[]> {
+    if (useSupabasePrimary()) {
+      try {
+        const empUuid = await this.resolveEmployeeUuid(employeeId);
+        const { data, error } = await supabase
+          .from("test_attempts")
+          .select("*")
+          .eq("employee_id", empUuid);
+
+        if (error) throw error;
+        return (data || []).map((a) => this.mapRowToAttempt(a));
+      } catch (dbErr) {
+        if (!allowLocalTestsFallback()) throw dbErr;
+        console.warn("LocalTestsDb.getAllAttemptsForEmployee Supabase failed, using local fallback:", dbErr);
+      }
+    }
+
     try {
       const empUuid = await this.resolveEmployeeUuid(employeeId);
       const { data, error } = await supabase
@@ -455,12 +653,15 @@ export class LocalTestsDb {
         .eq("employee_id", empUuid);
 
       if (error) throw error;
-      return (data || []).map(a => this.mapRowToAttempt(a));
+      if (data && data.length > 0) {
+        return data.map((a) => this.mapRowToAttempt(a));
+      }
     } catch (dbErr) {
       console.warn("LocalTestsDb.getAllAttemptsForEmployee failed, falling back to local file:", dbErr);
-      const db = await this.loadDB();
-      return db.test_attempts.filter((a) => a.employee_id === employeeId);
     }
+
+    const db = await this.loadDB();
+    return db.test_attempts.filter((a) => a.employee_id === employeeId);
   }
 }
 

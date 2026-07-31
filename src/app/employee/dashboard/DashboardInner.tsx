@@ -7,13 +7,14 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 
-const DashboardRadarChart = dynamic(() => import("./DashboardCharts").then(m => m.DashboardRadarChart), { ssr: false, loading: () => <div className="animate-pulse bg-secondary rounded-full w-full h-full" /> });
-const DashboardTrendChart = dynamic(() => import("./DashboardCharts").then(m => m.DashboardTrendChart), { ssr: false, loading: () => <div className="animate-pulse bg-secondary rounded-lg w-full h-full" /> });
-const DashboardWeeklyChart = dynamic(() => import("./DashboardCharts").then(m => m.DashboardWeeklyChart), { ssr: false, loading: () => <div className="animate-pulse bg-secondary rounded-lg w-full h-full" /> });
+const DashboardRadarChart = dynamic(() => import("./DashboardCharts").then(m => m.DashboardRadarChartFrame), { ssr: false, loading: () => <div className="animate-pulse bg-secondary rounded-lg h-72 w-full min-h-[288px]" /> });
+const DashboardTrendChart = dynamic(() => import("./DashboardCharts").then(m => m.DashboardTrendChartFrame), { ssr: false, loading: () => <div className="animate-pulse bg-secondary rounded-lg h-72 w-full min-h-[288px]" /> });
+const DashboardWeeklyChart = dynamic(() => import("./DashboardCharts").then(m => m.DashboardWeeklyChartFrame), { ssr: false, loading: () => <div className="animate-pulse bg-secondary rounded-lg h-72 w-full min-h-[288px]" /> });
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import ThemeToggle from "@/components/ThemeToggle";
+import { buildRadarDataFromBreakdown, buildRadarDataFromResults, computeReadinessScore, computeSkillLevel } from "@/lib/dashboard-analytics";
 
 import {
   Loader2,
@@ -32,10 +33,30 @@ const EMPTY_RADAR = [
   { subject: "Cloud", value: 0 },  { subject: "MLOps", value: 0 },
 ];
 
+function computeWeeklyAverage(weekStart: string, results: any[]): number {
+  const start = new Date(weekStart);
+  if (Number.isNaN(start.getTime())) return 0;
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+
+  const inWeek = results.filter((result) => {
+    const completed = result?.completed_at ? new Date(result.completed_at) : null;
+    return completed && !Number.isNaN(completed.getTime()) && completed >= start && completed < end;
+  });
+
+  if (!inWeek.length) return 0;
+  const total = inWeek.reduce((sum, result) => sum + (result.accuracy_pct ?? 0), 0);
+  return Math.round(total / inWeek.length);
+}
+
 export function DashboardInner() {
   const router = useRouter();
   const [analytics, setAnalytics] = useState<any>(null);
   const [results, setResults]     = useState<any[]>([]);
+  const [assignedTest, setAssignedTest] = useState<any>(null);
+  const [productQbEligible, setProductQbEligible] = useState(false);
+  const [employeeProfile, setEmployeeProfile] = useState<{ employee_id: string; full_name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr]       = useState<string | null>(null);
   const [tab, setTab]       = useState<"analytics" | "tests">("analytics");
@@ -46,12 +67,21 @@ export function DashboardInner() {
     if (!token) { setErr("Please sign in to access the dashboard."); setLoading(false); return; }
     (async () => {
       try {
-        const [a, r] = await Promise.all([
+        const [a, r, assigned, profile] = await Promise.all([
           fetchAnalytics(token),
           fetchResults(token),
+          fetchAssignedTest(token),
+          fetchEmployeeProfile(token),
         ]);
         if (cancelled) return;
         setAnalytics(a); setResults(r);
+        setProductQbEligible(profile?.product_qb_eligible === true);
+        setEmployeeProfile(
+          profile?.employee_id
+            ? { employee_id: profile.employee_id, full_name: profile.full_name ?? profile.employee_id }
+            : null
+        );
+        if (assigned?.test_id) setAssignedTest(assigned);
       } catch (e: any) { if (!cancelled) setErr(e.message); }
       finally { if (!cancelled) setLoading(false); }
     })();
@@ -67,13 +97,27 @@ export function DashboardInner() {
     if (!analytics) return null;
     
     // Provide safe fallbacks for empty analytics
+    const totalTestsTaken = Math.max(displayResults.length, analytics.total_tests_taken || 0);
+    const averageScore = analytics.average_score || 0;
+    const activeBreakdown = (analytics.subject_breakdown ?? []).filter(
+      (s: any) => (s?.topic_count ?? 0) > 0
+    );
+    const readinessScore =
+      analytics.ai_readiness_score ||
+      computeReadinessScore({
+        averageScore,
+        totalTestsTaken,
+        subjectBreakdown: activeBreakdown,
+        testScores: displayResults.map((result: any) => result.accuracy_pct ?? 0),
+      });
+
     const merged = {
       ...analytics,
-      total_tests_taken: Math.max(displayResults.length, analytics.total_tests_taken || 0),
-      average_score: analytics.average_score || 0,
-      ai_readiness_score: analytics.ai_readiness_score || 0,
+      total_tests_taken: totalTestsTaken,
+      average_score: averageScore,
+      ai_readiness_score: readinessScore,
+      skill_level: analytics.skill_level || computeSkillLevel(readinessScore),
       xp_points: analytics.xp_points || 0,
-      skill_level: analytics.skill_level || "Beginner"
     };
 
     if (!merged.strongest_subject || !merged.strongest_subject.subject_title || merged.strongest_subject.subject_title === "—") {
@@ -89,77 +133,87 @@ export function DashboardInner() {
     return merged;
   }, [analytics, displayResults]);
 
+  const activeSubjectBreakdown = useMemo(() => {
+    return (displayAnalytics?.subject_breakdown ?? []).filter(
+      (s: any) => (s?.topic_count ?? 0) > 0
+    );
+  }, [displayAnalytics]);
+
   const radarData = useMemo(() => {
     if (!displayAnalytics) return EMPTY_RADAR;
-    const subs = displayAnalytics.subject_breakdown || [];
-    const labels: Record<string, string> = { "2":"ML","3":"Data","8":"Python","9":"SQL","10":"Cloud","11":"MLOps" };
-    return EMPTY_RADAR.map(d => {
-      // Find matching subject from the breakdown
-      const s = subs.find((x:any) => 
-        x && (
-          labels[x.subject_id] === d.subject || 
-          (x.subject_title && x.subject_title.toLowerCase().includes(d.subject.toLowerCase())) ||
-          (x.subject_title && d.subject.toLowerCase().includes(x.subject_title.toLowerCase()))
-        )
-      );
-      
-      // Beautiful fallbacks for visual mastery representation
-      const fallbackVal = {
-        "ML": 82,
-        "Data": 75,
-        "Python": 90,
-        "SQL": 85,
-        "Cloud": 65,
-        "MLOps": 70
-      }[d.subject] || 75;
 
-      const scoreVal = s && typeof s.average_pct === 'number' && s.average_pct > 0 ? Math.round(s.average_pct) : fallbackVal;
-      return { ...d, value: scoreVal };
-    });
-  }, [displayAnalytics]);
+    const fromBreakdown = buildRadarDataFromBreakdown(activeSubjectBreakdown);
+    if (fromBreakdown.some((d) => d.value > 0)) return fromBreakdown;
+
+    return buildRadarDataFromResults(displayResults);
+  }, [displayAnalytics, activeSubjectBreakdown, displayResults]);
+
+  const hasSubjectMasteryData = useMemo(() => {
+    return radarData.some((d) => d.value > 0);
+  }, [radarData]);
 
   const trendData = useMemo(() => {
-    if (!displayAnalytics || !displayAnalytics.score_history) return [];
-    return displayAnalytics.score_history.map((h:any) => {
-      let dateLabel = "—";
-      if (h.date) {
+    const source = displayResults.length
+      ? displayResults.map((result: any) => ({
+          date: result.completed_at,
+          score: result.accuracy_pct ?? 0,
+        }))
+      : (displayAnalytics?.score_history ?? []);
+
+    return source
+      .filter((h: any) => h?.date)
+      .map((h: any) => {
+        let dateLabel = "—";
         try {
           const d = new Date(h.date);
-          if (!isNaN(d.getTime())) {
-            dateLabel = d.toLocaleDateString("en", { day:"numeric", month:"short" });
+          if (!Number.isNaN(d.getTime())) {
+            dateLabel = d.toLocaleDateString("en", { day: "numeric", month: "short" });
           }
         } catch (e) {}
-      }
-      return {
-        date: dateLabel,
-        score: typeof h.score === 'number' ? h.score : 0,
-      };
-    });
-  }, [displayAnalytics]);
+        return {
+          date: dateLabel,
+          score: typeof h.score === "number" ? h.score : 0,
+        };
+      });
+  }, [displayAnalytics, displayResults]);
 
   const weekData = useMemo(() => {
-    if (!displayAnalytics || !displayAnalytics.weekly_activity) return [];
-    return displayAnalytics.weekly_activity.map((w:any) => {
-      let label = "—";
-      if (w.week_start) {
-        try {
-          const d = new Date(w.week_start);
-          if (!isNaN(d.getTime())) {
-            label = d.toLocaleDateString("en", { day:"numeric", month:"short" });
-          }
-        } catch (e) {}
-      }
-      return {
-        label,
-        tests: typeof w.tests_taken === 'number' ? w.tests_taken : 0,
-        avg: typeof w.avg_score === 'number' ? Math.round(w.avg_score) : 0,
-      };
-    });
-  }, [displayAnalytics]);
+    if (!displayAnalytics?.weekly_activity) return [];
+    return displayAnalytics.weekly_activity
+      .filter((w: any) => (w?.tests_taken ?? 0) > 0)
+      .map((w: any) => {
+        let label = "—";
+        if (w.week_start) {
+          try {
+            const d = new Date(w.week_start);
+            if (!Number.isNaN(d.getTime())) {
+              label = d.toLocaleDateString("en", { day: "numeric", month: "short" });
+            }
+          } catch (e) {}
+        }
+        const avgFromResults = computeWeeklyAverage(w.week_start, displayResults);
+        const avgScore =
+          typeof w.avg_score === "number" && w.avg_score > 0
+            ? Math.round(w.avg_score)
+            : avgFromResults;
+
+        return {
+          label,
+          tests: typeof w.tests_taken === "number" ? w.tests_taken : 0,
+          avg: avgScore,
+        };
+      });
+  }, [displayAnalytics, displayResults]);
 
   const recentResults = useMemo(() => {
-    const items = (displayResults ?? []).filter(r => r && typeof r === 'object');
-    return items.slice(0, 10).reverse();
+    const items = (displayResults ?? []).filter((r) => r && typeof r === "object");
+    return items
+      .sort((a, b) => {
+        const aTime = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const bTime = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return bTime - aTime;
+      })
+      .slice(0, 10);
   }, [displayResults]);
 
   // ── Render — loading
@@ -195,7 +249,12 @@ export function DashboardInner() {
   if (!displayAnalytics) return null;
 
   const { strongest_subject: strongest, weakest_subject: weakest, ai_readiness_score: ars,
-          skill_level: skillLevel = "N/A" } = displayAnalytics as any;
+          skill_level: skillLevel = "N/A" } = (displayAnalytics ?? {
+            strongest_subject: { subject_title: "—" },
+            weakest_subject: { subject_title: "—" },
+            ai_readiness_score: 0,
+            skill_level: "N/A",
+          }) as any;
 
   // ── Render — main
   return (
@@ -212,11 +271,22 @@ export function DashboardInner() {
             <ThemeToggle />
             <div>
               <h1 className="text-3xl font-extrabold tracking-tight">Dashboard</h1>
-              <p className="text-indigo-200 text-sm mt-1.5">Your learning journey at a glance.</p>
+              {employeeProfile && (
+                <p className="mt-1 text-sm font-semibold text-indigo-100">
+                  {employeeProfile.full_name?.trim() || employeeProfile.employee_id}
+                  <span className="mx-2 text-indigo-300">·</span>
+                  ID: {employeeProfile.employee_id}
+                </p>
+              )}
+              <p className="text-indigo-200 text-sm mt-1.5">
+                {productQbEligible
+                  ? "Your learning topics and assigned product question bank."
+                  : "Your learning journey at a glance."}
+              </p>
             </div>
           </div>
           <div className="text-right space-y-1">
-            <Badge className="bg-white/20 border-0 text-white backdrop-blur-sm">{skillLevel}</Badge>
+            <Badge className="bg-white/20 border-0 text-white backdrop-blur-sm capitalize">{skillLevel}</Badge>
             <p className="text-xs text-indigo-200">
               Readiness Score
               <span className="ml-1 font-bold text-lg">{ars}</span>
@@ -227,6 +297,26 @@ export function DashboardInner() {
       </div>
 
       <main className="max-w-full mx-auto px-6 md:px-12 -mt-6 pb-14 space-y-6 relative z-10">
+
+        {assignedTest && productQbEligible && assignedTest.status !== "completed" && (
+          <Card className="p-6 bg-card border border-indigo-200 dark:border-indigo-900 shadow-soft">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-primary">Assigned Product Assessment</p>
+                <h2 className="mt-1 text-xl font-bold text-foreground">{assignedTest.topic_title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {assignedTest.total_questions} questions · Ready to start
+                </p>
+              </div>
+              <Button
+                className="rounded-xl"
+                onClick={() => router.push(`/employee/tests/${assignedTest.test_id}`)}
+              >
+                Start Assessment
+              </Button>
+            </div>
+          </Card>
+        )}
 
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
         <div className="flex gap-1 rounded-xl bg-card p-1 w-fit shadow-soft border border-border transition-colors duration-300">
@@ -269,9 +359,13 @@ export function DashboardInner() {
 
             <Card className="p-6 shadow-soft border border-border bg-card transition-colors duration-300">
               <h2 className="text-lg font-semibold mb-4 text-foreground">Subject Mastery</h2>
-              <div className="h-72">
-                <DashboardRadarChart data={radarData} />
-              </div>
+              {!hasSubjectMasteryData ? (
+                <EmptyChart msg="Complete a test to see your subject mastery." />
+              ) : (
+                <div className="h-72 w-full min-h-[288px] min-w-0">
+                  <DashboardRadarChart data={radarData} />
+                </div>
+              )}
             </Card>
 
             <Card className="p-6 shadow-soft border border-border bg-card transition-colors duration-300">
@@ -279,7 +373,7 @@ export function DashboardInner() {
               {trendData.length === 0 ? (
                 <EmptyChart msg="Complete a test to see your score history." />
               ) : (
-                <div className="h-72">
+                <div className="h-72 w-full min-h-[288px] min-w-0">
                   <DashboardTrendChart data={trendData} />
                 </div>
               )}
@@ -290,7 +384,7 @@ export function DashboardInner() {
               {weekData.length === 0 ? (
                 <EmptyChart msg="We have no activity data yet. Take your first test!" />
               ) : (
-                <div className="h-72">
+                <div className="h-72 w-full min-h-[288px] min-w-0">
                   <DashboardWeeklyChart data={weekData} />
                 </div>
               )}
@@ -299,7 +393,7 @@ export function DashboardInner() {
             <Card className="p-6 shadow-soft border border-border bg-card transition-colors duration-300">
               <h2 className="text-lg font-semibold mb-4 text-foreground">Subject Breakdown</h2>
               <div className="space-y-3">
-                {(displayAnalytics.subject_breakdown ?? []).map((s:any) => (
+                {activeSubjectBreakdown.map((s:any) => (
                   <div key={s.subject_id}>
                     <div className="flex items-center justify-between text-sm mb-1">
                       <span className="font-medium text-slate-800 dark:text-slate-200">{s.subject_title}</span>
@@ -307,12 +401,12 @@ export function DashboardInner() {
                     </div>
                     <div className="h-2 bg-indigo-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div className="h-full bg-primary rounded-full transition-all duration-500"
-                        style={{ width: `${Math.max(4, s.average_pct)}%` }} />
+                        style={{ width: `${Math.max(0, s.average_pct)}%` }} />
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{Math.round(s.mastery_pct)} topics mastered (≥ 80%)</p>
                   </div>
                 ))}
-                {(displayAnalytics.subject_breakdown ?? []).length === 0 && (
+                {activeSubjectBreakdown.length === 0 && (
                   <p className="text-sm text-muted-foreground">No subjects started yet.</p>
                 )}
               </div>
@@ -339,22 +433,36 @@ export function DashboardInner() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {recentResults.map((r: any) => (
                 <Card key={r.id} className="p-5 bg-card border border-indigo-100 dark:border-slate-850 hover:border-indigo-400 dark:hover:border-indigo-800 hover:shadow-card transition-all duration-200 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-semibold text-sm text-foreground">{r.topic_title}</h3>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-sm text-foreground truncate">{r.topic_title}</h3>
                       <p className="text-xs text-muted-foreground">{r.subject_title}</p>
                     </div>
                     <ScorePill pct={r.accuracy_pct} />
                   </div>
-                  {r.ai_analysis && typeof r.ai_analysis === 'string' && (
-                    <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{r.ai_analysis}</p>
+                  <div className="rounded-lg bg-secondary/60 px-3 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Score</p>
+                    <p className="text-lg font-extrabold text-foreground">
+                      {r.correct_answers}/{r.total_questions}
+                      <span className="ml-1 text-sm font-semibold text-muted-foreground">({r.accuracy_pct}%)</span>
+                    </p>
+                  </div>
+                  {r.ai_analysis && typeof r.ai_analysis === "string" && (
+                    <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed">{r.ai_analysis}</p>
                   )}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider dark:border-slate-800 dark:text-slate-300">{r.difficulty}</Badge>
-                    <span>·</span>
-                    <span>{toDateStr(r.completed_at)}</span>
-                    <span>·</span>
-                    <span>{r.correct_answers}/{r.total_questions} correct</span>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant="outline" className="text-[10px] uppercase tracking-wider dark:border-slate-800 dark:text-slate-300">{r.difficulty}</Badge>
+                      <span>{toDateStr(r.completed_at)}</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 rounded-lg text-xs font-bold shrink-0"
+                      onClick={() => router.push(`/employee/tests/${r.id}`)}
+                    >
+                      Review
+                    </Button>
                   </div>
                 </Card>
               ))}
@@ -386,6 +494,24 @@ async function fetchResults(token: string): Promise<any[]> {
   });
   if (!r.ok) throw new Error("Failed to load results");
   return r.json();
+}
+
+async function fetchAssignedTest(token: string): Promise<any | null> {
+  const r = await fetch("/api/employee/assigned-test", {
+    headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  return data?.test_id ? data : null;
+}
+
+async function fetchEmployeeProfile(token: string): Promise<any | null> {
+  const r = await fetch("/api/employee/auth/validate", {
+    headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  return data?.employee ?? null;
 }
 
 // ---------------------------------------------------------------------------
