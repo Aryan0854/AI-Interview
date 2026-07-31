@@ -40,9 +40,16 @@ export async function POST(
 
     const body = await request.json().catch(() => ({}));
     const violationType = String(body.violationType || "Unknown Violation").slice(0, 120);
+    const detail = body.detail ? String(body.detail).slice(0, 240) : undefined;
+    const category = body.category ? String(body.category) : undefined;
+    const severity = body.severity ? String(body.severity) : undefined;
 
     const existing = normalizeProctoring(test.proctoring);
-    const proctoring = recordProctorViolation(existing, violationType);
+    const proctoring = recordProctorViolation(existing, violationType, {
+      detail,
+      category: category as any,
+      severity: severity as any,
+    });
 
     await localTestsDb.updateTest(testId, { proctoring });
 

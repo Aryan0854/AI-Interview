@@ -5,9 +5,27 @@
 export const EMPLOYEE_PROCTOR_MAX_VIOLATIONS = 5;
 export const EMPLOYEE_PROCTOR_VIOLATION_COOLDOWN_MS = 2500;
 
+export type ProctorAnomalyCategory =
+  | "face"
+  | "attention"
+  | "browser"
+  | "camera"
+  | "session"
+  | "other";
+
+export type ProctorAnomalySeverity = "low" | "medium" | "high";
+
+export type ProctorViolation = {
+  type: string;
+  timestamp: string;
+  category?: ProctorAnomalyCategory;
+  severity?: ProctorAnomalySeverity;
+  detail?: string;
+};
+
 export type EmployeeProctoringState = {
   warningCount: number;
-  violations: Array<{ type: string; timestamp: string }>;
+  violations: ProctorViolation[];
   autoSubmitted: boolean;
   sessionStartedAt?: string | null;
   videoUploaded?: boolean;
@@ -25,12 +43,43 @@ export function emptyProctoringState(): EmployeeProctoringState {
   };
 }
 
+export function classifyProctorAnomaly(type: string): {
+  category: ProctorAnomalyCategory;
+  severity: ProctorAnomalySeverity;
+} {
+  const t = type.toLowerCase();
+  if (t.includes("multiple face")) return { category: "face", severity: "high" };
+  if (t.includes("face missing") || t.includes("face not")) return { category: "face", severity: "high" };
+  if (t.includes("looking down") || t.includes("phone")) return { category: "attention", severity: "high" };
+  if (t.includes("looking away") || t.includes("distracted")) return { category: "attention", severity: "medium" };
+  if (t.includes("camera")) return { category: "camera", severity: "high" };
+  if (t.includes("recording")) return { category: "camera", severity: "medium" };
+  if (t.includes("tab") || t.includes("focus") || t.includes("fullscreen") || t.includes("devtools") || t.includes("copy") || t.includes("paste") || t.includes("refresh") || t.includes("print") || t.includes("right click") || t.includes("navigation")) {
+    return { category: "browser", severity: "medium" };
+  }
+  return { category: "other", severity: "low" };
+}
+
 export function normalizeProctoring(raw: unknown): EmployeeProctoringState {
   if (!raw || typeof raw !== "object") return emptyProctoringState();
   const p = raw as EmployeeProctoringState;
+  const violations = Array.isArray(p.violations)
+    ? p.violations.map((v) => {
+        const type = String(v?.type ?? "Unknown").slice(0, 120);
+        const classified = classifyProctorAnomaly(type);
+        return {
+          type,
+          timestamp: v?.timestamp ? String(v.timestamp) : new Date().toISOString(),
+          category: v?.category || classified.category,
+          severity: v?.severity || classified.severity,
+          detail: v?.detail ? String(v.detail).slice(0, 240) : undefined,
+        };
+      })
+    : [];
+
   return {
     warningCount: Number(p.warningCount) || 0,
-    violations: Array.isArray(p.violations) ? p.violations : [],
+    violations,
     autoSubmitted: Boolean(p.autoSubmitted),
     sessionStartedAt: p.sessionStartedAt ?? null,
     videoUploaded: Boolean(p.videoUploaded),
@@ -106,7 +155,7 @@ export function canSubmitTest(test: {
 export function recordProctorViolation(
   existing: EmployeeProctoringState,
   violationType: string,
-  opts?: { forceAutoSubmit?: boolean }
+  opts?: { forceAutoSubmit?: boolean; detail?: string; category?: ProctorAnomalyCategory; severity?: ProctorAnomalySeverity }
 ): EmployeeProctoringState {
   const now = new Date().toISOString();
   const lastAt = existing.lastViolationAt ? new Date(existing.lastViolationAt).getTime() : 0;
@@ -126,6 +175,8 @@ export function recordProctorViolation(
     existing.autoSubmitted ||
     nextCount >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS;
 
+  const classified = classifyProctorAnomaly(violationType);
+
   return {
     ...existing,
     warningCount: nextCount,
@@ -133,7 +184,13 @@ export function recordProctorViolation(
     lastViolationAt: now,
     violations: [
       ...existing.violations,
-      { type: violationType.slice(0, 120), timestamp: now },
+      {
+        type: violationType.slice(0, 120),
+        timestamp: now,
+        category: opts?.category || classified.category,
+        severity: opts?.severity || classified.severity,
+        detail: opts?.detail ? opts.detail.slice(0, 240) : undefined,
+      },
     ],
   };
 }

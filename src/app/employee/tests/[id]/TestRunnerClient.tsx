@@ -676,8 +676,10 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
               Allow <span className="text-foreground font-bold">webcam</span> when prompted. Camera and fullscreen are
               recommended for proctoring; you can still start if either is unavailable.
             </li>
+            <li>
+              Face monitoring is active: looking away/down, missing face, or multiple people in frame are flagged with timestamps.
+            </li>
             <li>Tab switch, minimize, refresh, copy/paste, and DevTools are blocked.</li>
-            <li>If camera is on, keep your face visible; looking away can trigger warnings.</li>
             <li>Session may be video-recorded when camera access is granted.</li>
             <li>5 strikes auto-submits your assessment.</li>
           </ul>

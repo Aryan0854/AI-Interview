@@ -21,6 +21,7 @@ import {
   buildResourcePortalEmployees,
   loadEmployeeTestManifest,
 } from '@/services/resource-mapping-service';
+import { normalizeProctoring } from '@/lib/employee-proctoring';
 
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -137,7 +138,7 @@ export async function GET(request: NextRequest) {
           score,
           scorePercent,
           videoUrl: (test as any).session_recording_url || null,
-          proctoring: (test as any).proctoring || null,
+          proctoring: normalizeProctoring((test as any).proctoring),
           startedAt: test.started_at,
           completedAt: test.completed_at,
         });
@@ -174,7 +175,7 @@ export async function GET(request: NextRequest) {
           score,
           scorePercent,
           videoUrl: row.video_url || null,
-          proctoring: row.proctoring || null,
+          proctoring: normalizeProctoring(row.proctoring),
           startedAt: row.started_at,
           completedAt: row.completed_at,
         });
@@ -237,7 +238,7 @@ export async function GET(request: NextRequest) {
             scorePercent,
             // Local row is authoritative — do not keep a stale Supabase video URL.
             videoUrl: test.session_recording_url || null,
-            proctoring: test.proctoring || null,
+            proctoring: normalizeProctoring(test.proctoring),
             startedAt: test.started_at,
             completedAt: test.completed_at,
           };
@@ -260,7 +261,7 @@ export async function GET(request: NextRequest) {
             score,
             scorePercent,
             videoUrl: test.session_recording_url || null,
-            proctoring: test.proctoring || null,
+            proctoring: normalizeProctoring(test.proctoring),
             startedAt: test.started_at,
             completedAt: test.completed_at
           });

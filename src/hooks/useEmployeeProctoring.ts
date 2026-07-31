@@ -65,7 +65,7 @@ export function useEmployeeProctoring(options: {
   }, [initialProctoring?.warningCount]);
 
   const persistProctorViolation = useCallback(
-    async (violationType: string) => {
+    async (violationType: string, detail?: string) => {
       if (!token) return null;
       try {
         const res = await fetch(`/api/employee/tests/${testId}/proctor_violation`, {
@@ -74,7 +74,7 @@ export function useEmployeeProctoring(options: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ violationType }),
+          body: JSON.stringify({ violationType, detail }),
         });
         if (!res.ok) return null;
         const payload = await res.json();
@@ -105,6 +105,9 @@ export function useEmployeeProctoring(options: {
       "Face Missing": "Face not detected in camera feed. Please face your screen clearly.",
       "Looking Away": "Please look directly at your screen.",
       "Looking Down (possible phone usage)": "Please look at your screen — looking down is flagged as a violation.",
+      "Looking Left": "Please face the camera — looking left is flagged as distraction.",
+      "Looking Right": "Please face the camera — looking right is flagged as distraction.",
+      "Looking Up": "Please face the camera — looking up is flagged as distraction.",
       "Multiple Faces Detected": "Multiple faces detected. Only the test taker may be visible.",
       "Print Attempt Blocked": "Printing the test page is not allowed.",
       "Refresh Attempt Blocked": "Refreshing the page during the test is not allowed.",
@@ -113,17 +116,22 @@ export function useEmployeeProctoring(options: {
   }, []);
 
   const triggerProctorWarning = useCallback(
-    (violationType: string) => {
+    (violationType: string, detail?: string) => {
       if (phase !== "running") return;
       if (autoSubmitTriggeredRef.current) return;
 
       const nowMs = Date.now();
       const lastForType = lastTriggerRef.current[violationType] ?? 0;
-      if (nowMs - lastForType < EMPLOYEE_PROCTOR_VIOLATION_COOLDOWN_MS) return;
+      // Face anomalies use a slightly longer per-type cooldown to reduce noise.
+      const cooldown =
+        /face|looking|multiple/i.test(violationType)
+          ? Math.max(EMPLOYEE_PROCTOR_VIOLATION_COOLDOWN_MS, 5000)
+          : EMPLOYEE_PROCTOR_VIOLATION_COOLDOWN_MS;
+      if (nowMs - lastForType < cooldown) return;
       lastTriggerRef.current[violationType] = nowMs;
 
       void (async () => {
-        const serverState = await persistProctorViolation(violationType);
+        const serverState = await persistProctorViolation(violationType, detail);
         const nextCount = serverState?.warningCount ?? Math.min(warningCount + 1, EMPLOYEE_PROCTOR_MAX_VIOLATIONS);
         setWarningCount(nextCount);
 
@@ -360,9 +368,9 @@ export function useEmployeeProctoring(options: {
     };
   }, [phase, camStream, mediaRecorderRef, triggerProctorWarning, intentionalRecorderStopRef]);
 
-  // ── Face + gaze tracking (clmtrackr) ────────────────────────────
+  // ── Face + gaze tracking (clmtrackr) + multi-face (FaceDetector) ─
   useEffect(() => {
-    if (phase !== "running" || !clmReady || !camStream) return;
+    if (phase !== "running" || !camStream) return;
 
     type ClmTracker = {
       init: (m: unknown) => void;
@@ -374,12 +382,15 @@ export function useEmployeeProctoring(options: {
 
     let trackerInstance: ClmTracker | null = null;
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let multiFaceIntervalId: ReturnType<typeof setInterval> | null = null;
     let lastState: "one" | "none" | "left" | "right" | "up" | "down" = "one";
     let stateStartTime = Date.now();
     let isTracking = false;
     const stateHistory: string[] = [];
+    let cancelled = false;
 
     const startTracking = () => {
+      if (!clmReady) return;
       const w = window as Window & { clm?: { tracker: new () => ClmTracker }; pModel?: unknown };
       if (!w.clm || !w.pModel || !videoRef.current || videoRef.current.readyState < 2) return;
       try {
@@ -395,7 +406,9 @@ export function useEmployeeProctoring(options: {
 
     const timer = setTimeout(startTracking, 1000);
 
+    // Gaze / face-present monitoring via clmtrackr landmarks.
     intervalId = setInterval(() => {
+      if (!clmReady) return;
       if (!isTracking || !trackerInstance) {
         if (videoRef.current && videoRef.current.readyState >= 2 && !isTracking) startTracking();
         return;
@@ -444,21 +457,69 @@ export function useEmployeeProctoring(options: {
         stateStartTime = now;
       } else {
         const duration = (now - stateStartTime) / 1000;
-        if (lastState === "none" && duration >= 3.5) {
-          triggerProctorWarning("Face Missing");
-          stateStartTime = now;
-        } else if (["left", "right", "up", "down"].includes(lastState) && duration >= 3.5) {
+        if (lastState === "none" && duration >= 3.0) {
           triggerProctorWarning(
-            lastState === "down" ? "Looking Down (possible phone usage)" : "Looking Away"
+            "Face Missing",
+            `No face detected for ${duration.toFixed(1)}s`
           );
+          stateStartTime = now;
+        } else if (lastState === "down" && duration >= 2.8) {
+          triggerProctorWarning(
+            "Looking Down (possible phone usage)",
+            `Looking down for ${duration.toFixed(1)}s`
+          );
+          stateStartTime = now;
+        } else if (lastState === "left" && duration >= 3.0) {
+          triggerProctorWarning("Looking Left", `Gaze left for ${duration.toFixed(1)}s`);
+          stateStartTime = now;
+        } else if (lastState === "right" && duration >= 3.0) {
+          triggerProctorWarning("Looking Right", `Gaze right for ${duration.toFixed(1)}s`);
+          stateStartTime = now;
+        } else if (lastState === "up" && duration >= 3.0) {
+          triggerProctorWarning("Looking Up", `Gaze up for ${duration.toFixed(1)}s`);
           stateStartTime = now;
         }
       }
     }, 1000);
 
+    // Multi-person detection via Chromium FaceDetector API (Chrome/Edge).
+    const FaceDetectorCtor = (window as any).FaceDetector as
+      | (new (opts?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+          detect: (image: CanvasImageSource) => Promise<Array<{ boundingBox: DOMRectReadOnly }>>;
+        })
+      | undefined;
+
+    if (typeof FaceDetectorCtor === "function") {
+      let detector: InstanceType<typeof FaceDetectorCtor> | null = null;
+      try {
+        detector = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 5 });
+      } catch {
+        detector = null;
+      }
+
+      if (detector) {
+        multiFaceIntervalId = setInterval(async () => {
+          if (cancelled || !videoRef.current || videoRef.current.readyState < 2) return;
+          try {
+            const faces = await detector!.detect(videoRef.current);
+            if (faces.length >= 2) {
+              triggerProctorWarning(
+                "Multiple Faces Detected",
+                `${faces.length} faces visible in camera frame`
+              );
+            }
+          } catch {
+            // FaceDetector may fail on some frames; ignore transient errors.
+          }
+        }, 2000);
+      }
+    }
+
     return () => {
+      cancelled = true;
       clearTimeout(timer);
       if (intervalId) clearInterval(intervalId);
+      if (multiFaceIntervalId) clearInterval(multiFaceIntervalId);
       try {
         trackerInstance?.stop();
       } catch {

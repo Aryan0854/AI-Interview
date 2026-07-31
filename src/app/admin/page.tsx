@@ -3636,6 +3636,7 @@ export default function AdminResumeDashboard() {
                                                           {test.proctoring?.warningCount ? (
                                                             <div className="text-[9px] text-amber-600 font-bold mt-0.5">
                                                               {test.proctoring.warningCount} proctor warnings
+                                                              {test.proctoring.autoSubmitted ? " · auto-submitted" : ""}
                                                             </div>
                                                           ) : null}
                                                         </td>
@@ -3672,6 +3673,64 @@ export default function AdminResumeDashboard() {
                                                         </td>
                                                       </tr>
                                                     ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            )}
+                                            {account.tests?.some((t: any) => (t.proctoring?.violations || []).length > 0) && (
+                                              <div className="border border-amber-100 dark:border-amber-950/40 rounded-xl overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
+                                                <div className="px-3 py-2 bg-amber-50/80 dark:bg-amber-950/20 border-b border-amber-100 dark:border-amber-950/40">
+                                                  <h4 className="font-extrabold text-[11px] uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                                                    Proctoring Anomalies (with timestamps)
+                                                  </h4>
+                                                  <p className="text-[10px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">
+                                                    Face / attention / browser events recorded during the assessment (IST).
+                                                  </p>
+                                                </div>
+                                                <table className="w-full text-left border-collapse text-xs">
+                                                  <thead>
+                                                    <tr className="bg-slate-50 dark:bg-slate-900 border-b border-indigo-50 dark:border-slate-850 text-slate-500 font-bold uppercase tracking-wider text-[9px]">
+                                                      <th className="p-2.5">Timestamp</th>
+                                                      <th className="p-2.5">Anomaly</th>
+                                                      <th className="p-2.5">Category</th>
+                                                      <th className="p-2.5">Severity</th>
+                                                      <th className="p-2.5">Detail</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-850/50">
+                                                    {account.tests.flatMap((test: any) =>
+                                                      (test.proctoring?.violations || []).map(
+                                                        (v: any, idx: number) => (
+                                                          <tr key={`${test.id}-${idx}-${v.timestamp || idx}`}>
+                                                            <td className="p-2.5 whitespace-nowrap font-medium text-slate-700 dark:text-slate-300">
+                                                              {formatPortalTimestamp(v.timestamp) || "—"}
+                                                            </td>
+                                                            <td className="p-2.5 font-semibold text-slate-800 dark:text-slate-200">
+                                                              {v.type}
+                                                            </td>
+                                                            <td className="p-2.5 capitalize text-slate-500">
+                                                              {v.category || "—"}
+                                                            </td>
+                                                            <td className="p-2.5">
+                                                              <span
+                                                                className={`inline-flex rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                                                                  v.severity === "high"
+                                                                    ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                                                                    : v.severity === "medium"
+                                                                      ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                                                                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                                                                }`}
+                                                              >
+                                                                {v.severity || "low"}
+                                                              </span>
+                                                            </td>
+                                                            <td className="p-2.5 text-slate-500">
+                                                              {v.detail || "—"}
+                                                            </td>
+                                                          </tr>
+                                                        )
+                                                      )
+                                                    )}
                                                   </tbody>
                                                 </table>
                                               </div>

@@ -32,8 +32,16 @@ export interface ResourcePortalEmployee {
     videoUrl?: string | null;
     proctoring?: {
       warningCount: number;
-      violations: Array<{ type: string; timestamp: string }>;
+      violations: Array<{
+        type: string;
+        timestamp: string;
+        category?: string;
+        severity?: string;
+        detail?: string;
+      }>;
       autoSubmitted: boolean;
+      sessionStartedAt?: string | null;
+      videoUploaded?: boolean;
     } | null;
     startedAt: string | null;
     completedAt: string | null;
