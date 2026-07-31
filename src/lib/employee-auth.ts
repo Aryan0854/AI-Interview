@@ -40,6 +40,9 @@ function getAccountFilePath() {
 let inMemoryStore: AccountStore | null = null;
 
 function readStore(): AccountStore {
+  if (process.env.NODE_ENV === "development") {
+    inMemoryStore = null;
+  }
   if (inMemoryStore) {
     return inMemoryStore;
   }
@@ -134,17 +137,27 @@ export function verifyPassword(password: string, salt: string, hash: string) {
   return crypto.timingSafeEqual(Buffer.from(candidate, "utf8"), Buffer.from(hash, "utf8"));
 }
 
-export function saveEmployeePassword(employeeId: string, password: string) {
+export function saveEmployeePassword(employeeId: string, password: string): EmployeeAccount | null {
   const store = readStore();
   const employee = store.employees.find((item) => normalizeEmployeeId(item.employee_id) === normalizeEmployeeId(employeeId));
-  if (!employee) return false;
+  if (!employee) return null;
 
   const { hash, salt } = hashPassword(password);
   employee.password_hash = hash;
   employee.password_salt = salt;
   employee.is_first_login = false;
   writeStore(store);
-  return true;
+  return employee;
+}
+
+export function completeFirstTimeLogin(employeeId: string): EmployeeAccount | null {
+  const store = readStore();
+  const employee = store.employees.find((item) => normalizeEmployeeId(item.employee_id) === normalizeEmployeeId(employeeId));
+  if (!employee) return null;
+
+  employee.is_first_login = false;
+  writeStore(store);
+  return employee;
 }
 
 export function signToken(employeeId: string, expiresInMs?: number) {
@@ -217,6 +230,7 @@ export async function syncEmployeeToSupabase(account: EmployeeAccount): Promise<
         employee_id: account.employee_id,
         email: account.email || "",
         full_name: account.full_name || account.employee_id,
+        department: account.department || "",
         role: account.role || "employee",
         xp_points: account.xp_points || 0,
         streak_days: account.streak_days || 0,

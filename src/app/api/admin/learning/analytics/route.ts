@@ -48,7 +48,13 @@ export async function GET(_req: NextRequest) {
     }));
 
     // Subject heatmap (simple version)
-    const { data: subjects } = await supabase.from("learning_subjects").select("id, title").order("order_index");
+    const { data: rawSubjects } = await supabase.from("learning_subjects").select("id, title").order("order_index");
+    const seenSubjectTitles = new Set<string>();
+    const subjects = (rawSubjects ?? []).filter((s) => {
+      if (seenSubjectTitles.has(s.title)) return false;
+      seenSubjectTitles.add(s.title);
+      return true;
+    });
 
     const subjectHeatmap = await Promise.all(
       (subjects ?? []).map(async (subj) => {

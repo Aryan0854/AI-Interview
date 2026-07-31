@@ -7,58 +7,47 @@ import { withAICache } from "./cache";
 
 export type { AIProvider } from "./types";
 
-const SUPPORTED_PROVIDERS = ["gemini", "ollama", "copilot", "groq"] as const;
+// Default priority order for every AI call in the app (resume extraction,
+// interview question generation, employee quiz generation, etc.):
+// Copilot first, then Groq, then Gemini, then Ollama last. Only after all
+// four fail does a caller fall back to its own non-LLM fallback (e.g. the
+// preset employee question bank) — never before every provider is tried.
+const SUPPORTED_PROVIDERS = ["copilot", "groq", "gemini", "ollama"] as const;
 type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 
-function resolveProviderName(): SupportedProvider {
-  const configured = (process.env.AI_PROVIDER || "gemini").trim().toLowerCase();
-  if ((SUPPORTED_PROVIDERS as readonly string[]).includes(configured)) {
-    return configured as SupportedProvider;
-  }
-  console.warn(`Unknown AI_PROVIDER "${configured}" — falling back to "gemini".`);
-  return "gemini";
+const instances = new Map<SupportedProvider, AIProvider>();
+
+function getProvider(name: SupportedProvider): AIProvider {
+  let p = instances.get(name);
+  if (p) return p;
+  p = name === "groq" ? new GroqProvider()
+    : name === "ollama" ? new OllamaProvider()
+    : name === "copilot" ? new CopilotProvider()
+    : new GeminiProvider();
+  instances.set(name, p);
+  return p;
 }
 
-let cachedProvider: AIProvider | null = null;
-let cachedProviderName: SupportedProvider | null = null;
-
-/**
- * Returns the currently configured LLM provider (singleton per provider name), based on
- * the AI_PROVIDER environment variable: "gemini" (default), "ollama", "copilot", or "groq".
- *
- * Every caller in the app should go through this factory rather than instantiating a
- * provider directly, so switching providers is a single env-var change with zero code edits.
- */
-export function getAIProvider(): AIProvider {
-  const name = resolveProviderName();
-  if (cachedProvider && cachedProviderName === name) {
-    return cachedProvider;
-  }
-
-  switch (name) {
-    case "ollama":
-      cachedProvider = new OllamaProvider();
-      break;
-    case "copilot":
-      cachedProvider = new CopilotProvider();
-      break;
-    case "groq":
-      cachedProvider = new GroqProvider();
-      break;
-    case "gemini":
-    default:
-      cachedProvider = new GeminiProvider();
-      break;
-  }
-  cachedProviderName = name;
-  return cachedProvider;
+function providerOrder(): SupportedProvider[] {
+  // AI_PROVIDER, if explicitly set, is an admin override that jumps to the
+  // front of the queue. Leave it unset to use the standard Copilot -> Groq ->
+  // Gemini -> Ollama priority order.
+  const raw = (process.env.AI_PROVIDER || "").trim().toLowerCase();
+  const configured = (SUPPORTED_PROVIDERS as readonly string[]).includes(raw) ? (raw as SupportedProvider) : null;
+  if (!configured) return [...SUPPORTED_PROVIDERS];
+  return [configured, ...SUPPORTED_PROVIDERS.filter((p) => p !== configured)];
 }
 
-/**
- * Convenience helper: generate text from the currently configured provider, with
- * response caching + in-flight de-duplication applied automatically.
- */
+// Configured provider first, then the rest as fallback; throws only after all fail.
 export async function generateAIText(prompt: string): Promise<string> {
-  const provider = getAIProvider();
-  return withAICache(provider.name, prompt, () => provider.generateText(prompt));
+  let lastErr: unknown;
+  for (const name of providerOrder()) {
+    try {
+      return await withAICache(name, prompt, () => getProvider(name).generateText(prompt));
+    } catch (err) {
+      lastErr = err;
+      console.warn(`AI provider "${name}" failed, trying next.`, err);
+    }
+  }
+  throw lastErr;
 }

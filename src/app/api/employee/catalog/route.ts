@@ -78,9 +78,27 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const subjects = cached?.subjects ?? [];
-    const modules = cached?.modules ?? [];
-    const topics = cached?.topics ?? [];
+    const dedupeByKey = <T extends Record<string, any>>(items: T[], keyFn: (item: T) => string): T[] => {
+      const seen = new Set<string>();
+      return items.filter((item) => {
+        const key = keyFn(item);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    const subjects = dedupeByKey(cached?.subjects ?? [], (s) => s.title);
+    const subjectIdSet = new Set(subjects.map((s) => s.id));
+    const modules = dedupeByKey(
+      (cached?.modules ?? []).filter((m: any) => subjectIdSet.has(m.subject_id)),
+      (m) => `${m.subject_id}::${m.title}`
+    );
+    const moduleIdSet = new Set(modules.map((m) => m.id));
+    const topics = dedupeByKey(
+      (cached?.topics ?? []).filter((t: any) => moduleIdSet.has(t.module_id)),
+      (t) => `${t.module_id}::${t.title}`
+    );
     const resources = cached?.resources ?? [];
 
     // ── Fallback: use static curriculum if DB is empty ──────────────────

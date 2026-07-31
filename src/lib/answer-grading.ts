@@ -112,7 +112,7 @@ ${rubric.modelAnswer ? `- Model answer summary: ${rubric.modelAnswer}` : ""}
 
 GRADE STRICTLY AGAINST THIS FIXED RUBRIC (total = 10 points):
 1. Understanding / Relation (0-2 points): Does the answer actually address what was asked, and relate correctly to the question's subject? 0 = off-topic/irrelevant, 1 = partially relevant, 2 = fully on-topic and correctly framed.
-2. Keywords (0-4 points): How many of the expected key concepts above (or clear paraphrases/synonyms of them) does the answer demonstrate understanding of? Score proportionally — do not require exact wording, but the underlying concept must genuinely be present and correctly used, not just name-dropped.
+2. Keywords (0-4 points): How many of the expected key concepts above (or clear paraphrases/synonyms of them) does the answer demonstrate CORRECT understanding of? For technical concepts, a factually wrong statement about a concept counts as NOT covering it, even if the term is mentioned — accuracy matters, not just presence. Score proportionally.
 3. Reasoning (0-2 points): Does the candidate explain WHY or HOW, showing genuine reasoning/justification/trade-off awareness — not just a list of facts or buzzwords? 0 = no reasoning, 1 = some reasoning, 2 = clear, sound reasoning.
 4. Clarity (0-2 points): Is the answer well-structured, coherent, and easy to follow? 0 = rambling/incoherent, 1 = mostly clear, 2 = clear and well-organized.
 

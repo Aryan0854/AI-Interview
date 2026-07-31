@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -282,6 +282,7 @@ export default function AdminResumeDashboard() {
   // Tab state
   const [activeTab, setActiveTab] = useState<"employee" | "suitable" | "unsuitable" | "outbox" | "requirements" | "logs" | "employee-portal">("employee");
   const [allTestResults, setAllTestResults] = useState<any[]>([]);
+  const [registeredAccounts, setRegisteredAccounts] = useState<any[]>([]);
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
   const [emails, setEmails] = useState<any[]>([]);
@@ -588,12 +589,53 @@ export default function AdminResumeDashboard() {
       const data = await res.json();
       setEmployees(data.employees || []);
       setAllTestResults(data.allTestResults || []);
+      setRegisteredAccounts(data.registeredAccounts || []);
     } catch (err) {
       console.error("Failed to fetch employees", err);
     } finally {
       setIsEmployeesLoading(false);
     }
   };
+
+  // Unified Employee Portal roster: every registered account from Supabase,
+  // UNIONed with every employeeId that shows up in test results. This makes
+  // sure a newly signed-up employee with zero test attempts still appears
+  // (previously the portal list was built solely from allTestResults, so
+  // brand-new accounts were invisible until they took a test).
+  const portalAccounts = useMemo(() => {
+    const ids = new Set<string>();
+    registeredAccounts.forEach(a => { if (a.employee_id) ids.add(a.employee_id); });
+    allTestResults.forEach(t => { if (t.employeeId) ids.add(t.employeeId); });
+
+    return Array.from(ids).map(empId => {
+      const empTests = allTestResults.filter(t => t.employeeId === empId);
+      const registered = registeredAccounts.find(a => a.employee_id === empId);
+      const matchingEmp = employees.find(e => e.employee_id === empId);
+
+      const name = registered?.full_name || matchingEmp?.full_name || empTests[0]?.employeeName || empId;
+      const department = registered?.department || matchingEmp?.department || "Auto-Registered";
+      const designation = registered?.role || matchingEmp?.designation || "External Candidate";
+      const registeredStatus = registered ? "Registered" : (matchingEmp?.status || "Registered");
+      const skills = matchingEmp?.skills || "—";
+
+      const completedTests = empTests.filter(t => t.status === "completed");
+      const avgScore = completedTests.length > 0
+        ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
+        : null;
+
+      return {
+        empId,
+        name,
+        department,
+        designation,
+        registeredStatus,
+        skills,
+        testsCount: empTests.length,
+        avgScore,
+        tests: empTests,
+      };
+    });
+  }, [registeredAccounts, allTestResults, employees]);
 
   const handleExportPortalData = async () => {
     try {
@@ -625,34 +667,17 @@ export default function AdminResumeDashboard() {
       headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
       headerRow.height = 25;
 
-      const accounts = Array.from(new Set(allTestResults.map(t => t.employeeId)))
-        .map(empId => {
-          const empTests = allTestResults.filter(t => t.employeeId === empId);
-          const matchingEmp = employees.find(e => e.employee_id === empId);
-          
-          const name = matchingEmp?.full_name || empTests[0]?.employeeName || empId;
-          const department = matchingEmp?.department || "Auto-Registered";
-          const designation = matchingEmp?.designation || "External Candidate";
-          const registeredStatus = matchingEmp?.status || "Registered";
-          const skills = matchingEmp?.skills || "—";
-          
-          const completedTests = empTests.filter(t => t.status === "completed");
-          const avgScore = completedTests.length > 0
-            ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
-            : null;
-
-          return {
-            name,
-            empId,
-            department,
-            designation,
-            registeredStatus,
-            skills,
-            testsCount: empTests.length,
-            avgScore: avgScore !== null ? `${avgScore}%` : "—",
-            testDetails: empTests.map(t => `${t.topicTitle} (${t.status === 'completed' ? t.score + '%' : t.status})`).join("; ")
-          };
-        });
+      const accounts = portalAccounts.map(acc => ({
+        name: acc.name,
+        empId: acc.empId,
+        department: acc.department,
+        designation: acc.designation,
+        registeredStatus: acc.registeredStatus,
+        skills: acc.skills,
+        testsCount: acc.testsCount,
+        avgScore: acc.avgScore !== null ? `${acc.avgScore}%` : "—",
+        testDetails: acc.tests.map((t: any) => `${t.topicTitle} (${t.status === 'completed' ? t.score + '%' : t.status})`).join("; ")
+      }));
 
       // Add rows to worksheet
       accounts.forEach(acc => {
@@ -783,6 +808,7 @@ export default function AdminResumeDashboard() {
       setEmails(emailsData.emails || []);
       setEmployees(employeesData.employees || []);
       setAllTestResults(employeesData.allTestResults || []);
+      setRegisteredAccounts(employeesData.registeredAccounts || []);
       setResetLogs(resetLogsData.logs || []);
       setSystemLogs(logsData.logs || []);
       
@@ -2679,7 +2705,7 @@ export default function AdminResumeDashboard() {
                 >
                   Employee Portal
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee-portal" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {Array.from(new Set(allTestResults.map(t => t.employeeId))).length}
+                    {portalAccounts.length}
                   </Badge>
                 </button>
                 <button
@@ -3348,7 +3374,7 @@ export default function AdminResumeDashboard() {
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-indigo-50 dark:border-slate-800 rounded-2xl shadow-sm text-center">
                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total Registered Accounts</span>
                         <span className="text-xl md:text-2xl font-black text-indigo-600 dark:text-violet-400">
-                          {Array.from(new Set(allTestResults.map(t => t.employeeId))).length}
+                          {portalAccounts.length}
                         </span>
                       </div>
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-indigo-50 dark:border-slate-800 rounded-2xl shadow-sm text-center">
@@ -3360,8 +3386,8 @@ export default function AdminResumeDashboard() {
                       <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-indigo-50 dark:border-slate-800 rounded-2xl shadow-sm text-center">
                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Avg Tests / Account</span>
                         <span className="text-xl md:text-2xl font-black text-amber-500">
-                          {Array.from(new Set(allTestResults.map(t => t.employeeId))).length > 0
-                            ? (allTestResults.length / Array.from(new Set(allTestResults.map(t => t.employeeId))).length).toFixed(1)
+                          {portalAccounts.length > 0
+                            ? (allTestResults.length / portalAccounts.length).toFixed(1)
                             : 0}
                         </span>
                       </div>
@@ -3430,34 +3456,7 @@ export default function AdminResumeDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-800/50">
-                            {Array.from(new Set(allTestResults.map(t => t.employeeId)))
-                              .map(empId => {
-                                const empTests = allTestResults.filter(t => t.employeeId === empId);
-                                const matchingEmp = employees.find(e => e.employee_id === empId);
-                                
-                                const name = matchingEmp?.full_name || empTests[0]?.employeeName || empId;
-                                const department = matchingEmp?.department || "Auto-Registered";
-                                const designation = matchingEmp?.designation || "External Candidate";
-                                const registeredStatus = matchingEmp?.status || "Registered";
-                                const skills = matchingEmp?.skills || "—";
-                                
-                                const completedTests = empTests.filter(t => t.status === "completed");
-                                const avgScore = completedTests.length > 0
-                                  ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
-                                  : null;
-
-                                return {
-                                  empId,
-                                  name,
-                                  department,
-                                  designation,
-                                  registeredStatus,
-                                  skills,
-                                  testsCount: empTests.length,
-                                  avgScore,
-                                  tests: empTests
-                                };
-                              })
+                            {portalAccounts
                               .filter(account => {
                                 if (!testResultsSearch) return true;
                                 const term = testResultsSearch.toLowerCase();
@@ -3588,7 +3587,7 @@ export default function AdminResumeDashboard() {
                                   </React.Fragment>
                                 );
                               })}
-                            {allTestResults.length === 0 && (
+                            {portalAccounts.length === 0 && (
                               <tr>
                                 <td colSpan={8} className="text-center py-12 text-slate-400 italic">
                                   No accounts found.

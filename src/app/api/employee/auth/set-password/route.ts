@@ -51,14 +51,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Password setup has already been completed" }, { status: 400 });
     }
 
-    const saved = saveEmployeePassword(employee.employee_id, password);
-    if (!saved) {
+    const updated = saveEmployeePassword(employee.employee_id, password);
+    if (!updated) {
       return NextResponse.json({ error: "Failed to save password" }, { status: 500 });
     }
 
-    const token = signToken(employee.employee_id);
-    await syncEmployeeToSupabase(employee);
-    return NextResponse.json({ status: "ok", token, employee: { employee_id: employee.employee_id, full_name: employee.full_name } });
+    const token = signToken(updated.employee_id);
+    await syncEmployeeToSupabase(updated);
+    return NextResponse.json({ status: "ok", token, employee: { employee_id: updated.employee_id, full_name: updated.full_name } });
   } catch (e) {
     console.error("Employee set-password route error:", e);
     return NextResponse.json({ error: "Unable to set password" }, { status: 500 });

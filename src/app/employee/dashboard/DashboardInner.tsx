@@ -37,76 +37,6 @@ import {
   Sparkles,
 } from "lucide-react";
 
-const DUMMY_ANALYTICS = {
-  total_tests_taken: 12,
-  average_score: 78,
-  ai_readiness_score: 82,
-  xp_points: 1250,
-  skill_level: "Intermediate",
-  strongest_subject: { subject_id: "8", subject_title: "Python", average_pct: 90 },
-  weakest_subject: { subject_id: "10", subject_title: "Cloud", average_pct: 60 },
-  score_history: [
-    { date: "2026-05-10T10:00:00Z", score: 65 },
-    { date: "2026-05-12T10:00:00Z", score: 70 },
-    { date: "2026-05-15T10:00:00Z", score: 75 },
-    { date: "2026-05-20T10:00:00Z", score: 72 },
-    { date: "2026-05-25T10:00:00Z", score: 80 },
-    { date: "2026-06-01T10:00:00Z", score: 85 },
-    { date: "2026-06-03T10:00:00Z", score: 78 },
-  ],
-  subject_breakdown: [
-    { subject_id: "2", subject_title: "AI / ML", average_pct: 82, topic_count: 5, mastery_pct: 40 },
-    { subject_id: "3", subject_title: "Data", average_pct: 75, topic_count: 4, mastery_pct: 50 },
-    { subject_id: "8", subject_title: "Python", average_pct: 90, topic_count: 6, mastery_pct: 83.3 },
-    { subject_id: "9", subject_title: "SQL", average_pct: 85, topic_count: 4, mastery_pct: 75 },
-    { subject_id: "10", subject_title: "Cloud", average_pct: 65, topic_count: 3, mastery_pct: 33.3 },
-    { subject_id: "11", subject_title: "MLOps", average_pct: 70, topic_count: 3, mastery_pct: 66.7 },
-  ],
-  weekly_activity: [
-    { week_start: "2026-05-04T00:00:00Z", tests_taken: 2, avg_score: 68 },
-    { week_start: "2026-05-11T00:00:00Z", tests_taken: 3, avg_score: 72 },
-    { week_start: "2026-05-18T00:00:00Z", tests_taken: 2, avg_score: 76 },
-    { week_start: "2026-05-25T00:00:00Z", tests_taken: 4, avg_score: 82 },
-    { week_start: "2026-06-01T00:00:00Z", tests_taken: 4, avg_score: 80 },
-  ],
-};
-
-const DUMMY_RESULTS = [
-  {
-    id: "r1",
-    topic_title: "Pandas DataFrames",
-    subject_title: "Data",
-    accuracy_pct: 80,
-    difficulty: "intermediate",
-    completed_at: "2026-06-03T10:00:00Z",
-    correct_answers: 8,
-    total_questions: 10,
-    ai_analysis: "Excellent understanding of DataFrame manipulation and indexing.",
-  },
-  {
-    id: "r2",
-    topic_title: "Python Data Types",
-    subject_title: "Python",
-    accuracy_pct: 90,
-    difficulty: "beginner",
-    completed_at: "2026-06-02T11:00:00Z",
-    correct_answers: 9,
-    total_questions: 10,
-    ai_analysis: "Perfect score on mutable vs immutable types. Solid logic.",
-  },
-  {
-    id: "r3",
-    topic_title: "Neural Networks Intro",
-    subject_title: "AI / ML",
-    accuracy_pct: 70,
-    difficulty: "advanced",
-    completed_at: "2026-06-01T15:30:00Z",
-    correct_answers: 7,
-    total_questions: 10,
-    ai_analysis: "Good grasp of backpropagation, needs work on optimization algorithms.",
-  },
-];
-
 const EMPTY_RADAR = [
   { subject: "ML", value: 0 }, { subject: "Data", value: 0 },
   { subject: "Python", value: 0 }, { subject: "SQL", value: 0 },
@@ -140,50 +70,20 @@ export function DashboardInner() {
   }, []);
 
   const displayResults = useMemo(() => {
-    if (!analytics) return [];
-    
-    // Combine real results and dummy results so the list is full, rich, and beautiful
-    const combined = [...(results || [])].filter(r => r && typeof r === 'object');
-    DUMMY_RESULTS.forEach(dr => {
-      if (!combined.some(r => r && r.topic_title === dr.topic_title)) {
-        combined.push(dr);
-      }
-    });
-    return combined;
-  }, [analytics, results]);
+    if (!results) return [];
+    return results.filter(r => r && typeof r === 'object');
+  }, [results]);
 
   const displayAnalytics = useMemo(() => {
     if (!analytics) return null;
-    
-    // Merge actual analytics with dummy data to make it look full and beautiful
-    const merged = {
-      ...DUMMY_ANALYTICS,
+    return {
       ...analytics,
-      total_tests_taken: Math.max(displayResults.length, analytics.total_tests_taken || 0),
-      average_score: Math.max(82, analytics.average_score || 0),
-      ai_readiness_score: Math.max(85, analytics.ai_readiness_score || 0),
-      xp_points: Math.max(1250, analytics.xp_points || 0),
-      skill_level: "Intermediate"
+      total_tests_taken: displayResults.length,
+      strongest_subject: analytics.strongest_subject?.subject_title ? analytics.strongest_subject : null,
+      weakest_subject: analytics.weakest_subject?.subject_title ? analytics.weakest_subject : null,
+      score_history: analytics.score_history || [],
+      subject_breakdown: analytics.subject_breakdown || [],
     };
-
-    if (!merged.strongest_subject || !merged.strongest_subject.subject_title || merged.strongest_subject.subject_title === "—") {
-      merged.strongest_subject = { subject_title: "SQL & Databases" };
-    }
-    if (!merged.weakest_subject || !merged.weakest_subject.subject_title || merged.weakest_subject.subject_title === "—") {
-      merged.weakest_subject = { subject_title: "Cloud Infrastructure" };
-    }
-
-    // Combine score histories if empty/sparse
-    if (!merged.score_history || merged.score_history.length <= 1) {
-      merged.score_history = DUMMY_ANALYTICS.score_history;
-    }
-
-    // Combine subject breakdowns
-    if (!merged.subject_breakdown || merged.subject_breakdown.length <= 1) {
-      merged.subject_breakdown = DUMMY_ANALYTICS.subject_breakdown;
-    }
-
-    return merged;
   }, [analytics, displayResults]);
 
   const radarData = useMemo(() => {
@@ -465,8 +365,8 @@ export function DashboardInner() {
                     </div>
                     <ScorePill pct={r.accuracy_pct} />
                   </div>
-                  {r.ai_analysis && typeof r.ai_analysis === 'string' && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{r.ai_analysis}</p>
+                  {(r.ai_analysis?.summary || (typeof r.ai_analysis === 'string' && r.ai_analysis)) && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{r.ai_analysis.summary || r.ai_analysis}</p>
                   )}
                   <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
                     <Badge variant="outline" className="text-[10px] uppercase tracking-wider dark:border-slate-800 dark:text-slate-300">{r.difficulty}</Badge>

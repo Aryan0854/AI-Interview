@@ -56,7 +56,7 @@ export async function askGemini(
   action: string,
   payload: any,
   signal?: AbortSignal
-): Promise<string> {
+): Promise<any> {
   switch (action) {
     case "generate_questions":
       return generateQuestions(
@@ -131,7 +131,7 @@ Do NOT use markdown. ${count} objects exactly.`.trim();
 /* 2. result analysis                                                  */
 /* ------------------------------------------------------------------ */
 
-async function analyseResults({ topic, accuracy, total, correct, wrongQuestions }: AnalyzeResultInput): Promise<string> {
+async function analyseResults({ topic, accuracy, total, correct, wrongQuestions }: AnalyzeResultInput): Promise<any> {
   const prompt = `
 You are an AI exam-coach. An employee just completed a ${topic} quiz.
 
@@ -153,7 +153,7 @@ Return raw JSON only, no markdown.`.trim();
   const raw: any = await geminiEngine.generateText(prompt);
   if (typeof raw === "string") {
     try { return JSON.parse(raw.replace(/```json/gi, "").replace(/```/g, "").trim()); }
-    catch { return raw; }
+    catch { return { summary: raw, strengths: [], weaknesses: [], next_steps: [], continue_message: "" }; }
   }
-  return JSON.stringify(raw);
+  return raw;
 }

@@ -1,7 +1,10 @@
-import { askGemini } from "./learning-ai";
-import { join } from "path";
-import { existsSync } from "fs";
-import { readFile, writeFile, mkdir } from "fs/promises";
+export function normalizeAnalysis(val: unknown): any {
+  if (val && typeof val === "object") return val;
+  if (typeof val === "string" && val.trim()) {
+    try { return normalizeAnalysis(JSON.parse(val)); } catch { return { summary: val, strengths: [], weaknesses: [], next_steps: [], continue_message: "" }; }
+  }
+  return null;
+}
 
 export function mapDifficulty(diff: string): string {
   const d = String(diff).toLowerCase().trim();
@@ -771,176 +774,79 @@ export function getFallbackQuestions(topicTitle: string, defDiff: string): any[]
   return templates;
 }
 
-function generateTemplateQuestion(subject: string, topic: string, index: number, difficulty: string) {
-  const questionStems = [
-    "What is the primary objective of {topic} in the context of {subject}?",
-    "Which of the following is a key advantage of utilizing {topic} over traditional methods?",
-    "What is a potential risk or bottleneck when applying {topic} to large-scale systems?",
-    "In {subject}, how does {topic} handle unexpected input anomalies?",
-    "Which tool or framework is commonly associated with implementing {topic}?",
-    "What is the theoretical foundation behind {topic} design principles?",
-    "How is the efficiency of {topic} typically measured in production?",
-    "Which best practice is recommended when configuring {topic} parameters?",
-    "What type of data representation is optimal for {topic} processing?",
-    "Under what condition does {topic} perform most optimally?",
-    "What is the impact of dimensionality or scale on {topic} execution?",
-    "How does {topic} interact with other components in a {subject} pipeline?",
-    "Which algorithm or technique is a core component of {topic}?",
-    "What is the primary difference between a simple and advanced implementation of {topic}?",
-    "How does {topic} ensure model generalization or robustness?",
-    "Which metric is most suitable for validating the output of {topic}?",
-    "What is a common misconception about {topic} in the industry?",
-    "How does resource allocation affect the performance of {topic}?",
-    "Which mathematical concept is fundamental to {topic}?",
-    "What is the future trend or research focus in the field of {topic}?"
-  ];
+/**
+ * Randomizes the position of the correct option within each question, so the
+ * answer isn't always index 0 (which lets someone "always pick option 1" and
+ * score 100%). Applied uniformly to every question — whether it came from the
+ * LLM or the hardcoded fallback bank — right before it's handed back to a
+ * caller, so no individual question source needs to worry about this itself.
+ */
+function shuffleQuestionOptions<T extends { options: string[]; correctIndex?: number; correct_option_index?: number }>(q: T): T {
+  const options = Array.isArray(q.options) ? q.options : [];
+  const originalCorrectIndex = q.correctIndex !== undefined ? q.correctIndex : (q.correct_option_index !== undefined ? q.correct_option_index : 0);
 
-  const stemIndex = index % questionStems.length;
-  const stem = questionStems[stemIndex];
-  
-  const correctOptions = [
-    "To establish structured patterns, reduce bias, and ensure execution consistency.",
-    "Enhanced adaptability to complex patterns and improved overall efficiency.",
-    "Increased latency or memory footprint during peak workload conditions.",
-    "By applying filtering mechanisms, normalization, or default fallbacks.",
-    "Industry-standard packages and integrated development frameworks.",
-    "Rigorous mathematical logic and empirical validation models.",
-    "Through latency metrics, precision scores, and throughput optimization.",
-    "Conducting hyperparameter search and validating on isolated test sets.",
-    "Normalized vectors, relational schemas, or structured feature maps.",
-    "When the input distribution closely aligns with the training assumptions.",
-    "It can cause sparseness or increased complexity, requiring dimensionality reduction.",
-    "It acts as a feature extractor or decision node in the data pipeline.",
-    "Iterative optimization, gradient-based search, or rule-based matching.",
-    "The inclusion of non-linear mappings and deeper parameter spaces.",
-    "By using cross-validation, regularization, and dropout techniques.",
-    "Mean squared error, classification accuracy, or custom utility functions.",
-    "That it guarantees perfect accuracy without requiring high-quality input data.",
-    "Insufficient hardware capacity can cause execution timeouts or failures.",
-    "Linear algebra, probability theory, or multi-variable calculus.",
-    "Improving explainability, reducing latency, and enhancing zero-shot capabilities."
-  ];
-
-  const distractors = [
-    [
-      "To write temporary log files that are automatically deleted after 24 hours.",
-      "To customize the visual color themes of the administrator dashboard.",
-      "To run background network speed tests during peak system traffic."
-    ],
-    [
-      "It eliminates the need for any programming language or compiler.",
-      "It reduces the physical power consumption of the server to zero.",
-      "It allows users to bypass authorization rules completely."
-    ],
-    [
-      "The system UI automatically reverting to default browser settings.",
-      "A lack of documentation in the developer community repositories.",
-      "The server requiring physical hardware reboot after each run."
-    ],
-    [
-      "By shutting down the active execution process immediately.",
-      "By emailing the system administrator a notification check.",
-      "By converting the data into unformatted binary strings."
-    ],
-    [
-      "Basic word processors and spreadsheet document applications.",
-      "Legacy file transfer protocols and storage tape devices.",
-      "Static web browsers running on outdated mobile hardware."
-    ]
-  ];
-
-  const distList = distractors[index % distractors.length];
-  
-  const rawQuestion = stem
-    .replace(/{topic}/g, topic)
-    .replace(/{subject}/g, subject);
-
-  const rawCorrect = correctOptions[stemIndex]
-    .replace(/{topic}/g, topic)
-    .replace(/{subject}/g, subject);
-
-  const rawDistractors = distList.map(d => 
-    d.replace(/{topic}/g, topic).replace(/{subject}/g, subject)
-  );
-
-  const questionText = `${rawQuestion} (Ref: ${index + 1})`;
-  const options = [rawCorrect, ...rawDistractors];
-  
-  const correctIndex = (index * 7) % 4;
-  if (correctIndex !== 0) {
-    const temp = options[0];
-    options[0] = options[correctIndex];
-    options[correctIndex] = temp;
+  if (options.length < 2 || originalCorrectIndex < 0 || originalCorrectIndex >= options.length) {
+    return q;
   }
 
-  const explanation = `This question (Reference ID: ${index + 1}) tests your understanding of ${topic} concepts within ${subject}. The correct answer was chosen because it correctly describes the core architectural, performance, or theoretical characteristics under standard conditions.`;
+  const correctText = options[originalCorrectIndex];
+
+  // Fisher-Yates shuffle of the option indices themselves, so we can track
+  // exactly where the correct answer ends up.
+  const order = options.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  const shuffledOptions = order.map((i) => options[i]);
+  const newCorrectIndex = shuffledOptions.indexOf(correctText);
 
   return {
-    question: questionText,
-    options,
-    correctIndex,
-    explanation,
-    difficulty: mapDifficulty(difficulty)
+    ...q,
+    options: shuffledOptions,
+    correctIndex: newCorrectIndex,
+    ...(q.correct_option_index !== undefined ? { correct_option_index: newCorrectIndex } : {}),
   };
 }
 
-async function getOrCreateDatabank(subject: string, topic: string, difficulty: string): Promise<any[]> {
-  const root = process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-  const filePath = join(root, "question_databank.json");
-  
-  let databank: Record<string, any[]> = {};
-  try {
-    if (existsSync(filePath)) {
-      const content = await readFile(filePath, "utf-8");
-      databank = JSON.parse(content);
-    }
-  } catch (e) {
-    console.warn("Failed to load question databank file, initializing new one.", e);
+/** Picks exactly 5 easy + 3 medium + 2 hard from a pool, filling shortfalls from what's left. */
+function pickBalanced(pool: any[]): any[] {
+  const norm = (d: string) => mapDifficulty(d) === "beginner" ? "easy" : mapDifficulty(d) === "advanced" ? "hard" : "medium";
+  const byDiff = { easy: pool.filter(q => norm(q.difficulty) === "easy"), medium: pool.filter(q => norm(q.difficulty) === "medium"), hard: pool.filter(q => norm(q.difficulty) === "hard") };
+  const shuffle = (arr: any[]) => [...arr].sort(() => 0.5 - Math.random());
+  const picked = [...shuffle(byDiff.easy).slice(0, 5), ...shuffle(byDiff.medium).slice(0, 3), ...shuffle(byDiff.hard).slice(0, 2)];
+  if (picked.length < 10) {
+    const used = new Set(picked);
+    const rest = shuffle(pool.filter(q => !used.has(q)));
+    picked.push(...rest.slice(0, 10 - picked.length));
   }
-
-  const cacheKey = `${subject}::${topic}`.toLowerCase();
-  if (databank[cacheKey] && databank[cacheKey].length >= 100) {
-    return databank[cacheKey];
-  }
-
-  const generated: any[] = [];
-  const baseQuestions = getFallbackQuestions(topic, difficulty).map(q => ({
-    ...q,
-    difficulty: mapDifficulty(q.difficulty)
-  }));
-  
-  generated.push(...baseQuestions);
-
-  const needed = 100 - generated.length;
-  for (let i = 0; i < needed; i++) {
-    const qIndex = generated.length;
-    const diff = qIndex % 3 === 0 ? "easy" : (qIndex % 3 === 1 ? "medium" : "hard");
-    const generatedQuestion = generateTemplateQuestion(subject, topic, qIndex, diff);
-    generated.push(generatedQuestion);
-  }
-
-  databank[cacheKey] = generated;
-  try {
-    await mkdir(root, { recursive: true });
-    await writeFile(filePath, JSON.stringify(databank, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to save question databank file.", e);
-  }
-
-  return generated;
+  return picked.slice(0, 10);
 }
 
+/** Generates exactly 10 MCQs (5 easy, 3 medium, 2 hard) for the given topic via the configured LLM. */
 export async function fetchQuestionsFromAI(subjectTitle: string, topicTitle: string, defDiff: string): Promise<any[]> {
   try {
-    const databank = await getOrCreateDatabank(subjectTitle, topicTitle, defDiff);
-    // Shuffle and pick 10 random questions
-    const shuffled = [...databank].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, 10);
+    const { generateAIText } = await import("@/lib/ai-providers");
+    const prompt = `Generate exactly 10 multiple-choice quiz questions on the topic "${topicTitle}" (subject: ${subjectTitle}). Every question must be factually accurate and specific to this exact topic — no generic or unrelated questions.
+
+Distribution: 5 easy, 3 medium, 2 hard.
+Each question needs exactly 4 options: 1 correct, 3 plausible-but-wrong distractors (not absurd/unrelated ones).
+
+Return ONLY a JSON array of exactly 10 objects, no commentary:
+[{"question": "...", "options": ["...", "...", "...", "..."], "correctIndex": 0, "explanation": "why this is correct", "difficulty": "easy"|"medium"|"hard"}]`;
+
+    const raw = await generateAIText(prompt);
+    const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed) && parsed.length >= 8 && parsed.every(q => Array.isArray(q.options) && q.options.length === 4)) {
+      return parsed.slice(0, 10).map(q => shuffleQuestionOptions({ ...q, difficulty: mapDifficulty(q.difficulty) }));
+    }
+    throw new Error("LLM returned malformed or insufficient MCQs");
   } catch (err) {
-    console.warn("Failed to fetch questions from databank, falling back to basic list.", err);
-    const fallback = getFallbackQuestions(topicTitle, defDiff);
-    const shuffled = [...fallback].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, 10);
+    console.warn("LLM MCQ generation failed, using local fallback question bank.", err);
+    const pool = getFallbackQuestions(topicTitle, defDiff);
+    return pickBalanced(pool).map(q => shuffleQuestionOptions({ ...q, difficulty: mapDifficulty(q.difficulty) }));
   }
 }
 

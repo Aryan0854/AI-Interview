@@ -1,22 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { hashPassword } from "@/lib/employee-auth";
-import fs from "fs";
-import path from "path";
-
-// Helper to read the store
-const STATIC_ACCOUNT_FILE = path.join(process.cwd(), "src", "data", "employee-accounts.json");
-function getAccountFilePath() {
-  if (process.env.VERCEL === "1") {
-    return "/tmp/employee-accounts.json";
-  }
-  return STATIC_ACCOUNT_FILE;
-}
-
-function readStore() {
-  const filePath = getAccountFilePath();
-  const raw = fs.readFileSync(filePath, "utf8");
-  return JSON.parse(raw);
-}
+import { getEmployeeAccount, saveEmployeePassword, syncEmployeeToSupabase } from "@/lib/employee-auth";
 
 function validatePassword(password: string) {
   return password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
@@ -33,8 +16,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Employee ID is required" }, { status: 400 });
     }
 
-    const store = readStore();
-    const employee = store.employees.find((item: any) => item.employee_id.trim().toUpperCase() === employee_id.toUpperCase());
+    const employee = getEmployeeAccount(employee_id);
 
     if (!employee) {
       return NextResponse.json({ error: "Employee ID not found" }, { status: 404 });
@@ -52,15 +34,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Password does not meet the strength requirements (Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char)" }, { status: 400 });
     }
 
-    // Hash and save the password
-    const { hash, salt } = hashPassword(password);
-    employee.password_hash = hash;
-    employee.password_salt = salt;
-    employee.is_first_login = false; // ensure they can now log in normally
-
-    // Write back to database
-    const filePath = getAccountFilePath();
-    fs.writeFileSync(filePath, JSON.stringify(store, null, 2), "utf8");
+    // Hash, save (also clears is_first_login so they can log in normally), and sync
+    // the updated record to Supabase so the admin portal reflects it immediately.
+    const updated = saveEmployeePassword(employee.employee_id, password);
+    if (!updated) {
+      return NextResponse.json({ error: "Failed to reset password" }, { status: 500 });
+    }
+    await syncEmployeeToSupabase(updated);
 
     return NextResponse.json({ status: "ok", message: "Password reset successful" });
   } catch (error: any) {

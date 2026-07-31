@@ -16,6 +16,7 @@ import "@/lib/pdf-polyfill";
 import { localEngine } from "@/lib/local-ai";
 import { geminiEngine } from "@/lib/gemini-ai";
 import { enhanceTextItemsWithAI, type EnhancementItem } from "@/lib/resume-enhancement";
+import { extractResumeStructureWithAI, ResumeExtractionError } from "@/lib/resume-extraction";
 import { supabase } from "@/lib/db";
 import { pushProgress, signalProcessingDone } from "@/lib/sse-queue";
 import { sessionService } from "@/services/session-service";
@@ -176,7 +177,32 @@ export class ResumeService {
       const text = await this.extractTextFromBuffer(fileBuffer);
 
       resume.originalText = text;
-      const parsed = this.parseStructure(text);
+
+      pushProgress(resume.id, {
+        step: "parsing",
+        message: "Extracting skills, education & experience with AI…",
+      });
+
+      let parsed;
+      try {
+        parsed = await extractResumeStructureWithAI(text);
+      } catch (extractionError: any) {
+        // AI extraction is always tried first, across the full Copilot ->
+        // Groq -> Gemini -> Ollama chain. Only if every provider fails do we
+        // fall back to the regex/heuristic parser below, purely so an AI
+        // outage doesn't block resume processing entirely. This is clearly
+        // flagged via parsed.extractionSource = "fallback" for transparency.
+        console.warn(
+          "AI resume extraction failed on all providers; using last-resort regex fallback parser.",
+          extractionError instanceof ResumeExtractionError ? extractionError.message : extractionError
+        );
+        pushProgress(resume.id, {
+          step: "parsing",
+          message: "AI extraction unavailable — using fallback parser…",
+        });
+        parsed = this.parseStructure(text);
+      }
+
       resume.parsed = parsed;
       pushProgress(resume.id, { step: "parsing", message: "Structure parsed successfully." });
 
@@ -461,28 +487,74 @@ export class ResumeService {
     }
   }
 
+  /**
+   * Finds a "date range" in a line of resume text, e.g. "Jan 2020 - Mar 2022",
+   * "2019-2023", "06/2021 to Present". Adapted from a notebook-based approach,
+   * corrected to use proper separator alternation and returning structured
+   * start/end/current fields instead of a raw regex match.
+   */
+  private extractDurationRange(line: string): { raw: string; start: string; end: string; current: boolean } | null {
+    const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+    const MONTH_YEAR = `${MONTH}\\.?\\s+\\d{4}`;
+    const NUMERIC_DATE = `\\d{1,2}[\\/\\-]\\d{4}`;
+    const YEAR = `\\b(?:19|20)\\d{2}\\b`;
+    const START = `(?:${MONTH_YEAR}|${NUMERIC_DATE}|${YEAR})`;
+    const ONGOING = "(?:present|current|now|ongoing)";
+    const END = `(?:${MONTH_YEAR}|${NUMERIC_DATE}|${YEAR}|${ONGOING})`;
+    const SEP = "(?:-|–|—|to|through)";
+
+    const regex = new RegExp(`${START}\\s*${SEP}\\s*${END}`, "i");
+    const match = line.match(regex);
+    if (!match) return null;
+
+    const raw = match[0];
+    const sepSplit = raw.split(new RegExp(`\\s*${SEP}\\s*`, "i"));
+    const start = sepSplit[0]?.trim() || "";
+    const end = sepSplit[1]?.trim() || "";
+    const current = new RegExp(ONGOING, "i").test(end);
+
+    return { raw, start, end, current };
+  }
+
   private matchHeader(line: string): string | null {
     const clean = line.replace(/[•*\-\u2022\s]+/g, " ").trim().toLowerCase();
     if (clean.length === 0 || clean.length > 40) return null;
 
-    const mappings = [
-      { name: "summary", patterns: [/^(?:profile\s+summary|summary|profile|professional\s+summary|objective|career\s+objective|about\s+me|about)$/] },
-      { name: "experience", patterns: [/^(?:experience|professional\s+experience|work\s+experience|employment|employment\s+history|work\s+history|internships?|internship\s+experience|professional\s+history)$/] },
-      { name: "education", patterns: [/^(?:education|academic\s+background|academic\s+profile|academics?|education\s+details?|academic\s+details?)$/] },
-      { name: "skills", patterns: [/^(?:skills|technical\s+skills|core\s+competencies|key\s+skills|expertise|skills\s+&\s+tools|technologies)$/] },
-      { name: "projects", patterns: [/^(?:projects|academic\s+projects|personal\s+projects|selected\s+projects)$/] },
-      { name: "certifications", patterns: [/^(?:certifications?|licenses\s+&\s+certifications?|credentials?)$/] },
-      { name: "publications", patterns: [/^(?:publications?|research\s+publications?|papers)$/] }
-    ];
+    const mappings: Record<string, string[]> = {
+      summary: ["profile summary", "summary", "profile", "professional summary", "objective", "career objective", "about me", "about"],
+      experience: ["experience", "professional experience", "work experience", "employment", "employment history", "work history", "internships", "internship", "internship experience", "professional history"],
+      education: ["education", "academic background", "academic profile", "academics", "education details", "academic details"],
+      skills: ["skills", "technical skills", "core competencies", "key skills", "expertise", "skills tools", "technologies"],
+      projects: ["projects", "academic projects", "personal projects", "selected projects"],
+      certifications: ["certifications", "certification", "licenses certifications", "credentials"],
+      publications: ["publications", "publication", "research publications", "papers"],
+      languages: ["languages", "language proficiency", "languages known", "spoken languages"],
+    };
 
-    for (const mapping of mappings) {
-      if (mapping.patterns.some(p => p.test(clean))) {
-        return mapping.name;
-      }
+    // Handles compound headers like "Work Experience & Internships" — every
+    // &/and/,-separated chunk must be a known synonym for the SAME category.
+    const parts = clean.split(/\s*(?:&|\/|,|\band\b)\s*/).map((p) => p.trim()).filter(Boolean);
+    for (const [name, keywords] of Object.entries(mappings)) {
+      if (keywords.includes(clean)) return name;
+      if (parts.length > 1 && parts.every((p) => keywords.includes(p))) return name;
     }
     return null;
   }
 
+  /**
+   * Last-resort regex/heuristic resume parser — used ONLY when
+   * extractResumeStructureWithAI() (src/lib/resume-extraction.ts) fails after
+   * exhausting the full Copilot -> Groq -> Gemini -> Ollama provider chain.
+   * AI extraction is always attempted first and is strongly preferred; this
+   * exists purely so an AI outage doesn't block resume processing entirely.
+   *
+   * Section splitting/header matching mirrors the AI path's structure.
+   * Personal-info, education, and duration extraction are adapted from a
+   * proven regex-based approach (name-pattern detection with address
+   * exclusion, keyword-triggered multi-entry accumulation for education,
+   * broad month/year duration matching) rather than naive line-position
+   * guessing, to keep this fallback as accurate as a non-LLM parser can be.
+   */
   private parseStructure(text: string): ParsedResume {
     const lines = text
       .split("\n")
@@ -533,7 +605,7 @@ export class ResumeService {
 
       education: this.parseEducation(sections["education"] || ""),
 
-      skills: this.extractSkillsFromText(text),
+      skills: this.extractSkillsFromText(text, sections["languages"] || ""),
 
       projects: this.parseProjects(sections["projects"] || ""),
 
@@ -549,6 +621,8 @@ export class ResumeService {
       achievements: [],
 
       leadership: [],
+
+      extractionSource: "fallback",
 
       sections: boundaries.map((b, idx) => {
         const nextB = boundaries[idx + 1];
@@ -568,6 +642,7 @@ export class ResumeService {
 
   private extractPersonalInfo(lines: string[]) {
     const top = lines.slice(0, 20).join("\n");
+    const opening = lines.slice(0, 8).join(" ").slice(0, 200);
 
     const email =
       top.match(/[\w.-]+@[\w.-]+\.\w+/)?.[0] || "";
@@ -583,11 +658,50 @@ export class ResumeService {
     const github =
       top.match(/github\.com\/[\w-]+/i)?.[0] || "";
 
+    // Name detection: a resume's first line is usually the candidate's name,
+    // but not always (templates sometimes lead with a title/rule/logo text).
+    // Prefer it only if it actually looks like a name (2-4 capitalized
+    // words, no digits/@ symbol); otherwise scan the opening text for a
+    // Firstname Lastname pattern, excluding obvious address words.
+    const looksLikeName = (s: string) => {
+      const clean = s.replace(/[•*\-]/g, "").trim();
+      if (!clean || clean.length > 60) return false;
+      if (/[@\d]/.test(clean)) return false;
+      const nonNamePhrases = ["curriculum vitae", "resume", "cv", "bio data", "biodata", "personal information", "profile"];
+      if (nonNamePhrases.includes(clean.toLowerCase())) return false;
+      const words = clean.split(/\s+/);
+      if (words.length < 2 || words.length > 4) return false;
+      return words.every((w) => /^[A-Z][a-zA-Z.'-]*$/.test(w));
+    };
+
+    const addressWords = ["apartment", "road", "street", "complex", "avenue", "block", "sector", "floor", "nagar", "colony", "house", "lane"];
+
+    let fullName = "";
+    if (lines[0] && looksLikeName(lines[0])) {
+      fullName = lines[0].replace(/[•*\-]/g, "").trim();
+    } else {
+      const nameMatch = opening.match(/\b[A-Z][a-z]+\s[A-Z][a-z]+(\s[A-Z][a-z]+)?\b/);
+      if (nameMatch && !addressWords.some((w) => nameMatch[0].toLowerCase().includes(w))) {
+        fullName = nameMatch[0].trim();
+      } else {
+        fullName = lines[0]?.replace(/[•*\-]/g, "").trim() || "";
+      }
+    }
+
+    // Title: first line after the name that isn't obviously contact info.
+    let title = "";
+    for (let i = 1; i < Math.min(lines.length, 6); i++) {
+      const candidate = lines[i]?.trim() || "";
+      if (!candidate) continue;
+      if (/[\w.-]+@[\w.-]+\.\w+/.test(candidate)) continue;
+      if (/\d{3,}/.test(candidate)) continue;
+      if (/linkedin\.com|github\.com/i.test(candidate)) continue;
+      title = candidate;
+      break;
+    }
+
     return {
-      fullName:
-        lines[0]
-          ?.replace(/[•*\-]/g, "")
-          .trim() || "",
+      fullName,
 
       email,
 
@@ -601,7 +715,7 @@ export class ResumeService {
         ? `https://${github}`
         : "",
 
-      title: lines[1]?.trim() || "",
+      title,
     };
   }
 
@@ -731,15 +845,104 @@ export class ResumeService {
       return [];
     }
 
-    return content
+    const lines = content
       .split("\n")
-      .filter(Boolean)
-      .map((line) => ({
-        id: crypto.randomUUID(),
-        institution: line.split(",")[0]?.trim() || "",
-        degree: line.trim(),
-        graduationDate: line.match(/\b(19|20)\d{2}\b/)?.[0] || "",
-      }));
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const degreeKeywords = /\b(bachelor|master|b\.?\s?tech|m\.?\s?tech|b\.?\s?sc|m\.?\s?sc|b\.?e\.?|m\.?e\.?|mba|ph\.?d|associate|diploma|degree|b\.?\s?a\.?|m\.?\s?a\.?|b\.?\s?com|m\.?\s?com)\b/i;
+    const institutionKeywords = /\b(university|college|institute|school|academy|polytechnic)\b/i;
+    const scoreKeywords = /\b(gpa|cgpa|percentage|score)\b/i;
+
+    const educationInfo: any[] = [];
+    let current: any = null;
+
+    const finalizeCurrent = () => {
+      if (current) educationInfo.push(current);
+      current = null;
+    };
+
+    for (const line of lines) {
+      // Mirrors the notebook's guard against an "Interests" section bleeding
+      // into Education when a resume has no blank line between them.
+      if (/\binterests?\b/i.test(line)) continue;
+
+      const clean = line.replace(/^[•*\-]\s*/, "").trim();
+      const duration = this.extractDurationRange(line);
+
+      if (degreeKeywords.test(line)) {
+        finalizeCurrent();
+        current = {
+          id: crypto.randomUUID(),
+          institution: "",
+          degree: clean,
+          field: "",
+          location: "",
+          graduationDate: duration ? (duration.current ? "Present" : duration.end || duration.raw) : "",
+          gpa: "",
+          honors: [] as string[],
+        };
+        continue;
+      }
+
+      if (!current) {
+        // No degree line seen yet, but an institution line came first.
+        if (institutionKeywords.test(line)) {
+          current = {
+            id: crypto.randomUUID(),
+            institution: clean,
+            degree: "",
+            field: "",
+            location: "",
+            graduationDate: "",
+            gpa: "",
+            honors: [] as string[],
+          };
+        }
+        continue;
+      }
+
+      if (institutionKeywords.test(line) && !current.institution) {
+        current.institution = clean;
+        continue;
+      }
+
+      if (scoreKeywords.test(line)) {
+        const scoreMatch = line.match(/(\d+(\.\d+)?\s*%)|(\d+(\.\d+)?\s*\/\s*\d+(\.\d+)?)|(?:cgpa|gpa)[:\s]*([\d.]+)/i);
+        current.gpa = scoreMatch ? scoreMatch[0].trim() : clean;
+        continue;
+      }
+
+      if (duration && !current.graduationDate) {
+        current.graduationDate = duration.current ? "Present" : duration.end || duration.raw;
+        continue;
+      }
+    }
+
+    finalizeCurrent();
+
+    // Fallback: if nothing matched any keyword (e.g. a terse one-line-per-entry
+    // resume), don't return an empty list — treat each remaining line as a
+    // minimal entry so we never silently drop education info entirely.
+    if (educationInfo.length === 0) {
+      return lines
+        .filter((line) => !/\binterests?\b/i.test(line))
+        .map((line) => {
+          const duration = this.extractDurationRange(line);
+          return {
+            id: crypto.randomUUID(),
+            institution: line.split(",")[0]?.trim() || "",
+            degree: line.replace(/^[•*\-]\s*/, "").trim(),
+            field: "",
+            location: "",
+            graduationDate: duration ? (duration.current ? "Present" : duration.end || duration.raw) : (line.match(/\b(19|20)\d{2}\b/)?.[0] || ""),
+            gpa: "",
+            honors: [] as string[],
+          };
+        });
+    }
+
+    return educationInfo;
   }
 
   private parseProjects(content: string): any[] {
@@ -792,60 +995,48 @@ export class ResumeService {
     return projects;
   }
 
-  private extractSkillsFromText(text: string) {
+  private extractSkillsFromText(text: string, languagesSectionText: string = "") {
     const lower = text.toLowerCase();
 
     const techSkills = [
-      "javascript",
-      "typescript",
-      "python",
-      "react",
-      "vue",
-      "angular",
-      "node",
-      "express",
-      "java",
-      "spring",
-      "c#",
-      ".net",
-      "go",
-      "rust",
-      "php",
-      "docker",
-      "kubernetes",
-      "aws",
-      "azure",
-      "gcp",
-      "postgresql",
-      "mongodb",
-      "mysql",
-      "redis",
-      "git",
-      "ci/cd",
-      "html",
-      "css",
-      "sass",
-      "webpack",
-      "linux",
-      "bash",
+      "javascript", "typescript", "python", "react", "vue", "angular", "node",
+      "express", "java", "spring", "c#", ".net", "go", "rust", "php", "docker",
+      "kubernetes", "aws", "azure", "gcp", "postgresql", "mongodb", "mysql",
+      "redis", "git", "ci/cd", "html", "css", "sass", "webpack", "linux", "bash",
     ];
 
+    const toolSkills = [
+      "git", "docker", "jira", "confluence", "jenkins", "github actions", "gitlab ci",
+      "kubernetes", "terraform", "ansible", "figma", "postman", "slack", "trello",
+      "asana", "notion", "servicenow", "splunk", "grafana", "prometheus", "datadog",
+    ];
+
+    const softSkillKeywords = [
+      "communication", "leadership", "teamwork", "problem-solving", "problem solving",
+      "collaboration", "adaptability", "critical thinking", "time management",
+      "mentoring", "stakeholder management", "conflict resolution", "creativity",
+    ];
+
+    // Spoken/written languages — distinct from programming languages above.
+    // Checked against a dedicated Languages section when the resume has one
+    // (more reliable), falling back to a full-text scan otherwise.
+    const languageKeywords = [
+      "english", "spanish", "french", "german", "hindi", "tamil", "telugu",
+      "kannada", "malayalam", "marathi", "bengali", "gujarati", "punjabi",
+      "urdu", "mandarin", "chinese", "japanese", "korean", "portuguese",
+      "italian", "russian", "arabic", "dutch", "turkish", "vietnamese",
+      "thai", "polish", "swedish", "greek",
+    ];
+    const languageScanText = (languagesSectionText || text).toLowerCase();
+    const languages = languageKeywords
+      .filter((lang) => new RegExp(`\\b${lang}\\b`, "i").test(languageScanText))
+      .map((lang) => lang.charAt(0).toUpperCase() + lang.slice(1));
+
     return {
-      technical: techSkills.filter((skill) =>
-        lower.includes(skill)
-      ),
-
-      soft: [
-        "communication",
-        "leadership",
-        "teamwork",
-        "problem-solving",
-      ],
-
-      tools: ["git", "docker", "jira"],
-
-      languages: [],
-
+      technical: techSkills.filter((skill) => lower.includes(skill)),
+      soft: softSkillKeywords.filter((skill) => lower.includes(skill)),
+      tools: toolSkills.filter((skill) => lower.includes(skill)),
+      languages,
       other: [],
     };
   }

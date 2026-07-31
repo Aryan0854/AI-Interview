@@ -5,7 +5,7 @@ import { join } from 'path';
 import { readFile } from 'fs/promises';
 import { interviewCSVService } from '@/services/interview-csv-service';
 import { gradeAnswer, synthesizeRubricFromQuestion, type GradingRubric } from '@/lib/answer-grading';
-import { checkSyntaxGate, runLocalMockEvaluator } from '@/lib/code-eval-fallback';
+import { checkEmptyGate, detectLanguageMismatch, applyLanguagePenalty, runLocalMockEvaluator, LANGUAGE_MISMATCH_PENALTY } from '@/lib/code-eval-fallback';
 import { generateAIText } from '@/lib/ai-providers';
 
 const getUploadsRoot = () => {
@@ -150,6 +150,68 @@ function inferLanguageFromQuestion(question: string): string {
   return "javascript";
 }
 
+/**
+ * The fully-static (no per-candidate interpolation) fallback question banks used when
+ * AI generation fails. Hoisted to module scope so getQuestions() can recognize a cached
+ * question set as "this was a fallback batch" purely from its content — which matters
+ * for rows already sitting in the database from before generation_source existed, since
+ * a schema migration can't retroactively label historical rows.
+ *
+ * (The tech-track verbal fallback list is NOT included here because it interpolates the
+ * candidate's actual skills per-question, so its exact text varies — for that one,
+ * generation_source is the only reliable signal, which is fine since it only matters for
+ * batches generated after this fix shipped.)
+ */
+const STATIC_FALLBACK_CODING_QUESTIONS = [
+  `Coding Challenge: Write a function in JavaScript to check if a string is a palindrome. The function should ignore case and non-alphanumeric characters. Include examples and edge case handling.`,
+  `Coding Challenge: Write a function in JavaScript that takes an array of integers and a target sum, and returns an array of indices of the two numbers that add up to the target sum (Two Sum problem).`
+];
+
+const STATIC_FALLBACK_BEHAVIORAL_QUESTIONS = [
+  `Describe a time when you had to work with a difficult team member or client. How did you resolve the situation?`,
+  `Explain a time when you made a mistake on a project. How did you address it and what did you learn?`,
+  `Describe a situation where you had to quickly adapt to a major change at work (e.g., new tool, team restructure).`,
+  `How do you prioritize your tasks when handling multiple deadlines or high-pressure projects?`,
+  `What motivates you in your professional career, and how do you align it with company goals?`
+];
+
+const STATIC_FALLBACK_LEADERSHIP_QUESTIONS = [
+  `Can you share an experience where you led a project or initiative? What was the outcome?`,
+  `How do you handle constructive feedback or disagreement with a supervisor's decision?`,
+  `Describe a time when you went above and beyond your standard job responsibilities to deliver a project.`,
+  `How do you mentor junior team members or share knowledge across your team?`,
+  `Describe a time you had to persuade stakeholders to adopt your proposed design or plan.`
+];
+
+const STATIC_FALLBACK_SOFTSKILLS_QUESTIONS = [
+  `Describe a time you solved a complex problem. What steps did you take to find the solution?`,
+  `How do you explain technical or complex concepts to non-technical stakeholders or team members?`,
+  `How do you handle ambiguous requirements when starting a new task or project?`,
+  `Describe how you build trust and maintain strong relationships with your cross-functional partners.`,
+  `What strategies do you use to manage your time and avoid burnout during busy quarters?`
+];
+
+const KNOWN_STATIC_FALLBACK_QUESTIONS = new Set([
+  ...STATIC_FALLBACK_CODING_QUESTIONS,
+  ...STATIC_FALLBACK_BEHAVIORAL_QUESTIONS,
+  ...STATIC_FALLBACK_LEADERSHIP_QUESTIONS,
+  ...STATIC_FALLBACK_SOFTSKILLS_QUESTIONS,
+]);
+
+function isKnownStaticFallbackQuestion(text: string): boolean {
+  return KNOWN_STATIC_FALLBACK_QUESTIONS.has(text);
+}
+
+// Accepts a small model returning slightly more/fewer items than requested instead of
+// hard-failing the whole batch — truncates if over, accepts if reasonably close, only
+// rejects if the response is empty or far short of what was asked for.
+function acceptGenerated(arr: any, requested: number): any[] {
+  if (!Array.isArray(arr) || arr.length === 0) throw new Error(`Expected ${requested} items, got none`);
+  if (arr.length > requested) return arr.slice(0, requested);
+  if (arr.length < Math.ceil(requested * 0.6)) throw new Error(`Expected ~${requested} items, got only ${arr.length}`);
+  return arr;
+}
+
 function isWrongLanguageForCoding(question: string, answer: string): boolean {
   const qLower = question.toLowerCase();
   const aLower = answer.toLowerCase();
@@ -254,18 +316,47 @@ export class InterviewService {
   }
 
   async getQuestions(resumeId: string): Promise<string[]> {
-    // Check if questions already exist for this resume
-    const { data: existing, error } = await supabase
+    // Check if questions already exist for this resume. generation_source may not exist
+    // yet if migration-v5.sql hasn't been applied — retry without it rather than letting
+    // the whole query error out (Postgres errors on selecting a genuinely nonexistent
+    // column, it doesn't just return null for it).
+    let { data: existing, error } = await supabase
       .from('interview_questions')
-      .select('question_text')
+      .select('question_text, generation_source')
       .eq('resume_id', resumeId)
       .order('question_index', { ascending: true });
+
+    if (error) {
+      console.warn("Select with generation_source failed (migration-v5.sql likely not applied), retrying without it:", error.message);
+      const retry = await supabase
+        .from('interview_questions')
+        .select('question_text')
+        .eq('resume_id', resumeId)
+        .order('question_index', { ascending: true });
+      existing = retry.data as any;
+      error = retry.error;
+    }
 
     const resume = await resumeService.getCachedResume(resumeId);
     const hasConfig = !!resume?.report?.interviewConfig;
 
     if (existing && existing.length > 0) {
-      const questionsList = existing.map(row => row.question_text);
+      // A cached set is treated as a stale fallback batch — worth clearing and retrying
+      // — if EITHER: (a) it's tagged generation_source='fallback' (batches generated
+      // after this fix shipped), OR (b) every question text in it matches the known
+      // static fallback banks by content (catches rows already sitting in the database
+      // from before generation_source existed, which a schema migration alone can't
+      // retroactively fix).
+      const isStaleFallback =
+        existing.every((row: any) => row.generation_source === 'fallback') ||
+        existing.every((row: any) => isKnownStaticFallbackQuestion(row.question_text));
+      if (isStaleFallback) {
+        console.warn(`Cached questions for resume ${resumeId} were from a fallback generation — clearing and retrying with the configured AI provider.`);
+        await supabase.from('interview_questions').delete().eq('resume_id', resumeId);
+        return this.generateQuestions(resumeId);
+      }
+
+      const questionsList = existing.map((row: any) => row.question_text);
       if (!hasConfig && questionsList.length < 17) {
         // Upgrade legacy questions sets to 17 questions (15 verbal + 2 coding)
         const diff = 17 - questionsList.length;
@@ -312,6 +403,7 @@ export class InterviewService {
 
     let questions: string[] = [];
     let rubrics: (GradingRubric | null)[] = [];
+    let generationSource: 'ai' | 'fallback' = 'ai';
 
     // Use Gemini if available
     try {
@@ -323,102 +415,39 @@ export class InterviewService {
         const codingCount = sections.coding !== undefined ? Number(sections.coding) : 2;
         const totalVerbalCount = overlappingCount + gapCount + projectsCount;
 
-        const verbalPrompt = `
-        You are an elite technical interviewer. Your goal is to generate ${totalVerbalCount} highly specific, exclusively technical verbal interview questions tailored to the candidate's CV/Resume and the provided Job Description (JD).
+        const verbalPrompt = `Generate exactly ${totalVerbalCount} technical interview questions for this specific candidate. Every question MUST reference an actual technology, project, or requirement named in the CV or JD below — never a generic question that could apply to any candidate.
 
-        Job Description (JD):
-        ${jdText || "No JD specified. Generate questions focusing on candidate's primary skills and experience."}
+JD: ${jdText || "None provided — base questions on the candidate's primary skills and experience below."}
+CV: ${JSON.stringify(resume.parsed)}
+Target roles: ${JSON.stringify(resume.report?.targetRoles || [])}
 
-        Resume Profile (CV):
-        ${JSON.stringify(resume.parsed, null, 2)}
-        
-        Target Roles:
-        ${JSON.stringify(resume.report?.targetRoles || [])}
+Rules:
+- Match difficulty to the candidate's seniority (inferred from CV/JD). No trivia for seniors, no architecture questions for juniors.
+- ${overlappingCount} questions on skills/tools present in BOTH the CV and JD.
+- ${gapCount} questions on JD requirements NOT in the CV (gap/transferability assessment).
+- ${projectsCount} questions probing specific projects/experience actually listed in the CV.
+- Scenario/troubleshooting/trade-off framing, not dictionary definitions.
 
-        CRITICAL QUESTION GENERATION RULES:
-        1. EXPERIENCE-LEVEL ALIGNMENT:
-           - Carefully analyze the JD and CV to identify the seniority level (e.g. Intern, Graduate, Junior/L1, Mid-Level/L2, Senior/L3+, Lead, Manager).
-           - Adjust question complexity, technical depth, and scenarios accordingly. Do NOT ask high-level architecture or management strategy questions to a junior/intern, and do NOT ask simple trivia or basic syntax questions to a senior/lead.
+Return ONLY a JSON array of exactly ${totalVerbalCount} objects, no commentary:
+[{"question": "...", "difficulty": "Easy"|"Medium"|"Hard", "source": "JD+CV Match"|"JD Skill"|"CV Skill", "skill": "...", "expectedPoints": ["key point a strong answer must cover"]}]`;
 
-        2. DISTRIBUTION RULES (MUST EQUAL EXACTLY ${totalVerbalCount} QUESTIONS):
-           - Overlapping Competencies (JD+CV Match): Generate ${overlappingCount} questions focused on technologies, tools, and practices found in both the candidate's CV and the JD.
-           - JD-Specific / Gap Assessment (JD Skill): Generate ${gapCount} questions focusing on key requirements in the JD that are NOT explicitly mentioned in the candidate's CV. Frame these as gap-assessment or transferability questions.
-           - CV-Specific Projects/Experience (CV Skill): Generate ${projectsCount} questions exploring technical details and optimization of projects listed in the CV.
-
-        3. SIMULATION STYLE (SCENARIOS & PROBLEM-SOLVING):
-           - Avoid generic definition/trivia questions (e.g., "What is React state?").
-           - Focus on scenarios, system design tailored to their level, real-world troubleshooting, code optimization, and engineering trade-offs (e.g., "In your React project, how did you handle X issue when Y occurred?").
-
-        4. OUTPUT FORMAT:
-           - Return ONLY a JSON array of exactly ${totalVerbalCount} objects.
-           - Do not include any explanation or commentary.
-           - Follow this JSON schema exactly:
-           [
-             {
-               "question": "The question string",
-               "difficulty": "Easy" | "Medium" | "Hard",
-               "source": "JD+CV Match" | "JD Skill" | "CV Skill",
-               "skill": "React Hooks / SQL Indexing / Docker CI",
-               "expectedPoints": [
-                 "Expected key technical point 1 that the candidate should mention in a strong answer",
-                 "Expected key technical point 2..."
-               ]
-             }
-           ]
-         `;
-
-        const rawVerbal = await geminiEngine.generateText(verbalPrompt);
-        if (!Array.isArray(rawVerbal) || rawVerbal.length !== totalVerbalCount) {
-          throw new Error(`Invalid format: expected ${totalVerbalCount} questions in verbal array`);
-        }
+        const rawVerbal = acceptGenerated(await geminiEngine.generateText(verbalPrompt), totalVerbalCount);
 
         let rawCoding: any[] = [];
         if (codingCount > 0) {
-          const codingPrompt = `
-          You are an elite technical interviewer. Your goal is to generate ${codingCount} hands-on, practical coding challenges tailored to the candidate's CV/Resume and the provided Job Description (JD).
+          const codingPrompt = `Generate exactly ${codingCount} hands-on coding challenges for this candidate, matched to their seniority and primary language from the CV/JD below.
 
-          Job Description (JD):
-          ${jdText || "No JD specified. Generate coding challenges focusing on candidate's primary programming language."}
+JD: ${jdText || "None provided — base challenges on the candidate's primary programming language."}
+CV: ${JSON.stringify(resume.parsed)}
 
-          Resume Profile (CV):
-          ${JSON.stringify(resume.parsed, null, 2)}
+Rules:
+- Real programming tasks only ("write a function that...") — no theory/design/verbal questions.
+- Each question text must start with "Coding Challenge: " and include: problem description, expected input/output, constraints, 2+ examples, a starter function signature.
 
-          CRITICAL CODING CHALLENGE RULES:
-          1. EXPERIENCE-LEVEL ALIGNMENT:
-             - Carefully analyze the JD and CV to identify the seniority level.
-             - Make sure the coding challenges strictly align with the candidate's seniority level.
-             - The challenges MUST be actual programming tasks (e.g., "Write a function that...") that require writing code to solve a specific problem. Do NOT ask conceptual, theoretical, system design, or verbal questions.
+Return ONLY a JSON array of exactly ${codingCount} objects, no commentary:
+[{"question": "Coding Challenge: ...", "difficulty": "Easy"|"Medium"|"Hard", "source": "JD+CV Match", "skill": "...", "expectedPoints": ["expected solution logic/edge cases"]}]`;
 
-          2. STRUCTURED PROBLEM STATEMENT:
-             - The question text MUST contain:
-               - A clear description of the problem.
-               - The expected input and output.
-               - Constraints (e.g., time complexity, memory, input size).
-               - At least 2 examples with inputs and expected outputs.
-               - A starter function signature (e.g., \`function solution() { ... }\`).
-             - The question text MUST start with 'Coding Challenge: '.
-
-          3. OUTPUT FORMAT:
-             - Return ONLY a JSON array of exactly ${codingCount} objects.
-             - Do not include any explanation or commentary.
-             - Follow this JSON schema exactly:
-             [
-               {
-                 "question": "Coding Challenge: The detailed problem description with signature, inputs/outputs, constraints, and examples",
-                 "difficulty": "Easy" | "Medium" | "Hard",
-                 "source": "JD+CV Match",
-                 "skill": "Algorithms / Data Structures / Coding",
-                 "expectedPoints": [
-                   "Expected solution logic, optimization, or edge case handling"
-                 ]
-               }
-             ]
-           `;
-
-          rawCoding = await geminiEngine.generateText(codingPrompt);
-          if (!Array.isArray(rawCoding) || rawCoding.length !== codingCount) {
-            throw new Error(`Invalid format: expected ${codingCount} challenges in coding array`);
-          }
+          rawCoding = acceptGenerated(await geminiEngine.generateText(codingPrompt), codingCount);
         }
 
         const rawQuestions = [...rawVerbal, ...rawCoding];
@@ -443,49 +472,22 @@ export class InterviewService {
         const softskillsCount = sections.softskills !== undefined ? Number(sections.softskills) : 5;
         const totalNonTechCount = behavioralCount + leadershipCount + softskillsCount;
 
-        const nonTechPrompt = `
-        You are an elite HR interviewer. Your goal is to generate ${totalNonTechCount} highly professional non-technical verbal interview questions tailored to the candidate's CV/Resume and the provided Job Description (JD).
+        const nonTechPrompt = `Generate exactly ${totalNonTechCount} behavioral/HR interview questions for this specific candidate. Every question MUST tie back to actual roles, companies, or projects named in the CV below, or a real requirement in the JD — never a generic question that could apply to anyone.
 
-        Job Description (JD):
-        ${jdText || "No JD specified."}
+JD: ${jdText || "None provided."}
+CV: ${JSON.stringify(resume.parsed)}
 
-        Resume Profile (CV):
-        ${JSON.stringify(resume.parsed, null, 2)}
+Rules:
+- Match tone/expectations to seniority (leadership/strategy for seniors, adaptability/teamwork for juniors).
+- ${behavioralCount} questions: past behavior, conflict resolution, pressure, lessons learned — reference their actual work history.
+- ${leadershipCount} questions: leading initiatives, teamwork, mentoring, cross-functional work — reference their actual roles.
+- ${softskillsCount} questions: critical thinking, adaptability, stakeholder communication — reference their actual context.
+- Situational framing ("Tell me about a time when...", "How would you handle...").
 
-        CRITICAL QUESTION GENERATION RULES:
-        1. EXPERIENCE-LEVEL ALIGNMENT:
-           - Adjust question scenarios and expectations to candidate seniority (e.g., leadership and strategy for seniors, adaptability and teamwork for juniors).
+Return ONLY a JSON array of exactly ${totalNonTechCount} objects, no commentary:
+[{"question": "...", "difficulty": "Easy"|"Medium"|"Hard", "source": "Behavioral"|"Leadership"|"Soft Skills", "skill": "...", "expectedPoints": ["key point a strong answer must cover"]}]`;
 
-        2. DISTRIBUTION RULES (MUST EQUAL EXACTLY ${totalNonTechCount} QUESTIONS):
-           - Behavioral Competencies: Generate ${behavioralCount} questions focused on past behavior, conflict resolution, working under pressure, and lessons learned.
-           - Leadership & Collaboration: Generate ${leadershipCount} questions focusing on leading initiatives, teamwork, mentoring, and cross-functional communication.
-           - Problem Solving & Soft Skills: Generate ${softskillsCount} questions assessing soft skills, critical thinking, adaptability, and client/stakeholder communication.
-
-        3. SIMULATION STYLE (SCENARIOS & BEHAVIORAL):
-           - Frame questions as behavioral/situational prompts (e.g., "Tell me about a time when...", "How would you handle a situation where...").
-
-        4. OUTPUT FORMAT:
-           - Return ONLY a JSON array of exactly ${totalNonTechCount} objects.
-           - Do not include any explanation or commentary.
-           - Follow this JSON schema exactly:
-           [
-             {
-               "question": "The question string",
-               "difficulty": "Easy" | "Medium" | "Hard",
-               "source": "Behavioral" | "Leadership" | "Soft Skills",
-               "skill": "Conflict Resolution / Time Management / Client Communication",
-               "expectedPoints": [
-                 "Expected key situational/behavioral point 1 that the candidate should mention in a strong answer",
-                 "Expected key point 2..."
-               ]
-             }
-           ]
-        `;
-
-        const rawNonTech = await geminiEngine.generateText(nonTechPrompt);
-        if (!Array.isArray(rawNonTech) || rawNonTech.length !== totalNonTechCount) {
-          throw new Error(`Invalid format: expected ${totalNonTechCount} questions in non-technical array`);
-        }
+        const rawNonTech = acceptGenerated(await geminiEngine.generateText(nonTechPrompt), totalNonTechCount);
 
         questions = rawNonTech.map((qObj: any) => {
           if (typeof qObj === 'string') return qObj;
@@ -503,6 +505,7 @@ export class InterviewService {
       }
     } catch (err) {
       console.warn("Failed to generate questions with AI, falling back to dynamic defaults.", err);
+      generationSource = 'fallback';
       
       if (isTech) {
         const sections = config.sections || { overlapping: 8, gap: 3, projects: 4, coding: 2 };
@@ -562,10 +565,7 @@ export class InterviewService {
         }
 
         // Coding challenges list
-        const codingChallengesList = [
-          `Coding Challenge: Write a function in JavaScript to check if a string is a palindrome. The function should ignore case and non-alphanumeric characters. Include examples and edge case handling.`,
-          `Coding Challenge: Write a function in JavaScript that takes an array of integers and a target sum, and returns an array of indices of the two numbers that add up to the target sum (Two Sum problem).`
-        ];
+        const codingChallengesList = STATIC_FALLBACK_CODING_QUESTIONS;
 
         for (let i = 0; i < codingCount; i++) {
           questions.push(codingChallengesList[i % codingChallengesList.length]);
@@ -577,29 +577,9 @@ export class InterviewService {
         const leadershipCount = sections.leadership !== undefined ? Number(sections.leadership) : 5;
         const softskillsCount = sections.softskills !== undefined ? Number(sections.softskills) : 5;
 
-        const defaultBehavioralList = [
-          `Describe a time when you had to work with a difficult team member or client. How did you resolve the situation?`,
-          `Explain a time when you made a mistake on a project. How did you address it and what did you learn?`,
-          `Describe a situation where you had to quickly adapt to a major change at work (e.g., new tool, team restructure).`,
-          `How do you prioritize your tasks when handling multiple deadlines or high-pressure projects?`,
-          `What motivates you in your professional career, and how do you align it with company goals?`
-        ];
-
-        const defaultLeadershipList = [
-          `Can you share an experience where you led a project or initiative? What was the outcome?`,
-          `How do you handle constructive feedback or disagreement with a supervisor's decision?`,
-          `Describe a time when you went above and beyond your standard job responsibilities to deliver a project.`,
-          `How do you mentor junior team members or share knowledge across your team?`,
-          `Describe a time you had to persuade stakeholders to adopt your proposed design or plan.`
-        ];
-
-        const defaultSoftSkillsList = [
-          `Describe a time you solved a complex problem. What steps did you take to find the solution?`,
-          `How do you explain technical or complex concepts to non-technical stakeholders or team members?`,
-          `How do you handle ambiguous requirements when starting a new task or project?`,
-          `Describe how you build trust and maintain strong relationships with your cross-functional partners.`,
-          `What strategies do you use to manage your time and avoid burnout during busy quarters?`
-        ];
+        const defaultBehavioralList = STATIC_FALLBACK_BEHAVIORAL_QUESTIONS;
+        const defaultLeadershipList = STATIC_FALLBACK_LEADERSHIP_QUESTIONS;
+        const defaultSoftSkillsList = STATIC_FALLBACK_SOFTSKILLS_QUESTIONS;
 
         for (let i = 0; i < behavioralCount; i++) {
           questions.push(defaultBehavioralList[i % defaultBehavioralList.length]);
@@ -613,21 +593,38 @@ export class InterviewService {
       }
     }
 
+    if (generationSource === 'fallback') {
+      // This is intentionally loud (not just console.warn buried in normal logs): every
+      // candidate who hits this gets a generic, non-personalized question set instead of
+      // one tailored to their actual resume/JD, and — because getQuestions() caches
+      // whatever gets inserted below — this result will be served to that SAME resume on
+      // every future interview attempt too, until the stale rows are cleared. See
+      // generation_source handling in getQuestions().
+      console.error(
+        `[INTERVIEW QUESTIONS FELL BACK TO STATIC DEFAULTS] resumeId=${resumeId} — the configured AI provider (AI_PROVIDER=${process.env.AI_PROVIDER || 'gemini'}) failed to generate questions. Check the "Failed to generate questions with AI" warning above this line for the actual error. These fallback questions are being cached and will be reused for this resume until the stale interview_questions rows are cleared.`
+      );
+    }
+
     // Save generated questions to DB, alongside a grading rubric ("answer key") for each
     // question — this is generated by the SAME LLM call as the question itself (zero
     // extra cost), and is what lets both the primary LLM grader and the local fallback
     // grader mark answers against a real, consistent standard instead of guessing.
+    //
+    // generation_source is tagged 'ai' or 'fallback' so getQuestions() can tell a
+    // genuine cached question set apart from a stale fallback set and retry instead of
+    // permanently serving generic defaults to a resume that hit a transient AI failure.
     const insertData = questions.map((q, i) => ({
       resume_id: resumeId,
       question_index: i,
       question_text: q,
       grading_rubric: rubrics[i] || synthesizeRubricFromQuestion(q),
+      generation_source: generationSource,
     }));
     let { error } = await supabase.from('interview_questions').insert(insertData);
     if (error) {
-      // grading_rubric column may not exist yet (migration-v4.sql not applied) — degrade
-      // gracefully rather than losing the whole question set.
-      console.warn("Insert with grading_rubric failed, retrying without it:", error.message);
+      // grading_rubric/generation_source columns may not exist yet (migration-v5.sql not
+      // applied) — degrade gracefully rather than losing the whole question set.
+      console.warn("Insert with grading_rubric/generation_source failed, retrying without them:", error.message);
       const legacyInsertData = questions.map((q, i) => ({
         resume_id: resumeId,
         question_index: i,
@@ -685,60 +682,40 @@ export class InterviewService {
       const jdText = resume ? await getJobDescriptionText(resume.report?.jdId) : "";
 
       if (isCoding) {
-        // Coding answers: run the same deterministic syntax gate used by the interactive
-        // "Run" simulator first (zero cost, catches definite failures), then grade via
-        // LLM, falling back to the same local pattern-matching evaluator "Run" uses on
-        // LLM failure — one consistent standard for code across both surfaces.
         const inferredLanguage = inferLanguageFromQuestion(question);
-        const gate = checkSyntaxGate(inferredLanguage, answer);
-        if (gate) {
-          score = 1;
-          feedback = gate.error;
+        const emptyGate = checkEmptyGate(answer);
+        if (emptyGate) {
+          score = 0;
+          feedback = emptyGate.error || "No code submitted.";
         } else {
+          const mismatch = detectLanguageMismatch(inferredLanguage, answer);
           try {
             const prompt = `
-            You are an elite technical interviewer and expert code reviewer.
-            Evaluate the candidate's code submission for a practical coding challenge during an assessment.
+You are a code grader. Evaluate this coding answer against 3 test cases you generate, in whatever language it is actually written — always attempt evaluation, never refuse due to language.
 
-            Context details to align expectations:
-            - Job Description (JD):
-            ${jdText || "Not specified."}
+Job Description: ${jdText || "Not specified."}
+Candidate level: ${resume ? JSON.stringify(resume.parsed, null, 2) : "Not specified."}
+Question: "${question}"
+Code:
+\`\`\`
+${answer}
+\`\`\`
 
-            - Candidate's CV / Experience Level:
-            ${resume ? JSON.stringify(resume.parsed, null, 2) : "Not specified."}
+Generate 3 test cases, trace real execution, record actual vs expected, set passed. Score correctness/efficiency/quality based on the code's logic only, not its language.
 
-            Coding Challenge Asked: "${question}"
-            Candidate's Submitted Code Solution:
-            \`\`\`
-            ${answer}
-            \`\`\`
-
-            EVALUATION INSTRUCTIONS:
-            1. Rate the code solution on a scale from 1 to 10. Be extremely critical.
-            2. Assign a score of 0 or 1 for empty code, default template boilerplates, code in the wrong language (e.g. Python code for a JavaScript challenge), or code that only contains comments/stubs.
-            3. Grade expectations based on the candidate's seniority / experience level (e.g. expect clean code, optimization, time/space complexity analysis, and edge cases from senior candidates; focus on logic correctness and syntax from juniors).
-            4. Review code correctness, logical correctness, efficiency (Big O time/space complexity), and formatting.
-            5. Provide detailed constructive feedback (1-2 sentences) outlining what the candidate did well, any bug/edge-case gaps, and how the code could be optimized.
-
-            Return ONLY a JSON object:
-            {
-              "score": 8,
-              "feedback": "Detailed constructive feedback on code correctness and quality..."
-            }
-            `;
-
+Return ONLY: {"testCases": [{"name": "...", "expected": "...", "actual": "...", "passed": true}], "feedback": "1-2 sentences on correctness, gaps, and optimization."}
+`;
             const result = await geminiEngine.generateText(prompt);
-            if (result && typeof result.score === 'number' && typeof result.feedback === 'string') {
-              score = Math.max(0, Math.min(10, Math.round(result.score)));
-              feedback = result.feedback;
-            }
+            const testCases = Array.isArray(result?.testCases) ? result.testCases : [];
+            const passed = testCases.filter((t: any) => t.passed).length;
+            const baseScore = testCases.length > 0 ? Math.round((passed / testCases.length) * 10) : 5;
+            score = applyLanguagePenalty(baseScore, mismatch);
+            feedback = (result?.feedback || `${passed}/${testCases.length} test cases passed.`) + (mismatch ? ` (${LANGUAGE_MISMATCH_PENALTY}-point language mismatch penalty applied.)` : "");
           } catch (err) {
             console.warn("Failed to evaluate coding answer with AI, using local pattern-matching fallback.", err);
             const fallback = runLocalMockEvaluator(question, inferredLanguage, answer);
             score = fallback.score;
-            feedback = (fallback.compiles
-              ? `Code evaluated using the automated fallback grader (AI grading service was unavailable): ${fallback.testCases.filter((t: any) => t.passed).length}/${fallback.testCases.length} checks passed.`
-              : fallback.error || "Code did not pass automated syntax checks.");
+            feedback = `Evaluated via automated fallback grader (AI unavailable): ${fallback.testCases.filter((t: any) => t.passed).length}/${fallback.testCases.length} checks passed.`;
           }
         }
       } else {

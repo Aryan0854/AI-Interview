@@ -1,6 +1,8 @@
 -- ============================================================
 -- Employee Learning Portal — Seed data for initial deployment
--- Run after runs migration-v1.sql
+-- Run after migration-v1.sql AND migration-v6.sql (the latter adds the
+-- UNIQUE constraints this script's ON CONFLICT DO NOTHING clauses need).
+-- Safe to re-run any number of times — duplicate titles are skipped.
 -- ============================================================
 
 -- ---------------------------------------------------------------------------
@@ -21,50 +23,65 @@ VALUES
   ('MLOps',                          'CI/CD for ML, model serving, monitoring, and drift detection',                          'Gauge',             '#f97316', 11),
   ('Data Engineering',               'Pipelines, ETL/ELT, orchestration with Airflow / dbt, lakehouse',                      'GitBranch',         '#14b8a6', 12),
   ('Large Language Models',         'Prompt engineering, fine-tuning, RAG, function calling, evaluation',                   'Bot',               '#a855f7', 13),
-  ('AI Ethics & Governance',        'Bias mitigation, responsible AI, EU AI Act, model auditing',                           'Shield',            '#64748b', 14);
+  ('AI Ethics & Governance',        'Bias mitigation, responsible AI, EU AI Act, model auditing',                           'Shield',            '#64748b', 14)
+ON CONFLICT (title) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- 2. Modules — Artificial Intelligence (subject 1)
 -- ---------------------------------------------------------------------------
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Introduction to AI',          'History, definitions, and key milestones of artificial intelligence',       1 FROM learning_subjects WHERE title = 'Artificial Intelligence';
+SELECT id, 'Introduction to AI',          'History, definitions, and key milestones of artificial intelligence',       1 FROM learning_subjects WHERE title = 'Artificial Intelligence'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Search Algorithms',          'BFS, DFS, A*, minimax, and alpha-beta pruning',                            2 FROM learning_subjects WHERE title = 'Artificial Intelligence';
+SELECT id, 'Search Algorithms',          'BFS, DFS, A*, minimax, and alpha-beta pruning',                            2 FROM learning_subjects WHERE title = 'Artificial Intelligence'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Knowledge Representation',   'Ontologies, logic, frames, and semantic networks',                         3 FROM learning_subjects WHERE title = 'Artificial Intelligence';
+SELECT id, 'Knowledge Representation',   'Ontologies, logic, frames, and semantic networks',                         3 FROM learning_subjects WHERE title = 'Artificial Intelligence'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Expert Systems',            'Rule-based systems, inference engines, and MYCIN architecture',            4 FROM learning_subjects WHERE title = 'Artificial Intelligence';
+SELECT id, 'Expert Systems',            'Rule-based systems, inference engines, and MYCIN architecture',            4 FROM learning_subjects WHERE title = 'Artificial Intelligence'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'AI Agents',                 'Goal-directed agents, environments, and utility-based decision-making',    5 FROM learning_subjects WHERE title = 'Artificial Intelligence';
+SELECT id, 'AI Agents',                 'Goal-directed agents, environments, and utility-based decision-making',    5 FROM learning_subjects WHERE title = 'Artificial Intelligence'
+ON CONFLICT (subject_id, title) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- 3. Modules — Machine Learning (subject 2)
 -- ---------------------------------------------------------------------------
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Supervised Learning',       'Linear/logistic regression, decision trees, k-NN, and SVM',            1 FROM learning_subjects WHERE title = 'Machine Learning';
+SELECT id, 'Supervised Learning',       'Linear/logistic regression, decision trees, k-NN, and SVM',            1 FROM learning_subjects WHERE title = 'Machine Learning'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Unsupervised Learning',     'K-means, PCA, t-SNE, and Gaussian mixture models',                       2 FROM learning_subjects WHERE title = 'Machine Learning';
+SELECT id, 'Unsupervised Learning',     'K-means, PCA, t-SNE, and Gaussian mixture models',                       2 FROM learning_subjects WHERE title = 'Machine Learning'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Reinforcement Learning',    'Q-learning, policy gradients, and actor-critic architectures',           3 FROM learning_subjects WHERE title = 'Machine Learning';
+SELECT id, 'Reinforcement Learning',    'Q-learning, policy gradients, and actor-critic architectures',           3 FROM learning_subjects WHERE title = 'Machine Learning'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Model Evaluation',         'Metrics, cross-validation, ROC-AUC, F1, and hyperparameter tuning',    4 FROM learning_subjects WHERE title = 'Machine Learning';
+SELECT id, 'Model Evaluation',         'Metrics, cross-validation, ROC-AUC, F1, and hyperparameter tuning',    4 FROM learning_subjects WHERE title = 'Machine Learning'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Ensemble Methods',         'Random forests, XGBoost, bagging, and boosting',                         5 FROM learning_subjects WHERE title = 'Machine Learning';
+SELECT id, 'Ensemble Methods',         'Random forests, XGBoost, bagging, and boosting',                         5 FROM learning_subjects WHERE title = 'Machine Learning'
+ON CONFLICT (subject_id, title) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- 4. Modules — Data Science (subject 3)  (sample only — extend as needed)
 -- ---------------------------------------------------------------------------
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Statistical Foundations',   'Probability, distributions, hypothesis testing, and Bayesian inference', 1 FROM learning_subjects WHERE title = 'Data Science';
+SELECT id, 'Statistical Foundations',   'Probability, distributions, hypothesis testing, and Bayesian inference', 1 FROM learning_subjects WHERE title = 'Data Science'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'EDA & Visualization',       'Matplotlib, seaborn, EDA techniques, and storytelling with data',        2 FROM learning_subjects WHERE title = 'Data Science';
+SELECT id, 'EDA & Visualization',       'Matplotlib, seaborn, EDA techniques, and storytelling with data',        2 FROM learning_subjects WHERE title = 'Data Science'
+ON CONFLICT (subject_id, title) DO NOTHING;
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Pandas & NumPy Deep Dive',  'Vectorised operations, pivoting, and time-series analysis',              3 FROM learning_subjects WHERE title = 'Data Science';
+SELECT id, 'Pandas & NumPy Deep Dive',  'Vectorised operations, pivoting, and time-series analysis',              3 FROM learning_subjects WHERE title = 'Data Science'
+ON CONFLICT (subject_id, title) DO NOTHING;
 
 -- Remaining 11 subjects get a single generic module each as a starting point
 INSERT INTO learning_modules (subject_id, title, description, order_index)
 SELECT id, 'Core Concepts', 'Foundational topics for ' || title, 1
-FROM learning_subjects WHERE title NOT IN ('Artificial Intelligence','Machine Learning','Data Science');
+FROM learning_subjects WHERE title NOT IN ('Artificial Intelligence','Machine Learning','Data Science')
+ON CONFLICT (subject_id, title) DO NOTHING;
 
 -- ============================================================
 -- 5. Topics  (SQL names from snake_case; not lucide)
@@ -83,7 +100,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Introduction to AI'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -96,7 +114,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Search Algorithms'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -108,7 +127,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Knowledge Representation'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -120,7 +140,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Expert Systems'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -132,7 +153,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'AI Agents'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 -- ---------- Machine Learning subject ----------
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -147,7 +169,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Supervised Learning'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -160,7 +183,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Unsupervised Learning'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -172,7 +196,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Reinforcement Learning'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -185,7 +210,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Model Evaluation'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -198,7 +224,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Ensemble Methods'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 -- ---------- Data Science subject ----------
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -211,7 +238,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Data Science')
   AND m.title = 'Statistical Foundations'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -223,7 +251,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Data Science')
   AND m.title = 'EDA & Visualization'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
@@ -235,7 +264,8 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Data Science')
   AND m.title = 'Pandas & NumPy Deep Dive'
-ORDER BY t.ord;
+ORDER BY t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 -- ---------- All 11 remaining subjects (each has "Core Concepts" module) ----------
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -247,7 +277,8 @@ CROSS JOIN (VALUES
   ('Advanced Topics',               'advanced',    3, 35)
 ) AS t(title, difficulty, ord, mins)
 WHERE m.title = 'Core Concepts'
-ORDER BY m.subject_id, t.ord;
+ORDER BY m.subject_id, t.ord
+ON CONFLICT (module_id, title) DO NOTHING;
 
 -- ============================================================
 -- Seed completed

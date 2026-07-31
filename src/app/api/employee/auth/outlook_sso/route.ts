@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addEmployeeAccount, getEmployeeAccount, getEmployeeByEmail, signToken } from "@/lib/employee-auth";
+import { addEmployeeAccount, getEmployeeAccount, getEmployeeByEmail, signToken, syncEmployeeToSupabase } from "@/lib/employee-auth";
 
 export async function POST(request: NextRequest) {
   let body: any;
@@ -48,6 +48,11 @@ export async function POST(request: NextRequest) {
     if (!employee) {
       return NextResponse.json({ error: "Failed to retrieve employee account" }, { status: 500 });
     }
+
+    // Ensure this account exists in Supabase (source of truth for the admin
+    // Employee Portal tab) immediately — not just in the local auth JSON store.
+    // Without this, newly signed-up employees never appear in the admin portal.
+    await syncEmployeeToSupabase(employee);
 
     const token = signToken(employee.employee_id);
     return NextResponse.json({ 

@@ -92,7 +92,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const [answers,     setAnswers]     = useState<Record<number, number>>({});
   const [timeLeft,    setTimeLeft]    = useState<number | null>(null);
   const [msg,         setMsg]         = useState<string | null>(null);
-  const [submitted,   setSubmitted]   = useState<{ correct: number; total: number; accuracy_pct: number; ai_analysis?: string; topic_title: string } | null>(null);
+  const [submitted,   setSubmitted]   = useState<{ correct: number; total: number; accuracy_pct: number; ai_analysis?: any; topic_title: string } | null>(null);
 
   const savedRef     = useRef(false);
   const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null);

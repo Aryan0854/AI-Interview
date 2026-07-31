@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
 import { authenticateRequest } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
+import { normalizeAnalysis } from "@/lib/learning-fallback";
 
 export async function GET(request: NextRequest) {
   const auth = authenticateRequest(request);
@@ -58,12 +59,19 @@ export async function GET(request: NextRequest) {
     );
     const totalLearningHours = round(totalLearningMins / 60);
 
-    const { data: subjects, error: subjErr } = await supabase
+    const { data: rawSubjects, error: subjErr } = await supabase
       .from("learning_subjects")
       .select("id, title")
       .eq("is_active", true)
       .order("order_index");
     if (subjErr) throw subjErr;
+
+    const seenTitles = new Set<string>();
+    const subjects = (rawSubjects ?? []).filter((s) => {
+      if (seenTitles.has(s.title)) return false;
+      seenTitles.add(s.title);
+      return true;
+    });
 
     const subjectBreakdown = (subjects ?? []).map((subject) => {
       const subjectTests = completedTests.filter((t: any) => t.subject_id === subject.id);
@@ -148,7 +156,7 @@ export async function GET(request: NextRequest) {
         started_at: test.started_at,
         completed_at: test.completed_at ?? "",
         topic_breakdown: [],
-        ai_analysis: test.in_progress ?? "",
+        ai_analysis: normalizeAnalysis(test.in_progress),
         improvement_suggestions: [],
       };
     });
@@ -273,7 +281,7 @@ export async function GET(request: NextRequest) {
           started_at: test.started_at,
           completed_at: test.completed_at || "",
           topic_breakdown: [],
-          ai_analysis: typeof test.in_progress === "string" ? test.in_progress : "",
+          ai_analysis: normalizeAnalysis(test.in_progress),
           improvement_suggestions: [],
         };
       });

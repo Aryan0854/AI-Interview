@@ -126,7 +126,7 @@ export async function POST(
         return q ? q.question_text : a.question_id;
       });
 
-    let aiAnalysis = "";
+    let aiAnalysis: any = null;
     try {
       const { askGemini } = await import("@/lib/learning-ai");
       aiAnalysis = await askGemini("analyse_results", {

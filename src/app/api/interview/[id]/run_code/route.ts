@@ -2,7 +2,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { geminiEngine } from '@/lib/gemini-ai';
-import { checkSyntaxGate, runLocalMockEvaluator } from '@/lib/code-eval-fallback';
+import { checkEmptyGate, detectLanguageMismatch, applyLanguagePenalty, runLocalMockEvaluator, LANGUAGE_MISMATCH_PENALTY } from '@/lib/code-eval-fallback';
 
 export async function POST(
   request: NextRequest,
@@ -11,103 +11,54 @@ export async function POST(
   try {
     const { id: resumeId } = await params;
     const body = await request.json();
-    const { question_index, question, language, code } = body;
+    const { question, language, code } = body;
 
     if (!question || !language || !code) {
       return NextResponse.json({ error: 'Missing required fields: question, language, code' }, { status: 400 });
     }
 
-    // Hardcoded gate first — skip the LLM call entirely for definite, mechanical failures.
-    const gateResult = checkSyntaxGate(language, code);
-    if (gateResult) {
-      console.log(`Syntax gate rejected submission for resume ${resumeId} without calling the LLM (deterministic check).`);
-      return NextResponse.json(gateResult);
-    }
+    const emptyGate = checkEmptyGate(code);
+    if (emptyGate) return NextResponse.json(emptyGate);
+
+    const mismatch = detectLanguageMismatch(language, code);
 
     const prompt = `
-    You are an elite automated code runner, compiler simulator, and grading engine.
-    Your task is to compile and run the candidate's code against exactly 3 distinct test cases (including normal inputs and edge cases) for the specified coding challenge, strictly simulating execution in the specified programming language.
+You are a code execution simulator and grader. Evaluate this submission against the problem below, in whatever language it is actually written in — always attempt execution, never refuse.
 
-    Coding Challenge:
-    "${question}"
+Problem: "${question}"
+Declared language: ${language}
+Code:
+\`\`\`
+${code}
+\`\`\`
 
-    Programming Language:
-    "${language}"
+STEPS:
+1. Generate exactly 3 test cases (standard input, alternate bounds, edge case).
+2. Trace the code's actual execution against each; record real output as "actual", compare to "expected", set "passed".
+3. Score 0-10 based on how many test cases pass and overall code quality/correctness. Base this ONLY on whether the logic is correct, not on which language it's written in.
 
-    Candidate's Code Solution:
-    \`\`\`${language}
-    ${code}
-    \`\`\`
+Return ONLY this JSON, no markdown:
+{"compiles": true, "error": null, "testCases": [{"name": "...", "input": "...", "expected": "...", "actual": "...", "passed": true}], "score": 0}
+`;
 
-    EXECUTION & COMPILATION SIMULATION STEPS:
-    1. SYNTAX & COMPILATION CHECK:
-       - STRICT LANGUAGE CHECK: Check if the candidate's code is written using the proper syntax, keywords, and structural patterns of the selected programming language ("${language}").
-       - If the code belongs to a different programming language (for instance, if "def " or Python indentation is used when JavaScript/TypeScript/Java/C++ is selected, or if braces and "const/function" are used when Python is selected), you MUST fail compilation. Set "compiles" to false, and in "error" output a clear syntax compilation error (e.g. "Compilation Error: Python syntax cannot be compiled in a ${language} environment").
-       - Check the code for standard syntax or compile errors based on "${language}" specifications.
-       - If there are syntax or compiler errors, set "compiles" to false, and provide the compiler-like stderr message in "error" (e.g. Line numbers, error details). All "passed" values in test cases should be false, and "actual" should show the compilation/syntax error.
-    2. TEST CASE GENERATION:
-       - Create exactly 3 distinct test cases for the problem description.
-       - Each test case must check a specific behavior:
-         - Test Case 1: Standard / Happy path input.
-         - Test Case 2: Standard input with slightly different bounds or parameters.
-         - Test Case 3: Edge case (e.g. empty input, null, zeros, single item, boundary values, or case-sensitivity).
-    3. STEP-BY-STEP SIMULATION (DRY RUN):
-       - If compilation succeeded, trace the execution of the candidate's code step-by-step against each test case.
-       - Record the exact return value or stdout as "actual".
-       - Check if "actual" value matches the "expected" output. If it does, set "passed" to true, else false.
-    4. CORRECTNESS SCORING:
-       - Set a score from 0 to 10 based on how many test cases passed and the general correctness of the code. (e.g., all pass = 10, partial correctness = 4-8, compilation failure = 0).
-
-    OUTPUT FORMAT:
-    - You MUST return ONLY a JSON object.
-    - Do NOT wrap in markdown code blocks.
-    - Follow this JSON schema exactly:
-    {
-      "compiles": true,
-      "error": null,
-      "testCases": [
-        {
-          "name": "Test Case 1: Standard Palindrome",
-          "input": "string = 'racecar'",
-          "expected": "true",
-          "actual": "true",
-          "passed": true
-        },
-        {
-          "name": "Test Case 2: Palindrome with capital letters",
-          "input": "string = 'RaceCar'",
-          "expected": "true",
-          "actual": "true",
-          "passed": true
-        },
-        {
-          "name": "Test Case 3: Non-palindrome string",
-          "input": "string = 'hello'",
-          "expected": "false",
-          "actual": "false",
-          "passed": true
-        }
-      ],
-      "score": 10
-    }
-    `;
-
-    console.log(`Running compiler/sandbox simulation for resume ${resumeId}, language ${language}...`);
     try {
       const result = await geminiEngine.generateText(prompt);
-      return NextResponse.json(result);
-    } catch (geminiErr: any) {
-      console.warn("Gemini sandbox compiler failed (rate limit or quota limit). Falling back to local heuristic runner...", geminiErr);
-      const fallbackResult = runLocalMockEvaluator(question, language, code);
-      return NextResponse.json(fallbackResult);
+      const testCases = Array.isArray(result?.testCases) ? result.testCases : [];
+      const passed = testCases.filter((t: any) => t.passed).length;
+      const baseScore = testCases.length > 0 ? Math.round((passed / testCases.length) * 10) : Math.max(0, Math.min(10, Number(result?.score) || 0));
+      const score = applyLanguagePenalty(baseScore, mismatch);
+      return NextResponse.json({
+        compiles: result?.compiles !== false,
+        error: mismatch ? `${result?.error || ''} (${LANGUAGE_MISMATCH_PENALTY}-point language mismatch penalty applied)`.trim() : result?.error || null,
+        testCases,
+        score,
+      });
+    } catch (err) {
+      console.warn("AI code evaluation failed, using local fallback.", err);
+      return NextResponse.json(runLocalMockEvaluator(question, language, code));
     }
   } catch (err: any) {
-    console.error("Error simulating code run:", err);
-    return NextResponse.json({ 
-      compiles: false, 
-      error: `Compiler Sandbox Error: ${err.message || 'Unknown execution error'}`, 
-      testCases: [],
-      score: 0 
-    }, { status: 500 });
+    console.error("Error evaluating code:", err);
+    return NextResponse.json({ compiles: false, error: err.message || 'Unknown execution error', testCases: [], score: 0 }, { status: 500 });
   }
 }

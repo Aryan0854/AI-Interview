@@ -26,6 +26,10 @@ export interface ParsedResume {
   achievements: Achievement[];
   leadership: Leadership[];
   sections: ResumeSection[];
+  /** "ai" = extracted via the LLM provider chain (default path). "fallback" =
+   *  the LLM chain failed entirely and the regex/heuristic parser was used as
+   *  a last resort. Absent on older records parsed before this flag existed. */
+  extractionSource?: "ai" | "fallback";
 }
 
 export interface PersonalInfo {

@@ -1,38 +1,5 @@
 import { generateAIText } from "@/lib/ai-providers";
 
-// Predefined mock datasets for sample workspace documents
-const MOCK_L1_L2_JD = {
-  job_title: "L1/L2 Application Support Engineer",
-  department: "Technical",
-  experience: "2-5 years",
-  support_level: "L1/L2",
-  employment_type: "Full Time",
-  shift_timing: "Rotational / 24x7",
-  skills: ["SQL", "Linux", "Windows", "Shell scripting", "APIs"],
-  monitoring_tools: ["Splunk", "Datadog"],
-  cloud_platforms: ["AWS"],
-  soft_skills: ["Communication", "Problem solving", "Teamwork"],
-  responsibilities: ["Incident management", "Troubleshooting", "Monitoring", "RCA", "Ticketing support"],
-  tools: ["ServiceNow", "Jira"],
-  metrics: ["SLA adherence", "MTTR"]
-};
-
-const MOCK_L2_PRODUCTION_JD = {
-  job_title: "L2 Production Support Engineer",
-  department: "Technical",
-  experience: "3-6 years",
-  support_level: "L2",
-  employment_type: "Full Time",
-  shift_timing: "Rotational",
-  skills: ["SQL", "Linux", "Unix", "Shell scripting", "API Testing", "Python"],
-  monitoring_tools: ["Splunk", "Datadog", "AppDynamics"],
-  cloud_platforms: ["AWS", "Azure"],
-  soft_skills: ["Stakeholder management", "Communication", "Problem solving"],
-  responsibilities: ["Incident management", "RCA", "Troubleshooting", "Production deployment support", "Batch job support"],
-  tools: ["Jira", "ServiceNow", "Autosys"],
-  metrics: ["SLA adherence", "MTTR", "Incident resolution rate"]
-};
-
 /**
  * Extracts structured JD details from raw text.
  *
@@ -186,13 +153,6 @@ const runMockFallback = (text: string, filename?: string): any => {
       }
     }
   }
-
-  // Ensure default lists if empty
-  if (extracted.skills.length === 0) extracted.skills = ['SQL', 'Unix'];
-  if (extracted.soft_skills.length === 0) extracted.soft_skills = ['Communication', 'Problem solving'];
-  if (extracted.responsibilities.length === 0) extracted.responsibilities = ['Troubleshooting', 'Monitoring'];
-  if (extracted.tools.length === 0) extracted.tools = ['Jira', 'ServiceNow'];
-  if (extracted.metrics.length === 0) extracted.metrics = ['SLA adherence'];
 
   return extracted;
 };

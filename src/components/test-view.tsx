@@ -9,13 +9,14 @@ function ResultsView(props: {
     correct: number;
     total: number;
     accuracy_pct: number;
-    ai_analysis?: string;
+    ai_analysis?: { summary?: string; strengths?: string[]; weaknesses?: string[]; next_steps?: string[]; continue_message?: string } | string;
     topic_title: string;
   };
   onRetake: () => void;
   onGoDashboard: () => void;
 }) {
   const { correct = 0, total = 0, accuracy_pct = 0, ai_analysis, topic_title } = props.result;
+  const analysis = typeof ai_analysis === "string" ? { summary: ai_analysis } : ai_analysis;
   const pct = accuracy_pct;
   const accent = pct >= 75
     ? "text-emerald-600"
@@ -45,13 +46,42 @@ function ResultsView(props: {
       </motion.div>
 
       {/* ── analysis ── */}
-      {ai_analysis && (
-        <div className="rounded-xl bg-indigo-50 dark:bg-slate-900/50 border-2 border-indigo-200 dark:border-slate-800 p-5 space-y-2">
-          <div className="flex items-center gap-2 mb-1">
+      {analysis && (analysis.summary || analysis.strengths?.length || analysis.weaknesses?.length) && (
+        <div className="rounded-xl bg-indigo-50 dark:bg-slate-900/50 border-2 border-indigo-200 dark:border-slate-800 p-5 space-y-4">
+          <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-indigo-500" />
             <p className="text-xs font-bold text-indigo-700 dark:text-violet-400 uppercase tracking-wider">Insights</p>
           </div>
-          <p className="text-sm text-indigo-900 dark:text-slate-200 leading-relaxed whitespace-pre-line font-medium">{ai_analysis}</p>
+          {analysis.summary && (
+            <p className="text-sm text-indigo-900 dark:text-slate-200 leading-relaxed font-medium">{analysis.summary}</p>
+          )}
+          {!!analysis.strengths?.length && (
+            <div>
+              <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400 mb-1">Strengths</p>
+              <ul className="text-sm text-indigo-900 dark:text-slate-300 space-y-1 list-disc list-inside">
+                {analysis.strengths.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+          {!!analysis.weaknesses?.length && (
+            <div>
+              <p className="text-xs font-bold text-amber-700 dark:text-amber-400 mb-1">Areas to improve</p>
+              <ul className="text-sm text-indigo-900 dark:text-slate-300 space-y-1 list-disc list-inside">
+                {analysis.weaknesses.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+          {!!analysis.next_steps?.length && (
+            <div>
+              <p className="text-xs font-bold text-indigo-700 dark:text-violet-400 mb-1">Next steps</p>
+              <ul className="text-sm text-indigo-900 dark:text-slate-300 space-y-1 list-disc list-inside">
+                {analysis.next_steps.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </div>
+          )}
+          {analysis.continue_message && (
+            <p className="text-sm text-indigo-700 dark:text-violet-400 italic pt-1 border-t border-indigo-200 dark:border-slate-800">{analysis.continue_message}</p>
+          )}
         </div>
       )}
 

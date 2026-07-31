@@ -80,6 +80,29 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Fetch every registered learning-portal employee account from Supabase.
+  // This is independent of test activity — a newly signed-up employee with
+  // zero test attempts must still show up in the admin Employee Portal tab.
+  let registeredAccounts: {
+    employee_id: string;
+    full_name: string;
+    email: string | null;
+    department: string | null;
+    role: string | null;
+    created_at: string | null;
+  }[] = [];
+
+  try {
+    const { data: dbEmployees, error: employeesErr } = await supabase
+      .from("employees")
+      .select("employee_id, full_name, email, department, role, created_at");
+
+    if (employeesErr) throw employeesErr;
+    registeredAccounts = dbEmployees || [];
+  } catch (err) {
+    console.warn("Failed to fetch registered employee accounts from Supabase:", err);
+  }
+
   // Query MCQ test results for each employee
   const testResultsMap = new Map<string, { status: string; score: number; completedAt: string | null }[]>();
   const allTestResults: any[] = [];
@@ -263,10 +286,10 @@ export async function GET(request: NextRequest) {
   }
 
   if (!isExport) {
-    cacheStore.set("employees", { employees, allTestResults }, activeJdId);
+    cacheStore.set("employees", { employees, allTestResults, registeredAccounts }, activeJdId);
   }
 
-  return NextResponse.json({ employees, allTestResults });
+  return NextResponse.json({ employees, allTestResults, registeredAccounts });
 }
 
 export async function POST(request: NextRequest) {

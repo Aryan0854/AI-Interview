@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
 import { authenticateRequest } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
+import { normalizeAnalysis } from "@/lib/learning-fallback";
 
 interface TestRow {
   id: string;
@@ -42,7 +43,7 @@ interface ResultItem {
   started_at: string | null;
   completed_at: string | null;
   topic_breakdown: unknown[];
-  ai_analysis: string;
+  ai_analysis: any;
   improvement_suggestions: unknown[];
 }
 
@@ -145,7 +146,7 @@ export async function GET(request: NextRequest) {
         started_at: test.started_at,
         completed_at: test.completed_at,
         topic_breakdown: [],
-        ai_analysis: typeof test.in_progress === "string" ? test.in_progress : "",
+        ai_analysis: normalizeAnalysis(test.in_progress),
         improvement_suggestions: [],
       };
     });
@@ -184,7 +185,7 @@ export async function GET(request: NextRequest) {
           started_at: test.started_at,
           completed_at: test.completed_at,
           topic_breakdown: [],
-          ai_analysis: typeof test.in_progress === "string" ? test.in_progress : "",
+          ai_analysis: normalizeAnalysis(test.in_progress),
           improvement_suggestions: [],
         };
       });
