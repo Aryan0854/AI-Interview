@@ -5229,8 +5229,8 @@ export default function AdminDashboard() {
 
       {videoPreview && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fade-in text-foreground">
-          <Card className="w-full max-w-3xl bg-card border border-indigo-150 dark:border-slate-800 shadow-2xl rounded-3xl overflow-hidden animate-scale-up">
-            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
+          <Card className="w-full max-w-4xl bg-card border border-indigo-150 dark:border-slate-800 shadow-2xl rounded-3xl animate-scale-up overflow-visible">
+            <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between rounded-t-3xl">
               <div className="flex items-center gap-2 min-w-0">
                 <Video className="w-5 h-5 shrink-0" />
                 <span className="font-bold text-sm tracking-wide truncate">
@@ -5246,25 +5246,30 @@ export default function AdminDashboard() {
                   setVideoPreview(null);
                 }}
                 className="text-white/80 hover:text-white font-bold"
+                aria-label="Close video player"
               >
                 ✕
               </button>
             </div>
-            <div className="p-4 bg-black">
-              <video
-                key={videoPreview.url}
-                src={videoPreview.url}
-                controls
-                autoPlay
-                className="w-full max-h-[70vh] rounded-xl bg-black"
-                onError={() => {
-                  setActionError(
-                    "Could not play this recording — file may be corrupt or missing. Reset the test and ask the employee to retake."
-                  );
-                }}
-              />
-              <p className="text-[10px] text-slate-400 mt-3 text-center">
-                Use Play here or open downloads in Chrome/Edge/VLC. Windows Media Player cannot play WebM.
+            <div className="bg-black rounded-b-3xl overflow-hidden">
+              <div className="admin-native-video-shell">
+                <video
+                  key={videoPreview.url}
+                  src={videoPreview.url}
+                  className="admin-native-video"
+                  controls
+                  autoPlay
+                  playsInline
+                  preload="metadata"
+                  onError={() => {
+                    setActionError(
+                      "Could not play this recording — file may be corrupt or missing. Reset the test and ask the employee to retake."
+                    );
+                  }}
+                />
+              </div>
+              <p className="text-[10px] text-slate-400 px-4 py-3 text-center border-t border-slate-800">
+                Native player controls — play/pause, volume, timeline, and fullscreen. Open in Chrome/Edge or VLC if WebM fails elsewhere.
               </p>
             </div>
           </Card>
