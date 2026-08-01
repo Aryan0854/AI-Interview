@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +56,16 @@ import {
   type PortalTestStatusFilter,
 } from "@/lib/portal-test-status";
 
+function formatSyncAge(date: Date): string {
+  const sec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  return `${Math.floor(sec / 60)}m ago`;
+}
+
+const AUTO_SYNC_EMPLOYEES_MS = 15_000;
+const AUTO_SYNC_OTHER_MS = 30_000;
+
 function portalEmployeeName(account: { full_name?: string | null; employee_id?: string | null }): string {
   const name = account.full_name?.trim();
   if (name) return name;
@@ -69,19 +79,27 @@ function portalEmployeeId(account: { employee_id?: string | null }): string {
 function portalVideoTest(account: {
   test_id?: string | null;
   test_status?: string | null;
-  tests?: Array<{ id: string; videoUrl?: string | null; status?: string }>;
+  tests?: Array<{
+    id: string;
+    videoUrl?: string | null;
+    status?: string;
+    hasRecording?: boolean;
+    proctoring?: { videoUploaded?: boolean } | null;
+  }>;
 }): { testId: string; hasVideo: boolean } | null {
-  // Only treat a recording as downloadable after a completed attempt with a real URL.
-  const completedWithVideo = account.tests?.find(
-    (t) => t.status === "completed" && !!t.videoUrl
-  );
+  const recordingReady = (test: {
+    status?: string;
+    hasRecording?: boolean;
+  }) => test.status === "completed" && Boolean(test.hasRecording);
+
+  const completedWithVideo = account.tests?.find(recordingReady);
   if (completedWithVideo) {
     return { testId: completedWithVideo.id, hasVideo: true };
   }
 
   if (account.test_status === "completed" && account.test_id) {
     const primary = account.tests?.find((t) => t.id === account.test_id);
-    if (primary?.videoUrl) {
+    if (primary && recordingReady(primary)) {
       return { testId: primary.id, hasVideo: true };
     }
   }
@@ -297,6 +315,11 @@ export default function AdminResumeDashboard() {
   const [jdSavedText, setJdSavedText] = useState("");
   const jdFileInputRef = useRef<HTMLInputElement>(null);
   const isInitialLoadRef = useRef(true);
+  const [dashboardReady, setDashboardReady] = useState(false);
+  const [lastEmployeeSyncAt, setLastEmployeeSyncAt] = useState<Date | null>(null);
+  const [syncAgeTick, setSyncAgeTick] = useState(0);
+  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
+  const employeeSyncInFlightRef = useRef(false);
   const [isJdDragging, setIsJdDragging] = useState(false);
 
   // Invite Configuration Modal states
@@ -380,6 +403,9 @@ export default function AdminResumeDashboard() {
       }
     >
   >({});
+  const [assignedQuestionsByEmployee, setAssignedQuestionsByEmployee] = useState<
+    Record<string, { loading: boolean; questions: string[]; error?: string }>
+  >({});
   const [emails, setEmails] = useState<any[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -460,15 +486,6 @@ export default function AdminResumeDashboard() {
 
     loadInitialData(adminEmail);
   }, [authenticated, adminEmail]);
-
-  useEffect(() => {
-    if (authenticated && adminEmail) {
-      if (isInitialLoadRef.current) {
-        return;
-      }
-      loadEmployees();
-    }
-  }, [authenticated, adminEmail, selectedJdId]);
 
   useEffect(() => {
     if (authenticated && adminEmail) {
@@ -587,9 +604,9 @@ export default function AdminResumeDashboard() {
     }
   };
 
-  const loadResumes = async (emailToUse?: string) => {
+  const loadResumes = async (emailToUse?: string, opts?: { silent?: boolean }) => {
     const email = emailToUse || adminEmail;
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     try {
       const res = await fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`);
       const data = await res.json();
@@ -597,7 +614,7 @@ export default function AdminResumeDashboard() {
     } catch (err) {
       console.error("Failed to fetch resumes", err);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
 
@@ -649,9 +666,9 @@ export default function AdminResumeDashboard() {
     }
   };
 
-  const loadEmails = async (emailToUse?: string) => {
+  const loadEmails = async (emailToUse?: string, opts?: { silent?: boolean }) => {
     const email = emailToUse || adminEmail;
-    setIsEmailsLoading(true);
+    if (!opts?.silent) setIsEmailsLoading(true);
     try {
       const res = await fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`);
       const data = await res.json();
@@ -659,7 +676,7 @@ export default function AdminResumeDashboard() {
     } catch (err) {
       console.error("Failed to fetch emails", err);
     } finally {
-      setIsEmailsLoading(false);
+      if (!opts?.silent) setIsEmailsLoading(false);
     }
   };
 
@@ -676,20 +693,122 @@ export default function AdminResumeDashboard() {
     }
   };
 
-  const loadEmployees = async () => {
-    setIsEmployeesLoading(true);
+  const loadEmployees = useCallback(async (opts?: { silent?: boolean; fresh?: boolean }) => {
+    if (employeeSyncInFlightRef.current && opts?.silent) return;
+    employeeSyncInFlightRef.current = true;
+    if (!opts?.silent) {
+      setIsEmployeesLoading(true);
+    } else {
+      setIsBackgroundSyncing(true);
+    }
     try {
-      const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "all";
-      const jdQuery = `?activeJdId=${encodeURIComponent(sendJdId)}`;
-      const res = await fetch(`/api/admin/employees${jdQuery}`);
+      const sendJdId = selectedJdId && !selectedJdId.includes("@") ? selectedJdId : "all";
+      const freshQuery = opts?.fresh ? "&fresh=1" : "";
+      const res = await fetch(
+        `/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}${freshQuery}`
+      );
       const data = await res.json();
       setEmployees(data.employees || []);
       setAllTestResults(data.allTestResults || []);
       setResourcePortalEmployees(data.resourcePortalEmployees || []);
+      setLastEmployeeSyncAt(new Date());
     } catch (err) {
       console.error("Failed to fetch employees", err);
     } finally {
-      setIsEmployeesLoading(false);
+      employeeSyncInFlightRef.current = false;
+      if (!opts?.silent) {
+        setIsEmployeesLoading(false);
+      } else {
+        setIsBackgroundSyncing(false);
+      }
+    }
+  }, [selectedJdId]);
+
+  useEffect(() => {
+    if (authenticated && adminEmail) {
+      if (isInitialLoadRef.current) {
+        return;
+      }
+      loadEmployees();
+    }
+  }, [authenticated, adminEmail, selectedJdId, loadEmployees]);
+
+  // Live auto-sync: poll Supabase-backed portal data without manual refresh
+  useEffect(() => {
+    if (!authenticated || !adminEmail || !dashboardReady) return;
+
+    const syncEmployees = () => {
+      if (document.hidden) return;
+      void loadEmployees({ silent: true, fresh: true });
+    };
+
+    syncEmployees();
+    const employeeInterval = window.setInterval(syncEmployees, AUTO_SYNC_EMPLOYEES_MS);
+
+    let otherInterval: number | undefined;
+    if (activeTab === "suitable" || activeTab === "unsuitable") {
+      const syncResumes = () => {
+        if (!document.hidden) void loadResumes(undefined, { silent: true });
+      };
+      syncResumes();
+      otherInterval = window.setInterval(syncResumes, AUTO_SYNC_OTHER_MS);
+    } else if (activeTab === "outbox") {
+      const syncOutbox = () => {
+        if (!document.hidden) void loadEmails(undefined, { silent: true });
+      };
+      syncOutbox();
+      otherInterval = window.setInterval(syncOutbox, AUTO_SYNC_OTHER_MS);
+    }
+
+    const onVisible = () => {
+      if (!document.hidden) syncEmployees();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.clearInterval(employeeInterval);
+      if (otherInterval) window.clearInterval(otherInterval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [authenticated, adminEmail, dashboardReady, activeTab, loadEmployees]);
+
+  useEffect(() => {
+    if (!lastEmployeeSyncAt) return;
+    const id = window.setInterval(() => setSyncAgeTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [lastEmployeeSyncAt]);
+
+  const loadAssignedQuestions = async (employeeId: string) => {
+    let shouldFetch = true;
+    setAssignedQuestionsByEmployee((prev) => {
+      const cached = prev[employeeId];
+      if (cached?.loading || (cached?.questions?.length && !cached.error)) {
+        shouldFetch = false;
+        return prev;
+      }
+      return {
+        ...prev,
+        [employeeId]: { loading: true, questions: prev[employeeId]?.questions ?? [] },
+      };
+    });
+    if (!shouldFetch) return;
+
+    try {
+      const res = await fetch(
+        `/api/admin/employees/mapping-questions?employeeId=${encodeURIComponent(employeeId)}`
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load assigned questions");
+
+      setAssignedQuestionsByEmployee((prev) => ({
+        ...prev,
+        [employeeId]: { loading: false, questions: data.assigned_questions ?? [] },
+      }));
+    } catch (err: any) {
+      setAssignedQuestionsByEmployee((prev) => ({
+        ...prev,
+        [employeeId]: { loading: false, questions: [], error: err.message },
+      }));
     }
   };
 
@@ -727,15 +846,25 @@ export default function AdminResumeDashboard() {
 
   useEffect(() => {
     for (const account of resourcePortalEmployees) {
-      if (
-        expandedEmployees[account.employee_id] &&
-        account.test_id &&
-        account.test_status === "completed"
-      ) {
-        loadTestAttemptDetails(account.test_id);
+      if (expandedEmployees[account.employee_id]) {
+        if (
+          !(account.assigned_questions?.length) &&
+          !assignedQuestionsByEmployee[account.employee_id]?.questions?.length
+        ) {
+          loadAssignedQuestions(account.employee_id);
+        }
+        if (
+          account.test_id &&
+          account.test_status === "completed"
+        ) {
+          loadTestAttemptDetails(account.test_id);
+        }
       }
     }
   }, [expandedEmployees, resourcePortalEmployees]);
+
+  const isEmployeeDataPending =
+    loading || isEmployeesLoading || refreshingType === "employees";
 
   const filteredPortalEmployees = useMemo(() => {
     const term = testResultsSearch.trim().toLowerCase();
@@ -806,7 +935,7 @@ export default function AdminResumeDashboard() {
         delete next[testId];
         return next;
       });
-      await loadEmployees();
+      await loadEmployees({ fresh: true });
     } catch (err: any) {
       setActionError(err.message || "Failed to reset test");
     } finally {
@@ -820,8 +949,11 @@ export default function AdminResumeDashboard() {
     employeeName?: string
   ) => {
     const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+    const token =
+      typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
+    const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : "";
     const res = await adminFetch(
-      `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}&inline=1`
+      `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}&inline=1${tokenQuery}`
     );
     if (!res.ok) {
       let message = "Recording not available for this test.";
@@ -867,9 +999,14 @@ export default function AdminResumeDashboard() {
     employeeName?: string
   ) => {
     try {
-      if (videoPreview?.url) URL.revokeObjectURL(videoPreview.url);
-      const { blob, fileName } = await fetchTestVideoBlob(testId, employeeId, employeeName);
-      const url = URL.createObjectURL(blob);
+      if (videoPreview?.url?.startsWith("blob:")) {
+        URL.revokeObjectURL(videoPreview.url);
+      }
+      const token =
+        typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
+      if (!token) throw new Error("Admin session expired. Please sign in again.");
+      const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+      const url = `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}&inline=1&token=${encodeURIComponent(token)}`;
       setVideoPreview({
         url,
         title: employeeName || employeeId || fileName,
@@ -995,7 +1132,7 @@ export default function AdminResumeDashboard() {
       const [resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] = await Promise.all([
         withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 20000, "resumes"),
         withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
-        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`), 20000, "employees"),
+        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`), 60000, "employees"),
         withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
         withTimeout(fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`), 15000, "logs"),
         withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
@@ -1019,6 +1156,7 @@ export default function AdminResumeDashboard() {
       setResourcePortalEmployees(employeesData.resourcePortalEmployees || []);
       setResetLogs(resetLogsData.logs || []);
       setSystemLogs(logsData.logs || []);
+      setLastEmployeeSyncAt(new Date());
       
       if (settingsData && typeof settingsData === "object") {
         setPortalSettings({
@@ -1040,6 +1178,7 @@ export default function AdminResumeDashboard() {
       console.error("Failed to load initial data", err);
     } finally {
       isInitialLoadRef.current = false;
+      setDashboardReady(true);
       setLoading(false);
       setIsJdLoading(false);
       setIsEmailsLoading(false);
@@ -1108,7 +1247,7 @@ export default function AdminResumeDashboard() {
         } else if (type === "candidates" || type === "interviews") {
           await loadResumes();
         } else if (type === "employees") {
-          await loadEmployees();
+          await loadEmployees({ fresh: true });
         }
         await loadLogs();
         setActionSuccess(`Scan & refresh of ${type} completed successfully.`);
@@ -1156,7 +1295,7 @@ export default function AdminResumeDashboard() {
         } else if (uploadCategory === "jd" || uploadCategory === "br") {
           await loadJobDescriptions();
         } else if (uploadCategory === "employee") {
-          await loadEmployees();
+          await loadEmployees({ fresh: true });
         }
         await loadLogs();
         
@@ -2102,7 +2241,7 @@ export default function AdminResumeDashboard() {
         setActionSuccess(`${selectedEmployeeIds.length} employee record(s) deleted successfully.`);
         setSelectedEmployeeIds([]);
         setTimeout(() => setActionSuccess(null), 3000);
-        await loadEmployees();
+        await loadEmployees({ fresh: true });
       } catch (error: any) {
         setActionError(error.message || "Failed to delete employee records.");
       } finally {
@@ -2584,6 +2723,26 @@ export default function AdminResumeDashboard() {
               Upload job descriptions, screen candidate CVs in bulk, override suitability categories, and reset test sessions.
             </p>
           </div>
+          {dashboardReady && (
+            <div
+              className="flex items-center gap-2 rounded-xl border border-border bg-card/80 px-3 py-2 text-[11px] font-bold text-muted-foreground shadow-sm"
+              data-sync-tick={syncAgeTick}
+            >
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  isBackgroundSyncing ? "bg-amber-400 animate-pulse" : "bg-emerald-500"
+                }`}
+                aria-hidden
+              />
+              <span>
+                {isBackgroundSyncing
+                  ? "Syncing live data…"
+                  : lastEmployeeSyncAt
+                    ? `Live · updated ${formatSyncAge(lastEmployeeSyncAt)}`
+                    : "Live sync on"}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Global Action Toasts */}
@@ -2627,7 +2786,7 @@ export default function AdminResumeDashboard() {
                 >
                   Employee Data
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {employees.length}
+                    {isEmployeeDataPending ? "…" : employees.length}
                   </Badge>
                 </button>
                 <button
@@ -2666,7 +2825,10 @@ export default function AdminResumeDashboard() {
                 >
                   Employee Portal
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee-portal" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {resourcePortalEmployees.length || Array.from(new Set(allTestResults.map(t => t.employeeId))).length}
+                    {isEmployeeDataPending
+                      ? "…"
+                      : resourcePortalEmployees.length ||
+                        Array.from(new Set(allTestResults.map((t) => t.employeeId))).length}
                   </Badge>
                 </button>
                 <button
@@ -2687,10 +2849,16 @@ export default function AdminResumeDashboard() {
 
               {/* Candidates List Container */}
               <div className="p-6">
-                {loading ? (
+                {isEmployeeDataPending ? (
                   <div className="flex-1 flex flex-col items-center justify-center py-24 gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                    <p className="text-slate-500 font-bold text-sm">Loading records…</p>
+                    <p className="text-slate-500 font-bold text-sm">
+                      {activeTab === "employee-portal"
+                        ? "Loading employee portal data…"
+                        : activeTab === "employee"
+                          ? "Loading employee pool…"
+                          : "Loading screening dashboard…"}
+                    </p>
                   </div>
                 ) : activeTab === "requirements" ? (
                   <div className="space-y-4">
@@ -3084,13 +3252,7 @@ export default function AdminResumeDashboard() {
                     </div>
                   </div>
                 ) : activeTab === "employee" ? (
-                  isEmployeesLoading ? (
-                    <div className="flex-1 flex flex-col items-center justify-center py-24 gap-3">
-                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                      <p className="text-slate-500 font-bold text-sm">Loading employee pool…</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
+                  <div className="space-y-4">
                       {/* Summary Metrics */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
@@ -3327,7 +3489,6 @@ export default function AdminResumeDashboard() {
                         </div>
                       </div>
                     </div>
-                  )
                 ) : activeTab === "employee-portal" ? (
                   <div className="space-y-4">
                     <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/60 dark:bg-indigo-950/20 px-4 py-3 text-xs text-indigo-800 dark:text-indigo-200">
@@ -3413,7 +3574,7 @@ export default function AdminResumeDashboard() {
                           size="sm"
                           className="flex-1 sm:flex-none rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-xs"
                         >
-                          {refreshingType === "employees" ? (
+                          {isEmployeesLoading ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
                             <RefreshCcw className="w-3.5 h-3.5" />
@@ -3513,7 +3674,9 @@ export default function AdminResumeDashboard() {
                                             title={
                                               videoTest?.hasVideo
                                                 ? "Play completed test recording in browser"
-                                                : "Recording available after the test is completed"
+                                                : account.test_status === "completed"
+                                                  ? "No valid recording saved for this attempt — use Reset Test and ask employee to retake"
+                                                  : "Recording available after the test is completed"
                                             }
                                             onClick={() =>
                                               videoTest &&
@@ -3588,8 +3751,26 @@ export default function AdminResumeDashboard() {
                                               <h4 className="font-extrabold text-[11px] uppercase tracking-wider text-slate-500 mb-2">
                                                 Assigned Questions ({account.assigned_question_count})
                                               </h4>
-                                              {account.test_status === "completed" && account.test_id ? (
-                                                (() => {
+                                              {(() => {
+                                                const lazyAssigned = assignedQuestionsByEmployee[account.employee_id];
+                                                const assignedQuestionsList =
+                                                  account.assigned_questions?.length
+                                                    ? account.assigned_questions
+                                                    : lazyAssigned?.questions ?? [];
+
+                                                if (
+                                                  !assignedQuestionsList.length &&
+                                                  lazyAssigned?.loading
+                                                ) {
+                                                  return (
+                                                    <div className="flex items-center gap-2 text-[11px] text-slate-500 py-2">
+                                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                      Loading assigned questions...
+                                                    </div>
+                                                  );
+                                                }
+
+                                                if (account.test_status === "completed" && account.test_id) {
                                                   const attemptData = testAttemptDetails[account.test_id];
                                                   if (attemptData?.loading) {
                                                     return (
@@ -3638,25 +3819,32 @@ export default function AdminResumeDashboard() {
                                                       </p>
                                                     );
                                                   }
+                                                }
+
+                                                if (assignedQuestionsList.length > 0) {
                                                   return (
                                                     <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                                                      {(account.assigned_questions || []).map((q: string, idx: number) => (
+                                                      {assignedQuestionsList.map((q: string, idx: number) => (
                                                         <li key={idx}>{q}</li>
                                                       ))}
                                                     </ol>
                                                   );
-                                                })()
-                                              ) : (account.assigned_questions || []).length > 0 ? (
-                                                <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                                                  {(account.assigned_questions || []).map((q: string, idx: number) => (
-                                                    <li key={idx}>{q}</li>
-                                                  ))}
-                                                </ol>
-                                              ) : (
-                                                <p className="text-[11px] text-slate-400 font-medium italic">
-                                                  No assigned question text found in Resource_Question_Mapping.xlsx for this employee.
-                                                </p>
-                                              )}
+                                                }
+
+                                                if (lazyAssigned?.error) {
+                                                  return (
+                                                    <p className="text-[11px] text-rose-500 font-medium">
+                                                      Could not load assigned questions: {lazyAssigned.error}
+                                                    </p>
+                                                  );
+                                                }
+
+                                                return (
+                                                  <p className="text-[11px] text-slate-400 font-medium italic">
+                                                    No assigned question text found in Resource_Question_Mapping.xlsx for this employee.
+                                                  </p>
+                                                );
+                                              })()}
                                             </div>
                                             {account.tests?.length > 0 && (
                                               <div className="border border-indigo-50 dark:border-slate-850 rounded-xl overflow-hidden bg-white dark:bg-slate-950 shadow-inner">
@@ -5052,7 +5240,9 @@ export default function AdminResumeDashboard() {
               <button
                 type="button"
                 onClick={() => {
-                  URL.revokeObjectURL(videoPreview.url);
+                  if (videoPreview?.url?.startsWith("blob:")) {
+                    URL.revokeObjectURL(videoPreview.url);
+                  }
                   setVideoPreview(null);
                 }}
                 className="text-white/80 hover:text-white font-bold"
@@ -5067,6 +5257,11 @@ export default function AdminResumeDashboard() {
                 controls
                 autoPlay
                 className="w-full max-h-[70vh] rounded-xl bg-black"
+                onError={() => {
+                  setActionError(
+                    "Could not play this recording — file may be corrupt or missing. Reset the test and ask the employee to retake."
+                  );
+                }}
               />
               <p className="text-[10px] text-slate-400 mt-3 text-center">
                 Use Play here or open downloads in Chrome/Edge/VLC. Windows Media Player cannot play WebM.

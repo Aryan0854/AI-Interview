@@ -5,6 +5,8 @@ import { getOwnedTest } from "@/lib/employee-test-access";
 import {
   employeeTestVideoStoragePath,
   getEmployeeTestVideoAdminUrl,
+  isValidWebmBuffer,
+  repairWebmBuffer,
   saveEmployeeTestVideo,
 } from "@/lib/employee-test-video";
 import { markProctorVideoUploaded, normalizeProctoring } from "@/lib/employee-proctoring";
@@ -63,9 +65,12 @@ export async function POST(
             { status: 404 }
           );
         }
-        const buffer = Buffer.from(await data.arrayBuffer());
-        if (!buffer.length) {
-          return NextResponse.json({ error: "Recording file is empty." }, { status: 400 });
+        const buffer = repairWebmBuffer(Buffer.from(await data.arrayBuffer()));
+        if (!isValidWebmBuffer(buffer)) {
+          return NextResponse.json(
+            { error: "Recording file is missing or corrupt in storage." },
+            { status: 400 }
+          );
         }
 
         // Re-save through repair path so junk bytes before EBML header are stripped.

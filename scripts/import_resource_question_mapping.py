@@ -21,6 +21,7 @@ QB_SOURCE_FILE = ROOT / "QB-new.xlsx"
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 LOCAL_TESTS_FILE = ROOT / "uploads" / "local_tests_db.json"
 MANIFEST_FILE = ROOT / "uploads" / "employee_test_manifest.json"
+PROFILES_FILE = ROOT / "src" / "data" / "resource_portal_profiles.json"
 
 TOPIC_ID = "resource-product-assessment"
 SUBJECT_ID = "resource-subject"
@@ -167,6 +168,30 @@ def load_mapping_rows():
             }
         )
     return employees
+
+
+def export_portal_profiles(employees):
+    profiles = []
+    for emp in employees:
+        assigned = emp.get("assigned_questions") or []
+        profiles.append(
+            {
+                "employee_id": emp["employee_id"],
+                "full_name": emp.get("full_name") or emp["employee_id"],
+                "role": emp.get("role") or "employee",
+                "domain": emp.get("department") or "",
+                "product": emp.get("product") or "",
+                "email": emp.get("email") or "",
+                "ddh": emp.get("ddh") or "",
+                "emp_status": emp.get("emp_status") or "",
+                "remarks": emp.get("remarks") or "",
+                "assigned_questions": assigned,
+                "assigned_question_count": len(assigned),
+            }
+        )
+    PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROFILES_FILE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+    return len(profiles)
 
 
 def hash_password(password: str):
@@ -328,6 +353,9 @@ def main():
     print("Loading Resource Question Mapping...")
     employees = load_mapping_rows()
     print(f"Loaded {len(employees)} employees from mapping file.")
+
+    export_portal_profiles(employees)
+    print(f"Exported portal profiles JSON: {PROFILES_FILE}")
 
     created_accounts = ensure_accounts(employees)
     print(f"Ensured employee accounts ({created_accounts} new accounts added).")

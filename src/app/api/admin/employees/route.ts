@@ -22,6 +22,7 @@ import {
   loadEmployeeTestManifest,
 } from '@/services/resource-mapping-service';
 import { normalizeProctoring } from '@/lib/employee-proctoring';
+import { listEmployeeTestRecordingIds } from '@/lib/employee-test-video';
 
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -31,65 +32,74 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const activeJdId = searchParams.get('activeJdId') || undefined;
   const isExport = searchParams.get('export') === 'true';
+  const skipCache = searchParams.get('fresh') === '1';
 
-  const cached = cacheStore.get("employees", 30000, activeJdId);
+  const cached = !skipCache && cacheStore.get("employees", 120000, activeJdId);
   if (cached && !isExport) {
     return NextResponse.json(cached);
   }
 
   const jsonPath = getEmployeesJsonPath();
-  let employees: EmployeeRecord[] = [];
 
-  try {
-    const raw = await readFile(jsonPath, "utf8");
-    const parsed = JSON.parse(raw) as EmployeeRecord[];
-    const seen = new Set<string>();
-    employees = parsed.filter(emp => {
-      if (!emp.employee_id) return true;
-      if (seen.has(emp.employee_id)) return false;
-      seen.add(emp.employee_id);
-      return true;
-    });
-  } catch (e: any) {
-    if (e.code === "ENOENT") {
-      const res = await refreshEmployees(activeJdId);
-      try {
-        const raw = await readFile(jsonPath, "utf8");
-        employees = JSON.parse(raw);
-      } catch (e2) {
-        employees = [];
+  const loadEmployeesFromFile = async (): Promise<EmployeeRecord[]> => {
+    try {
+      const raw = await readFile(jsonPath, "utf8");
+      const parsed = JSON.parse(raw) as EmployeeRecord[];
+      const seen = new Set<string>();
+      return parsed.filter((emp) => {
+        if (!emp.employee_id) return true;
+        if (seen.has(emp.employee_id)) return false;
+        seen.add(emp.employee_id);
+        return true;
+      });
+    } catch (e: any) {
+      if (e.code === "ENOENT") {
+        await refreshEmployees(activeJdId);
+        try {
+          const raw = await readFile(jsonPath, "utf8");
+          return JSON.parse(raw);
+        } catch {
+          return [];
+        }
       }
+      return [];
     }
-  }
+  };
 
-  // If activeJdId is provided, dynamically re-calculate match scores against it
-  if (activeJdId && activeJdId !== 'all' && employees.length > 0) {
+  const [employeesInitial, manifest] = await Promise.all([
+    loadEmployeesFromFile(),
+    loadEmployeeTestManifest(),
+  ]);
+  let employees = employeesInitial;
+
+  // Query MCQ test results from Supabase (production source of truth),
+  // with a hard timeout so a slow DB cannot block the portal indefinitely.
+  const testResultsMap = new Map<string, { status: string; score: number; completedAt: string | null }[]>();
+  const allTestResults: any[] = [];
+
+  const applyJdSkillMatch = async () => {
+    if (!activeJdId || activeJdId === "all" || employees.length === 0) return;
     try {
       const { data: dbJd } = await supabase
-        .from('job_descriptions')
-        .select('jd_text')
-        .eq('id', activeJdId)
+        .from("job_descriptions")
+        .select("jd_text")
+        .eq("id", activeJdId)
         .single();
-      
-      if (dbJd && dbJd.jd_text) {
-        employees = employees.map(emp => {
-          const matchResult = calculateSkillMatch(emp.skills || '', dbJd.jd_text);
+
+      if (dbJd?.jd_text) {
+        employees = employees.map((emp) => {
+          const matchResult = calculateSkillMatch(emp.skills || "", dbJd.jd_text);
           return {
             ...emp,
             score: matchResult.score,
-            matchingSkills: matchResult.matchingSkills
+            matchingSkills: matchResult.matchingSkills,
           };
         });
       }
     } catch (dbErr) {
       console.error("Failed to query JD or recalculate employee skill match:", dbErr);
     }
-  }
-
-  // Query MCQ test results from Supabase (production source of truth),
-  // with a hard timeout so a slow DB cannot block the portal indefinitely.
-  const testResultsMap = new Map<string, { status: string; score: number; completedAt: string | null }[]>();
-  const allTestResults: any[] = [];
+  };
 
   const loadSupabaseResults = async () => {
   try {
@@ -190,9 +200,12 @@ export async function GET(request: NextRequest) {
   }
   };
 
-  await Promise.race([
-    loadSupabaseResults(),
-    new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+  await Promise.all([
+    applyJdSkillMatch(),
+    Promise.race([
+      loadSupabaseResults(),
+      new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+    ]),
   ]);
 
   // Overlay / fill from local JSON when allowed (also used as prod fallback if Supabase timed out)
@@ -284,6 +297,14 @@ export async function GET(request: NextRequest) {
   }
   }
 
+  const recordingIds = await listEmployeeTestRecordingIds();
+  for (let i = 0; i < allTestResults.length; i++) {
+    allTestResults[i] = {
+      ...allTestResults[i],
+      hasRecording: recordingIds.has(String(allTestResults[i].id ?? "")),
+    };
+  }
+
   // Attach testResults to employees
   employees = employees.map(emp => {
     return {
@@ -330,7 +351,6 @@ export async function GET(request: NextRequest) {
   if (!isExport) {
     let resourcePortalEmployees: any[] = [];
     try {
-      const manifest = await loadEmployeeTestManifest();
       resourcePortalEmployees = await buildResourcePortalEmployees(allTestResults, manifest);
     } catch (mappingErr) {
       console.warn("Failed to load employee portal mapping:", mappingErr);

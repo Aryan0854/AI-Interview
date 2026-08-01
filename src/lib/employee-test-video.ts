@@ -39,6 +39,86 @@ export function repairWebmBuffer(buffer: Buffer): Buffer {
   return buffer;
 }
 
+const MIN_WEBM_BYTES = 512;
+
+export function isValidWebmBuffer(buffer: Buffer): boolean {
+  const repaired = repairWebmBuffer(buffer);
+  return (
+    repaired.length >= MIN_WEBM_BYTES &&
+    repaired[0] === 0x1a &&
+    repaired[1] === 0x45 &&
+    repaired[2] === 0xdf &&
+    repaired[3] === 0xa3
+  );
+}
+
+/** One storage list call — used to mark which tests have a real recording file. */
+export async function listEmployeeTestRecordingIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  try {
+    const { data, error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).list(STORAGE_PREFIX, {
+      limit: 1000,
+    });
+    if (error) throw error;
+    for (const file of data ?? []) {
+      const name = file.name ?? "";
+      const fileSize = (file as { metadata?: { size?: number } }).metadata?.size;
+      if (
+        name.endsWith(".webm") &&
+        (fileSize == null || fileSize >= MIN_WEBM_BYTES)
+      ) {
+        ids.add(name.slice(0, -".webm".length));
+      }
+    }
+  } catch (err) {
+    console.warn("Could not list employee test recordings in storage:", err);
+  }
+
+  try {
+    const dir = join(getRuntimeUploadsRoot(), "employee_test_recordings");
+    const { readdir } = await import("fs/promises");
+    const files = await readdir(dir);
+    for (const name of files) {
+      if (name.endsWith(".webm")) {
+        ids.add(name.slice(0, -".webm".length));
+      }
+    }
+  } catch {
+    // no local recordings dir
+  }
+
+  return ids;
+}
+
+async function downloadFromStorage(path: string): Promise<Buffer | null> {
+  try {
+    const { data, error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).download(path);
+    if (!error && data) {
+      const buffer = repairWebmBuffer(Buffer.from(await data.arrayBuffer()));
+      if (isValidWebmBuffer(buffer)) return buffer;
+    }
+  } catch {
+    // fall through
+  }
+
+  try {
+    const { data, error } = await supabaseServer.storage
+      .from(RECORDINGS_BUCKET)
+      .createSignedUrl(path, 3600);
+    if (!error && data?.signedUrl) {
+      const res = await fetch(data.signedUrl);
+      if (res.ok) {
+        const buffer = repairWebmBuffer(Buffer.from(await res.arrayBuffer()));
+        if (isValidWebmBuffer(buffer)) return buffer;
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  return null;
+}
+
 async function ensureRecordingsBucket() {
   const { data: buckets, error } = await supabaseServer.storage.listBuckets();
   if (error) throw error;
@@ -53,7 +133,10 @@ async function ensureRecordingsBucket() {
 
 export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
   const cleaned = repairWebmBuffer(buffer);
-  if (!cleaned.length) return false;
+  if (!isValidWebmBuffer(cleaned)) {
+    console.warn(`Employee test video rejected for ${testId}: invalid or too-small WebM (${cleaned.length} bytes)`);
+    return false;
+  }
 
   try {
     await ensureRecordingsBucket();
@@ -145,15 +228,8 @@ export async function employeeTestVideoExists(testId: string): Promise<boolean> 
 export async function readEmployeeTestVideo(testId: string): Promise<Buffer | null> {
   const path = employeeTestVideoStoragePath(testId);
 
-  try {
-    const { data, error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).download(path);
-    if (!error && data) {
-      const buffer = repairWebmBuffer(Buffer.from(await data.arrayBuffer()));
-      if (buffer.length > 0) return buffer;
-    }
-  } catch {
-    // fall through to local / public URL
-  }
+  const fromStorage = await downloadFromStorage(path);
+  if (fromStorage) return fromStorage;
 
   const publicUrl = getEmployeeTestVideoPublicUrl(testId);
   if (publicUrl) {
@@ -161,7 +237,7 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
       const res = await fetch(publicUrl);
       if (res.ok) {
         const buffer = repairWebmBuffer(Buffer.from(await res.arrayBuffer()));
-        if (buffer.length > 0) return buffer;
+        if (isValidWebmBuffer(buffer)) return buffer;
       }
     } catch {
       // fall through
@@ -170,7 +246,7 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
 
   try {
     const local = repairWebmBuffer(await readFile(localVideoPath(testId)));
-    if (local.length > 0) return local;
+    if (isValidWebmBuffer(local)) return local;
   } catch {
     // fall through
   }

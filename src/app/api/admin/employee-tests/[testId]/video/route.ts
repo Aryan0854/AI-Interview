@@ -25,7 +25,7 @@ export async function GET(
       return NextResponse.json(
         {
           error:
-            "Recording not found. The test may have finished before proctoring video was saved — ask the employee to retake after the latest update.",
+            "Recording not found or invalid. The test may have finished before video was saved — ask the employee to retake after confirming camera access.",
         },
         { status: 404 }
       );

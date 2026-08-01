@@ -7,6 +7,7 @@ import {
   getEmployeeTestVideoAdminUrl,
   saveEmployeeTestVideo,
 } from "@/lib/employee-test-video";
+import { markProctorVideoUploaded, normalizeProctoring } from "@/lib/employee-proctoring";
 import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
 import { getRuntimeUploadsRoot } from "@/lib/runtime-data";
 
@@ -22,7 +23,12 @@ async function markVideoReady(
   employee: Parameters<typeof syncLocalTestStateToSupabase>[1]
 ) {
   const videoUrl = getEmployeeTestVideoAdminUrl(testId);
-  await localTestsDb.updateTest(testId, { session_recording_url: videoUrl });
+  const test = await localTestsDb.getTestById(testId);
+  const proctoring = markProctorVideoUploaded(normalizeProctoring(test?.proctoring));
+  await localTestsDb.updateTest(testId, {
+    session_recording_url: videoUrl,
+    proctoring,
+  });
 
   try {
     await syncLocalTestStateToSupabase(testId, employee);
