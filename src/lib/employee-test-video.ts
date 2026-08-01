@@ -2,6 +2,27 @@ import { join } from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { supabaseServer } from "@/lib/db";
 import { ensureRuntimeUploadsDir, getRuntimeUploadsRoot } from "@/lib/runtime-data";
+import { fixWebmDurationBuffer } from "@/lib/webm-duration-fix";
+
+/** Avoid re-parsing WebM on every byte-range request during playback. */
+const preparedVideoCache = new Map<string, Buffer>();
+const PREPARED_VIDEO_CACHE_MAX = 12;
+
+function rememberPreparedVideo(testId: string, buffer: Buffer): Buffer {
+  if (preparedVideoCache.size >= PREPARED_VIDEO_CACHE_MAX) {
+    const oldest = preparedVideoCache.keys().next().value;
+    if (oldest) preparedVideoCache.delete(oldest);
+  }
+  preparedVideoCache.set(testId, buffer);
+  return buffer;
+}
+
+/** Repair header + inject Duration so native `<video controls>` show total length. */
+export function prepareWebmForPlayback(buffer: Buffer): Buffer {
+  const repaired = repairWebmBuffer(buffer);
+  if (!isValidWebmBuffer(repaired)) return repaired;
+  return fixWebmDurationBuffer(repaired);
+}
 
 const RECORDINGS_BUCKET = "recordings";
 const STORAGE_PREFIX = "employee-tests";
@@ -132,7 +153,7 @@ async function ensureRecordingsBucket() {
 }
 
 export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
-  const cleaned = repairWebmBuffer(buffer);
+  const cleaned = prepareWebmForPlayback(buffer);
   if (!isValidWebmBuffer(cleaned)) {
     console.warn(`Employee test video rejected for ${testId}: invalid or too-small WebM (${cleaned.length} bytes)`);
     return false;
@@ -147,6 +168,7 @@ export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Pro
     });
     if (error) throw error;
 
+    rememberPreparedVideo(testId, cleaned);
     const { data: verify, error: verifyErr } = await supabaseServer.storage
       .from(RECORDINGS_BUCKET)
       .download(path);
@@ -161,6 +183,7 @@ export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Pro
     const dir = join(getRuntimeUploadsRoot(), "employee_test_recordings");
     await mkdir(dir, { recursive: true });
     await writeFile(localVideoPath(testId), cleaned);
+    rememberPreparedVideo(testId, cleaned);
     return true;
   } catch (localErr) {
     console.error("Employee test video local save failed:", localErr);
@@ -225,7 +248,7 @@ export async function employeeTestVideoExists(testId: string): Promise<boolean> 
   }
 }
 
-export async function readEmployeeTestVideo(testId: string): Promise<Buffer | null> {
+async function readEmployeeTestVideoRaw(testId: string): Promise<Buffer | null> {
   const path = employeeTestVideoStoragePath(testId);
 
   const fromStorage = await downloadFromStorage(path);
@@ -254,7 +277,18 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
   return null;
 }
 
+export async function readEmployeeTestVideo(testId: string): Promise<Buffer | null> {
+  const cached = preparedVideoCache.get(testId);
+  if (cached) return cached;
+
+  const raw = await readEmployeeTestVideoRaw(testId);
+  if (!raw) return null;
+
+  return rememberPreparedVideo(testId, prepareWebmForPlayback(raw));
+}
+
 export async function deleteEmployeeTestVideo(testId: string): Promise<void> {
+  preparedVideoCache.delete(testId);
   try {
     await supabaseServer.storage
       .from(RECORDINGS_BUCKET)

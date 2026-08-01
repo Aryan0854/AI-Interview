@@ -5251,26 +5251,21 @@ export default function AdminDashboard() {
                 ✕
               </button>
             </div>
-            <div className="bg-black rounded-b-3xl overflow-hidden">
-              <div className="admin-native-video-shell">
-                <video
-                  key={videoPreview.url}
-                  src={videoPreview.url}
-                  className="admin-native-video"
-                  controls
-                  autoPlay
-                  playsInline
-                  preload="metadata"
-                  onError={() => {
-                    setActionError(
-                      "Could not play this recording — file may be corrupt or missing. Reset the test and ask the employee to retake."
-                    );
-                  }}
-                />
-              </div>
-              <p className="text-[10px] text-slate-400 px-4 py-3 text-center border-t border-slate-800">
-                Native player controls — play/pause, volume, timeline, and fullscreen. Open in Chrome/Edge or VLC if WebM fails elsewhere.
-              </p>
+            <div className="bg-black rounded-b-3xl">
+              <video
+                key={videoPreview.url}
+                src={videoPreview.url}
+                className="admin-native-video"
+                controls
+                autoPlay
+                playsInline
+                preload="metadata"
+                onError={() => {
+                  setActionError(
+                    "Could not play this recording — file may be corrupt or missing. Reset the test and ask the employee to retake."
+                  );
+                }}
+              />
             </div>
           </Card>
         </div>
