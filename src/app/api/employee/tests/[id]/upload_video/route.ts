@@ -73,9 +73,7 @@ export async function POST(
           );
         }
 
-        // Re-save through repair path so junk bytes before EBML header are stripped.
-        await saveEmployeeTestVideo(testId, buffer);
-
+        // Direct client upload already stored the raw WebM — do not re-process/re-upload.
         const videoUrl = await markVideoReady(testId, auth.employee);
         return NextResponse.json({ success: true, videoUrl });
       }

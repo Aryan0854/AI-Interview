@@ -3,6 +3,7 @@ import { authenticateAdminRequest } from "@/lib/employee-auth";
 import { readEmployeeTestVideo } from "@/lib/employee-test-video";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 export async function GET(
   request: NextRequest,

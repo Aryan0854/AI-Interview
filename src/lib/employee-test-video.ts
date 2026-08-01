@@ -17,11 +17,12 @@ function rememberPreparedVideo(testId: string, buffer: Buffer): Buffer {
   return buffer;
 }
 
-/** Repair header + inject Duration so native `<video controls>` show total length. */
+/** Repair header only — never mutate stored recordings for optional playback metadata. */
 export function prepareWebmForPlayback(buffer: Buffer): Buffer {
   const repaired = repairWebmBuffer(buffer);
   if (!isValidWebmBuffer(repaired)) return repaired;
-  return fixWebmDurationBuffer(repaired);
+  const withDuration = fixWebmDurationBuffer(repaired);
+  return isValidWebmBuffer(withDuration) ? withDuration : repaired;
 }
 
 const RECORDINGS_BUCKET = "recordings";
@@ -60,7 +61,7 @@ export function repairWebmBuffer(buffer: Buffer): Buffer {
   return buffer;
 }
 
-const MIN_WEBM_BYTES = 512;
+const MIN_WEBM_BYTES = 4096;
 
 export function isValidWebmBuffer(buffer: Buffer): boolean {
   const repaired = repairWebmBuffer(buffer);
@@ -153,7 +154,7 @@ async function ensureRecordingsBucket() {
 }
 
 export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
-  const cleaned = prepareWebmForPlayback(buffer);
+  const cleaned = repairWebmBuffer(buffer);
   if (!isValidWebmBuffer(cleaned)) {
     console.warn(`Employee test video rejected for ${testId}: invalid or too-small WebM (${cleaned.length} bytes)`);
     return false;
@@ -284,7 +285,11 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
   const raw = await readEmployeeTestVideoRaw(testId);
   if (!raw) return null;
 
-  return rememberPreparedVideo(testId, prepareWebmForPlayback(raw));
+  const repaired = repairWebmBuffer(raw);
+  if (!isValidWebmBuffer(repaired)) return null;
+
+  const prepared = prepareWebmForPlayback(repaired);
+  return rememberPreparedVideo(testId, prepared);
 }
 
 export async function deleteEmployeeTestVideo(testId: string): Promise<void> {

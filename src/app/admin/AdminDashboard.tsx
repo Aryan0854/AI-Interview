@@ -965,8 +965,13 @@ export default function AdminDashboard() {
       }
       throw new Error(message);
     }
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      throw new Error("Recording not available for this test.");
+    }
     const blob = await res.blob();
     if (!blob.size) throw new Error("Recording file is empty.");
+    if (blob.size < 512) throw new Error("Recording file is too small or incomplete.");
     return { blob, fileName };
   };
 
@@ -1002,11 +1007,9 @@ export default function AdminDashboard() {
       if (videoPreview?.url?.startsWith("blob:")) {
         URL.revokeObjectURL(videoPreview.url);
       }
-      const token =
-        typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
-      if (!token) throw new Error("Admin session expired. Please sign in again.");
-      const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
-      const url = `/api/admin/employee-tests/${testId}/video?filename=${encodeURIComponent(fileName)}&inline=1&token=${encodeURIComponent(token)}`;
+      setActionError(null);
+      const { blob, fileName } = await fetchTestVideoBlob(testId, employeeId, employeeName);
+      const url = URL.createObjectURL(blob);
       setVideoPreview({
         url,
         title: employeeName || employeeId || fileName,
