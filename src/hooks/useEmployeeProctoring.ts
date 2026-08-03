@@ -27,7 +27,7 @@ export function useEmployeeProctoring(options: {
   phase: ProctorPhase;
   answersRef: React.MutableRefObject<Record<number, number>>;
   onAutoSubmit: (answers: Record<number, number>) => void;
-  requestFullscreen: () => Promise<void>;
+  requestFullscreen: () => Promise<boolean | void>;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   camStream: MediaStream | null;
   mediaRecorderRef: React.MutableRefObject<MediaRecorder | null>;
@@ -296,6 +296,29 @@ export function useEmployeeProctoring(options: {
   // ── Fullscreen watchdog ─────────────────────────────────────────
   useEffect(() => {
     if (phase !== "running") return;
+
+    void (async () => {
+      if (!isFullscreenActive()) {
+        await requestFullscreen();
+      }
+      if (isFullscreenActive()) {
+        everHadFullscreenRef.current = true;
+      }
+    })();
+
+    const retryDelays = [400, 900];
+    const retryTimers = retryDelays.map((delay) =>
+      setTimeout(() => {
+        if (!isFullscreenActive()) {
+          void requestFullscreen().then((ok) => {
+            if (ok || isFullscreenActive()) {
+              everHadFullscreenRef.current = true;
+            }
+          });
+        }
+      }, delay)
+    );
+
     if (isFullscreenActive()) {
       everHadFullscreenRef.current = true;
     }
@@ -313,7 +336,10 @@ export function useEmployeeProctoring(options: {
         triggerProctorWarning("Window Lost Focus");
       }
     }, 3000);
-    return () => clearInterval(id);
+    return () => {
+      retryTimers.forEach(clearTimeout);
+      clearInterval(id);
+    };
   }, [phase, triggerProctorWarning, requestFullscreen]);
 
   // ── Camera + recorder integrity ───────────────────────────────

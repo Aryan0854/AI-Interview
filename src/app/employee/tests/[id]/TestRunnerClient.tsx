@@ -132,6 +132,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
   const [clmReady, setClmReady] = useState(false);
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
+  const [awaitingFullscreen, setAwaitingFullscreen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
@@ -153,10 +154,25 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       } else if ((docEl as any).msRequestFullscreen) {
         await (docEl as any).msRequestFullscreen();
       }
+      return isFullscreenActive();
     } catch (err) {
       console.warn("Fullscreen request rejected or failed:", err);
+      return false;
     }
   }, []);
+
+  useEffect(() => {
+    if (phase !== "running" || !awaitingFullscreen) return;
+    const syncFullscreen = () => {
+      if (isFullscreenActive()) setAwaitingFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    document.addEventListener("webkitfullscreenchange", syncFullscreen);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreen);
+    };
+  }, [phase, awaitingFullscreen]);
 
   // Bind camera stream to video element when it becomes available
   useEffect(() => {
@@ -474,15 +490,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   }, [testId, token]);
 
   const handleStartTest = async () => {
-    try {
-      await requestFullscreen();
-    } catch (err) {
-      console.warn("Fullscreen request failed:", err);
-    }
-    if (!isFullscreenActive()) {
-      console.warn("Fullscreen not active; continuing without it.");
-    }
-
+    // Camera permission UI must finish before fullscreen can activate reliably.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: "user" },
@@ -508,6 +516,14 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       console.warn("Failed to access webcam; continuing without camera:", err);
     }
 
+    // Brief pause lets the browser close the camera permission banner before fullscreen.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    let enteredFullscreen = await requestFullscreen();
+    if (!enteredFullscreen) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      enteredFullscreen = await requestFullscreen();
+    }
+
     // If starting fresh (pending), update status and started_at in backend
     if (test && test.status === "pending") {
       const startTime = new Date().toISOString();
@@ -530,6 +546,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     }
 
     setPhase("running");
+    setAwaitingFullscreen(!isFullscreenActive());
   };
 
   // ── handlers ───────────────────────────────────────────────────
@@ -726,7 +743,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const selected   = answers[currentIdx];
 
   return (
-    <div className={`max-w-3xl mx-auto px-4 py-6 space-y-6 ${phase === "running" ? "select-none" : ""} ${showProctorWarning ? "pointer-events-none" : ""}`}>
+    <div className={`max-w-3xl mx-auto px-4 py-6 space-y-6 ${phase === "running" ? "select-none" : ""} ${showProctorWarning || awaitingFullscreen ? "pointer-events-none" : ""}`}>
 
       {/* ── Header bar ──────────────────────────────────────────── */}
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -872,6 +889,32 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       {msg && (
         <div className="text-center">
           <p className="text-sm text-slate-500 italic">{msg}</p>
+        </div>
+      )}
+
+      {/* Fullscreen gate — shown when camera permission blocked initial fullscreen */}
+      {awaitingFullscreen && phase === "running" && !showProctorWarning && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 pointer-events-auto">
+          <div className="bg-card rounded-2xl shadow-xl max-w-md w-full p-6 border border-indigo-100 dark:border-indigo-950/30 text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-950/30 flex items-center justify-center mx-auto text-indigo-600 dark:text-indigo-400">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-foreground">Enter Fullscreen to Begin</h3>
+            <p className="text-sm text-muted-foreground">
+              This assessment runs in fullscreen. Click below after allowing camera access.
+            </p>
+            <Button
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3 font-semibold text-sm"
+              onClick={async () => {
+                const ok = await requestFullscreen();
+                if (ok || isFullscreenActive()) {
+                  setAwaitingFullscreen(false);
+                }
+              }}
+            >
+              Enter Fullscreen &amp; Continue
+            </Button>
+          </div>
         </div>
       )}
 
