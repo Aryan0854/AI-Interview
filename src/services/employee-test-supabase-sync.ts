@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/db";
 import { useSupabasePrimary } from "@/lib/db-mode";
 import type { EmployeeAccount } from "@/lib/employee-auth";
-import { readPersistedJson } from "@/lib/runtime-data";
+import { readPersistedJson, writePersistedJson } from "@/lib/runtime-data";
 import {
   localTestsDb,
   type LocalTest,
@@ -231,6 +231,8 @@ export async function reconcileEmployeeTestsFromLocalJson(
         .eq("id", test.id)
         .maybeSingle();
 
+      // Supabase is authoritative — never resurrect a completed local row after admin reset.
+      if (remote && remote.status !== "completed") continue;
       if (remote?.status === "completed") continue;
 
       const questions = (db.test_questions ?? []).filter((q) => q.test_id === test.id);
@@ -256,6 +258,50 @@ export async function reconcileEmployeeTestsFromLocalJson(
     }
   } catch (err) {
     console.warn("reconcileEmployeeTestsFromLocalJson failed:", err);
+  }
+}
+
+/** Clear stale completed state from local JSON so dashboard sync cannot undo admin reset. */
+export async function clearLocalTestSnapshotAfterReset(testId: string): Promise<void> {
+  try {
+    const raw = await readPersistedJson("local_tests_db.json");
+    if (!raw) return;
+
+    const db = JSON.parse(raw) as {
+      tests: LocalTest[];
+      test_questions: LocalTestQuestion[];
+      test_attempts: LocalTestAttempt[];
+    };
+
+    let changed = false;
+    db.tests = (db.tests ?? []).map((t) => {
+      if (t.id !== testId) return t;
+      changed = true;
+      return {
+        ...t,
+        status: "pending" as const,
+        in_progress: null,
+        current_question_index: 0,
+        started_at: null,
+        completed_at: null,
+        session_recording_url: undefined,
+        proctoring: undefined,
+        score_correct: null,
+        score_total: null,
+        score_percent: null,
+        ai_analysis: null,
+      };
+    });
+
+    const beforeAttempts = (db.test_attempts ?? []).length;
+    db.test_attempts = (db.test_attempts ?? []).filter((a) => a.test_id !== testId);
+    if (db.test_attempts.length !== beforeAttempts) changed = true;
+
+    if (changed) {
+      await writePersistedJson("local_tests_db.json", JSON.stringify(db, null, 2));
+    }
+  } catch (err) {
+    console.warn("clearLocalTestSnapshotAfterReset failed:", err);
   }
 }
 

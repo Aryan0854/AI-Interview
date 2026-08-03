@@ -5,8 +5,7 @@ import { supabase } from "@/lib/db";
 import { writeLog } from "@/lib/structured-logger";
 import { cacheStore } from "@/lib/cache-store";
 import { deleteEmployeeTestVideo } from "@/lib/employee-test-video";
-import { resetTestInSupabase } from "@/services/employee-test-supabase-sync";
-import { allowLocalTestsFallback } from "@/lib/db-mode";
+import { resetTestInSupabase, clearLocalTestSnapshotAfterReset, resolveEmployeeUuid } from "@/services/employee-test-supabase-sync";
 
 /**
  * POST /api/admin/employees/reset-test
@@ -62,25 +61,41 @@ export async function POST(request: NextRequest) {
 
     // Postgres is source of truth in production.
     await resetTestInSupabase(resolvedTestId);
+    await clearLocalTestSnapshotAfterReset(resolvedTestId);
 
-    if (allowLocalTestsFallback()) {
+    try {
+      await localTestsDb.updateTest(resolvedTestId, {
+        status: "pending",
+        in_progress: null,
+        current_question_index: 0,
+        started_at: null,
+        completed_at: null,
+        session_recording_url: null as any,
+        proctoring: null as any,
+        score_correct: null,
+        score_total: null,
+        score_percent: null,
+        ai_analysis: null,
+      });
+      await localTestsDb.deleteAttempts(resolvedTestId);
+    } catch {
+      // test may exist only in Supabase after migration
+    }
+
+    if (employeeId) {
       try {
-        await localTestsDb.updateTest(resolvedTestId, {
-          status: "pending",
-          in_progress: null,
-          current_question_index: 0,
-          started_at: null,
-          completed_at: null,
-          session_recording_url: null as any,
-          proctoring: null as any,
-          score_correct: null,
-          score_total: null,
-          score_percent: null,
-          ai_analysis: null,
-        });
-        await localTestsDb.deleteAttempts(resolvedTestId);
+        const employeeUuid = await resolveEmployeeUuid(employeeId);
+        await supabase
+          .from("employees")
+          .update({
+            ai_readiness_score: 0,
+            xp_points: 0,
+            skill_level: "beginner",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", employeeUuid);
       } catch {
-        // test may exist only in Supabase after migration
+        // non-fatal
       }
     }
 

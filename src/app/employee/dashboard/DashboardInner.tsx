@@ -108,21 +108,23 @@ export function DashboardInner() {
       (s: any) => (s?.topic_count ?? 0) > 0
     );
     const readinessScore =
-      analytics.ai_readiness_score ||
-      computeReadinessScore({
-        averageScore,
-        totalTestsTaken,
-        subjectBreakdown: activeBreakdown,
-        testScores: displayResults.map((result: any) => result.accuracy_pct ?? 0),
-      });
+      totalTestsTaken > 0
+        ? (analytics.ai_readiness_score ||
+            computeReadinessScore({
+              averageScore,
+              totalTestsTaken,
+              subjectBreakdown: activeBreakdown,
+              testScores: displayResults.map((result: any) => result.accuracy_pct ?? 0),
+            }))
+        : 0;
 
     const merged = {
       ...analytics,
       total_tests_taken: totalTestsTaken,
       average_score: averageScore,
       ai_readiness_score: readinessScore,
-      skill_level: analytics.skill_level || computeSkillLevel(readinessScore),
-      xp_points: analytics.xp_points || 0,
+      skill_level: totalTestsTaken > 0 ? (analytics.skill_level || computeSkillLevel(readinessScore)) : "beginner",
+      xp_points: totalTestsTaken > 0 ? (analytics.xp_points || 0) : 0,
     };
 
     if (!merged.strongest_subject || !merged.strongest_subject.subject_title || merged.strongest_subject.subject_title === "—") {
