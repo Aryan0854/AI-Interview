@@ -47,6 +47,7 @@ const AdminResumeDetails = dynamic(() => import("@/components/AdminResumeDetails
   )
 });
 import ThemeToggle from "@/components/ThemeToggle";
+import PlyrVideoPlayer from "@/components/PlyrVideoPlayer";
 import {
   getPortalTestStatusBadgeClass,
   getPortalTestStatusLabel,
@@ -455,7 +456,14 @@ export default function AdminDashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [videoPreview, setVideoPreview] = useState<{ url: string; title: string } | null>(null);
+  const [videoPreview, setVideoPreview] = useState<{
+    url: string;
+    title: string;
+    testId: string;
+    employeeId: string;
+    employeeName?: string;
+    mode: "stream" | "blob" | "cdn";
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -969,10 +977,26 @@ export default function AdminDashboard() {
     if (contentType.includes("application/json")) {
       throw new Error("Recording not available for this test.");
     }
-    const blob = await res.blob();
-    if (!blob.size) throw new Error("Recording file is empty.");
-    if (blob.size < 512) throw new Error("Recording file is too small or incomplete.");
+    const arrayBuffer = await res.arrayBuffer();
+    if (!arrayBuffer.byteLength) throw new Error("Recording file is empty.");
+    if (arrayBuffer.byteLength < 512) throw new Error("Recording file is too small or incomplete.");
+    const blob = new Blob([arrayBuffer], { type: "video/webm" });
     return { blob, fileName };
+  };
+
+  const buildVideoStreamUrl = (
+    testId: string,
+    fileName: string,
+    token: string,
+    opts?: { cdn?: boolean }
+  ) => {
+    const params = new URLSearchParams({
+      inline: "1",
+      filename: fileName,
+      token,
+    });
+    if (opts?.cdn) params.set("cdn", "1");
+    return `/api/admin/employee-tests/${testId}/video?${params.toString()}`;
   };
 
   const handleDownloadTestVideo = async (
@@ -998,25 +1022,79 @@ export default function AdminDashboard() {
     }
   };
 
-  const handlePlayTestVideo = async (
+  const handlePlayTestVideo = (
     testId: string,
     employeeId: string,
     employeeName?: string
   ) => {
-    try {
-      if (videoPreview?.url?.startsWith("blob:")) {
-        URL.revokeObjectURL(videoPreview.url);
-      }
-      setActionError(null);
-      const { blob, fileName } = await fetchTestVideoBlob(testId, employeeId, employeeName);
-      const url = URL.createObjectURL(blob);
-      setVideoPreview({
-        url,
-        title: employeeName || employeeId || fileName,
-      });
-    } catch (err: any) {
-      setActionError(err.message || "Failed to open test recording");
+    if (videoPreview?.url?.startsWith("blob:")) {
+      URL.revokeObjectURL(videoPreview.url);
     }
+    setActionError(null);
+    const token =
+      typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
+    if (!token) {
+      setActionError("Admin session expired. Please log in again.");
+      return;
+    }
+    const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+    setVideoPreview({
+      url: buildVideoStreamUrl(testId, fileName, token),
+      title: employeeName || employeeId || fileName,
+      testId,
+      employeeId,
+      employeeName,
+      mode: "stream",
+    });
+  };
+
+  const handleVideoPlaybackError = async () => {
+    if (!videoPreview) return;
+    const { testId, employeeId, employeeName, mode, title } = videoPreview;
+
+    if (mode === "stream") {
+      try {
+        const { blob } = await fetchTestVideoBlob(testId, employeeId, employeeName);
+        if (videoPreview.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(videoPreview.url);
+        }
+        setVideoPreview({
+          url: URL.createObjectURL(blob),
+          title,
+          testId,
+          employeeId,
+          employeeName,
+          mode: "blob",
+        });
+        return;
+      } catch {
+        // fall through to CDN
+      }
+    }
+
+    if (mode === "stream" || mode === "blob") {
+      const token =
+        typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
+      if (token) {
+        if (videoPreview.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(videoPreview.url);
+        }
+        const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+        setVideoPreview({
+          url: buildVideoStreamUrl(testId, fileName, token, { cdn: true }),
+          title,
+          testId,
+          employeeId,
+          employeeName,
+          mode: "cdn",
+        });
+        return;
+      }
+    }
+
+    setActionError(
+      "Could not play this recording in the browser. Use Download and open the file in Chrome or VLC."
+    );
   };
 
   const handleExportPortalData = async () => {
@@ -5255,18 +5333,13 @@ export default function AdminDashboard() {
               </button>
             </div>
             <div className="bg-black rounded-b-3xl">
-              <video
-                key={videoPreview.url}
+              <PlyrVideoPlayer
+                key={`${videoPreview.url}-${videoPreview.mode}`}
                 src={videoPreview.url}
-                className="admin-native-video"
-                controls
+                title={videoPreview.title}
                 autoPlay
-                playsInline
-                preload="metadata"
                 onError={() => {
-                  setActionError(
-                    "Could not play this recording — file may be corrupt or missing. Reset the test and ask the employee to retake."
-                  );
+                  void handleVideoPlaybackError();
                 }}
               />
             </div>

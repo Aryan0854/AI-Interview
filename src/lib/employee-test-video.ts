@@ -7,6 +7,7 @@ import {
   hasWebmClusterData,
   isPlayableWebmBuffer,
 } from "@/lib/webm-validate";
+import { fixWebmDurationBuffer } from "@/lib/webm-duration-fix";
 
 /** Avoid re-parsing WebM on every byte-range request during playback. */
 const preparedVideoCache = new Map<string, Buffer>();
@@ -21,9 +22,11 @@ function rememberPreparedVideo(testId: string, buffer: Buffer): Buffer {
   return buffer;
 }
 
-/** Strip leading junk only — never rewrite metadata (prevents corruption). */
+/** Trim junk and add seekable duration metadata for browser `<video>` (serve path only). */
 export function prepareWebmForPlayback(buffer: Buffer): Buffer {
-  return repairWebmBuffer(buffer);
+  const repaired = repairWebmBuffer(buffer);
+  if (!isPlayableWebmBuffer(repaired)) return repaired;
+  return fixWebmDurationBuffer(repaired);
 }
 
 /** Validate + trim before persisting to Supabase/local disk. */
@@ -308,10 +311,10 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
   const raw = await readEmployeeTestVideoRaw(testId);
   if (!raw) return null;
 
-  const repaired = repairWebmBuffer(raw);
-  if (!isPlayableWebmBuffer(repaired)) return null;
+  const forPlayback = prepareWebmForPlayback(raw);
+  if (!isPlayableWebmBuffer(forPlayback)) return null;
 
-  return rememberPreparedVideo(testId, repaired);
+  return rememberPreparedVideo(testId, forPlayback);
 }
 
 export async function deleteEmployeeTestVideo(testId: string): Promise<void> {

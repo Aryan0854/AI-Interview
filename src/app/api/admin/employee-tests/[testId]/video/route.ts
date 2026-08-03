@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateAdminRequest } from "@/lib/employee-auth";
-import { readEmployeeTestVideo } from "@/lib/employee-test-video";
+import {
+  employeeTestVideoExists,
+  getEmployeeTestVideoPublicUrl,
+  readEmployeeTestVideo,
+} from "@/lib/employee-test-video";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -21,6 +25,16 @@ export async function GET(
       requestedName && /^[\w.\- ()]+$/i.test(requestedName) && requestedName.toLowerCase().endsWith(".webm")
         ? requestedName
         : `${testId}.webm`;
+
+    // Large recordings: redirect inline playback to Supabase CDN (native range requests).
+    if (inline && request.nextUrl.searchParams.get("cdn") === "1") {
+      const exists = await employeeTestVideoExists(testId);
+      const publicUrl = getEmployeeTestVideoPublicUrl(testId);
+      if (exists && publicUrl) {
+        return NextResponse.redirect(publicUrl, { status: 302 });
+      }
+    }
+
     const fileBuffer = await readEmployeeTestVideo(testId);
     if (!fileBuffer) {
       return NextResponse.json(
@@ -49,8 +63,9 @@ export async function GET(
           "Content-Range": `bytes ${start}-${end}/${fileSize}`,
           "Accept-Ranges": "bytes",
           "Content-Length": String(chunk.length),
-          "Content-Type": "video/webm",
+          "Content-Type": "video/webm; codecs=vp8",
           "Content-Disposition": disposition,
+          "Cache-Control": "private, max-age=3600",
         },
       });
     }
@@ -58,9 +73,10 @@ export async function GET(
     return new NextResponse(fileBuffer as any, {
       headers: {
         "Content-Length": String(fileSize),
-        "Content-Type": "video/webm",
+        "Content-Type": "video/webm; codecs=vp8",
         "Accept-Ranges": "bytes",
         "Content-Disposition": disposition,
+        "Cache-Control": "private, max-age=3600",
       },
     });
   } catch {
