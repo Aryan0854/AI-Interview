@@ -6,6 +6,7 @@ import {
   employeeTestVideoStoragePath,
   getEmployeeTestVideoAdminUrl,
   isValidWebmBuffer,
+  prepareWebmForStorage,
   repairWebmBuffer,
   saveEmployeeTestVideo,
 } from "@/lib/employee-test-video";
@@ -14,7 +15,7 @@ import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-
 import { supabaseServer } from "@/lib/db";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 async function markVideoReady(
   testId: string,
@@ -65,17 +66,33 @@ export async function POST(
             { status: 404 }
           );
         }
-        const buffer = repairWebmBuffer(Buffer.from(await data.arrayBuffer()));
-        if (!isValidWebmBuffer(buffer)) {
+        const raw = Buffer.from(await data.arrayBuffer());
+        const cleaned = prepareWebmForStorage(raw);
+        if (!cleaned) {
+          await supabaseServer.storage.from("recordings").remove([path]);
           return NextResponse.json(
-            { error: "Recording file is missing or corrupt in storage." },
+            {
+              error:
+                "Recording is corrupt or too short (missing video data). Please retake the test with Chrome/Edge and keep the camera on.",
+            },
             { status: 400 }
           );
         }
 
-        // Direct client upload already stored the raw WebM — do not re-process/re-upload.
+        // Re-upload trimmed/validated bytes so storage always holds a playable file.
+        if (cleaned.length !== raw.length || !isValidWebmBuffer(raw)) {
+          const saved = await saveEmployeeTestVideo(testId, cleaned);
+          if (!saved) {
+            await supabaseServer.storage.from("recordings").remove([path]);
+            return NextResponse.json(
+              { error: "Recording failed validation after upload." },
+              { status: 400 }
+            );
+          }
+        }
+
         const videoUrl = await markVideoReady(testId, auth.employee);
-        return NextResponse.json({ success: true, videoUrl });
+        return NextResponse.json({ success: true, videoUrl, bytes: cleaned.length });
       }
     }
 

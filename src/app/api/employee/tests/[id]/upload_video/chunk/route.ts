@@ -12,7 +12,7 @@ import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-
 import { getRuntimeUploadsRoot } from "@/lib/runtime-data";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function chunkDir(testId: string) {
   return join(getRuntimeUploadsRoot(), "video_upload_chunks", testId);

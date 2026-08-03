@@ -16,6 +16,75 @@ import type { EmployeeProctoringState } from "@/lib/employee-proctoring";
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIME_LIMIT_SECONDS = 1800;
+const MIN_RECORDING_BYTES = 4096;
+
+async function validateRecordingBlob(blob: Blob): Promise<boolean> {
+  if (blob.size < MIN_RECORDING_BYTES) return false;
+  try {
+    const sample = new Uint8Array(
+      await blob.slice(0, Math.min(blob.size, 65536)).arrayBuffer()
+    );
+    if (
+      sample[0] !== 0x1a ||
+      sample[1] !== 0x45 ||
+      sample[2] !== 0xdf ||
+      sample[3] !== 0xa3
+    ) {
+      return false;
+    }
+    const cluster = [0x1f, 0x43, 0xb6, 0x75];
+    for (let i = 0; i <= sample.length - 4; i++) {
+      if (
+        sample[i] === cluster[0] &&
+        sample[i + 1] === cluster[1] &&
+        sample[i + 2] === cluster[2] &&
+        sample[i + 3] === cluster[3]
+      ) {
+        return true;
+      }
+    }
+    return blob.size >= MIN_RECORDING_BYTES * 8;
+  } catch {
+    return false;
+  }
+}
+
+async function flushRecorderAndStop(recorder: MediaRecorder): Promise<void> {
+  await new Promise<void>((resolve) => {
+    if (recorder.state !== "recording") {
+      resolve();
+      return;
+    }
+    const onData = () => {
+      recorder.removeEventListener("dataavailable", onData);
+      resolve();
+    };
+    recorder.addEventListener("dataavailable", onData);
+    try {
+      recorder.requestData();
+    } catch {
+      recorder.removeEventListener("dataavailable", onData);
+      resolve();
+    }
+    setTimeout(() => {
+      recorder.removeEventListener("dataavailable", onData);
+      resolve();
+    }, 2500);
+  });
+
+  await new Promise<void>((resolve) => {
+    if (recorder.state === "inactive") {
+      resolve();
+      return;
+    }
+    recorder.addEventListener("stop", () => resolve(), { once: true });
+    try {
+      recorder.stop();
+    } catch {
+      resolve();
+    }
+  });
+}
 
 function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
   if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
@@ -386,7 +455,10 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           if (signedUrl) {
             const putRes = await fetch(signedUrl, {
               method: "PUT",
-              headers: { "Content-Type": blob.type || "video/webm" },
+              headers: {
+                "Content-Type": "video/webm",
+                "Cache-Control": "3600",
+              },
               body: blob,
             });
             if (putRes.ok) {
@@ -406,7 +478,29 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         console.warn("Direct Supabase video upload failed, trying chunk fallback:", directErr);
       }
 
-      // Fallback: chunked server upload (local dev only)
+      // Fallback: server upload (works when under platform body limit)
+      if (blob.size <= 4 * 1024 * 1024) {
+        try {
+          const formData = new FormData();
+          formData.append(
+            "video",
+            new File([blob], `${testId}.webm`, { type: "video/webm" })
+          );
+          const res = await fetch(`/api/employee/tests/${testId}/upload_video`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+          if (res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            return Boolean(payload?.success);
+          }
+        } catch {
+          // fall through to chunk path
+        }
+      }
+
+      // Fallback: chunked server upload
       const CHUNK_SIZE = 2 * 1024 * 1024;
       const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
 
@@ -445,10 +539,10 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       return false;
     };
 
-    return await new Promise<boolean>((resolve) => {
+    return new Promise<boolean>((resolve) => {
+      intentionalRecorderStopRef.current = true;
       recorder.onstop = async () => {
         try {
-          // Prefer a single contiguous WebM from all chunks (must include first init segment).
           const blob = new Blob(recordingChunksRef.current, {
             type: recorder.mimeType || "video/webm;codecs=vp8",
           });
@@ -457,10 +551,15 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
             resolve(false);
             return;
           }
+          if (!(await validateRecordingBlob(blob))) {
+            console.warn(`Proctoring recording failed validation (${blob.size} bytes).`);
+            resolve(false);
+            return;
+          }
 
           let ok = await uploadBlob(blob);
           if (!ok) {
-            await new Promise((r) => setTimeout(r, 800));
+            await new Promise((r) => setTimeout(r, 1000));
             ok = await uploadBlob(blob);
           }
           resolve(ok);
@@ -470,22 +569,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         }
       };
 
-      intentionalRecorderStopRef.current = true;
-      try {
-        if (recorder.state === "recording") {
-          recorder.requestData();
-        }
-      } catch {
-        // ignore
-      }
-      // Stop after a short tick so the final requestData chunk is flushed first.
-      setTimeout(() => {
-        try {
-          if (recorder.state !== "inactive") recorder.stop();
-        } catch {
-          resolve(false);
-        }
-      }, 120);
+      void flushRecorderAndStop(recorder).catch(() => resolve(false));
     });
   }, [testId, token]);
 
