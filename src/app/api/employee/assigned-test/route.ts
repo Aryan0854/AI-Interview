@@ -3,6 +3,7 @@ import { authenticateRequestAsync, isProductQbEmployee } from "@/lib/employee-au
 import { getEmployeeUuid } from "@/lib/employee-test-access";
 import { supabase } from "@/lib/db";
 import { reconcileEmployeeTestsFromLocalJson } from "@/services/employee-test-supabase-sync";
+import { employeeTestVideoExists } from "@/lib/employee-test-video";
 
 const TOPIC_ID = "resource-product-assessment";
 
@@ -12,7 +13,8 @@ function mapCompletedTest(row: {
   total_questions?: number | null;
   score_correct?: number | null;
   score_percent?: number | null;
-  completed_at?: string | null;
+    completed_at?: string | null;
+    recording_missing?: boolean;
 }) {
   const total = row.total_questions ?? 25;
   const correct = row.score_correct ?? 0;
@@ -28,6 +30,7 @@ function mapCompletedTest(row: {
     score_percent: scorePercent,
     completed_at: row.completed_at,
     can_retake: false,
+    recording_missing: row.recording_missing ?? false,
   };
 }
 
@@ -79,7 +82,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Failed to load assigned test" }, { status: 500 });
     }
 
-    const completed_test = completedRow ? mapCompletedTest(completedRow) : null;
+    const completed_test = completedRow
+      ? mapCompletedTest({
+          ...completedRow,
+          recording_missing: !(await employeeTestVideoExists(completedRow.id)),
+        })
+      : null;
 
     if (!activeRow) {
       return NextResponse.json({ active_test: null, completed_test });

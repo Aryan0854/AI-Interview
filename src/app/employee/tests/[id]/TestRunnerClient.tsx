@@ -10,105 +10,19 @@ import { Button } from "@/components/ui/button";
 import type { Test, TestQuestion } from "@/types/learning";
 import { useEmployeeProctoring, isFullscreenActive } from "@/hooks/useEmployeeProctoring";
 import type { EmployeeProctoringState } from "@/lib/employee-proctoring";
+import {
+  createMediaRecorder,
+  flushRecorderAndStop,
+  uploadProctoringBlob,
+  uploadProctoringProgress,
+} from "@/lib/proctoring-recorder-client";
+import VideoCatchupClient from "./VideoCatchupClient";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIME_LIMIT_SECONDS = 1800;
-const MIN_RECORDING_BYTES = 4096;
-
-async function validateRecordingBlob(blob: Blob): Promise<boolean> {
-  if (blob.size < MIN_RECORDING_BYTES) return false;
-  try {
-    const sample = new Uint8Array(
-      await blob.slice(0, Math.min(blob.size, 65536)).arrayBuffer()
-    );
-    if (
-      sample[0] !== 0x1a ||
-      sample[1] !== 0x45 ||
-      sample[2] !== 0xdf ||
-      sample[3] !== 0xa3
-    ) {
-      return false;
-    }
-    const cluster = [0x1f, 0x43, 0xb6, 0x75];
-    for (let i = 0; i <= sample.length - 4; i++) {
-      if (
-        sample[i] === cluster[0] &&
-        sample[i + 1] === cluster[1] &&
-        sample[i + 2] === cluster[2] &&
-        sample[i + 3] === cluster[3]
-      ) {
-        return true;
-      }
-    }
-    return blob.size >= MIN_RECORDING_BYTES * 8;
-  } catch {
-    return false;
-  }
-}
-
-async function flushRecorderAndStop(recorder: MediaRecorder): Promise<void> {
-  await new Promise<void>((resolve) => {
-    if (recorder.state !== "recording") {
-      resolve();
-      return;
-    }
-    const onData = () => {
-      recorder.removeEventListener("dataavailable", onData);
-      resolve();
-    };
-    recorder.addEventListener("dataavailable", onData);
-    try {
-      recorder.requestData();
-    } catch {
-      recorder.removeEventListener("dataavailable", onData);
-      resolve();
-    }
-    setTimeout(() => {
-      recorder.removeEventListener("dataavailable", onData);
-      resolve();
-    }, 2500);
-  });
-
-  await new Promise<void>((resolve) => {
-    if (recorder.state === "inactive") {
-      resolve();
-      return;
-    }
-    recorder.addEventListener("stop", () => resolve(), { once: true });
-    try {
-      recorder.stop();
-    } catch {
-      resolve();
-    }
-  });
-}
-
-function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
-  if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
-  // Prefer VP8 — more compatible than VP9 for Chrome/Edge playback after download.
-  const mimeTypes = [
-    "video/webm;codecs=vp8",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
-    "video/webm;codecs=vp9",
-  ];
-  for (const type of mimeTypes) {
-    if (MediaRecorder.isTypeSupported?.(type)) {
-      return new MediaRecorder(stream, {
-        mimeType: type,
-        videoBitsPerSecond: 600_000,
-      });
-    }
-  }
-  try {
-    return new MediaRecorder(stream, { videoBitsPerSecond: 600_000 });
-  } catch {
-    return null;
-  }
-}
 
 function durationToLabel(d: number): string {
   const m = Math.floor(d / 60);
@@ -158,9 +72,16 @@ function DifficultyBadge({ d }: { d: string }) {
 
 export default function TestRunnerClient({ testId }: { testId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const uploadVideoOnly = searchParams.get("uploadVideo") === "1";
+
+  if (uploadVideoOnly) {
+    return <VideoCatchupClient testId={testId} />;
+  }
 
   // ── state ──────────────────────────────────────────────────────
   type Phase = "loading" | "ready" | "running" | "retake-confirm" | "submitted" | "error";
+  type VideoUploadState = "pending" | "uploading" | "done" | "failed";
 
   const [phase,       setPhase]       = useState<Phase>("loading");
   const [err,         setErr]         = useState<string | null>(null);
@@ -172,6 +93,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const [timeLeft,    setTimeLeft]    = useState<number | null>(null);
   const [msg,         setMsg]         = useState<string | null>(null);
   const [submitted,   setSubmitted]   = useState<{ correct: number; total: number; accuracy_pct: number; ai_analysis?: string; topic_title: string } | null>(null);
+  const [videoUploadState, setVideoUploadState] = useState<VideoUploadState>("pending");
 
   const savedRef     = useRef(false);
   const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -189,6 +111,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStartRef = useRef<number | null>(null);
   const intentionalRecorderStopRef = useRef(false);
+  const lastProgressUploadRef = useRef(0);
 
   useEffect(() => {
     setToken(window.localStorage.getItem("employee_token") ?? "");
@@ -411,115 +334,24 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     intentionalRecorderStopRef,
   });
 
+  const uploadProgressSnapshot = useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!token || !recorder || recordingChunksRef.current.length === 0) return;
+    const now = Date.now();
+    if (now - lastProgressUploadRef.current < 45000) return;
+    lastProgressUploadRef.current = now;
+    const blob = new Blob(recordingChunksRef.current, {
+      type: recorder.mimeType || "video/webm",
+    });
+    await uploadProctoringProgress(testId, token, blob).catch(() => {});
+  }, [testId, token]);
+
   const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === "inactive") {
       console.warn("Proctoring recorder was not active at submit time.");
       return false;
     }
-
-    const uploadBlob = async (blob: Blob): Promise<boolean> => {
-      if (blob.size <= 0 || !token) return false;
-
-      const authHeaders = {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      };
-
-      // Production: direct upload to Supabase Storage (serverless-safe)
-      try {
-        const urlRes = await fetch(`/api/employee/tests/${testId}/video-upload-url`, {
-          method: "POST",
-          headers: authHeaders,
-        });
-        if (urlRes.ok) {
-          const { signedUrl } = await urlRes.json();
-          if (signedUrl) {
-            const putRes = await fetch(signedUrl, {
-              method: "PUT",
-              headers: {
-                "Content-Type": "video/webm",
-                "Cache-Control": "3600",
-              },
-              body: blob,
-            });
-            if (putRes.ok) {
-              const completeRes = await fetch(`/api/employee/tests/${testId}/upload_video`, {
-                method: "POST",
-                headers: authHeaders,
-                body: JSON.stringify({ complete: true }),
-              });
-              if (completeRes.ok) {
-                const payload = await completeRes.json().catch(() => ({}));
-                return Boolean(payload?.success);
-              }
-            }
-          }
-        }
-      } catch (directErr) {
-        console.warn("Direct Supabase video upload failed, trying chunk fallback:", directErr);
-      }
-
-      // Fallback: server upload (works when under platform body limit)
-      if (blob.size <= 4 * 1024 * 1024) {
-        try {
-          const formData = new FormData();
-          formData.append(
-            "video",
-            new File([blob], `${testId}.webm`, { type: "video/webm" })
-          );
-          const res = await fetch(`/api/employee/tests/${testId}/upload_video`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          });
-          if (res.ok) {
-            const payload = await res.json().catch(() => ({}));
-            return Boolean(payload?.success);
-          }
-        } catch {
-          // fall through to chunk path
-        }
-      }
-
-      // Fallback: chunked server upload
-      const CHUNK_SIZE = 2 * 1024 * 1024;
-      const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
-
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const slice = blob.slice(
-          chunkIndex * CHUNK_SIZE,
-          Math.min(blob.size, (chunkIndex + 1) * CHUNK_SIZE)
-        );
-        const formData = new FormData();
-        formData.append("chunkIndex", String(chunkIndex));
-        formData.append("totalChunks", String(totalChunks));
-        formData.append(
-          "chunk",
-          new File([slice], `${testId}-chunk-${chunkIndex}.webm`, {
-            type: blob.type || "video/webm",
-          })
-        );
-
-        const res = await fetch(`/api/employee/tests/${testId}/upload_video/chunk`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-
-        if (!res.ok) {
-          console.warn("Video chunk upload failed:", await res.text().catch(() => ""));
-          return false;
-        }
-
-        const payload = await res.json().catch(() => ({}));
-        if (payload?.complete && payload?.success) {
-          return true;
-        }
-      }
-
-      return false;
-    };
 
     return new Promise<boolean>((resolve) => {
       intentionalRecorderStopRef.current = true;
@@ -533,16 +365,11 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
             resolve(false);
             return;
           }
-          if (!(await validateRecordingBlob(blob))) {
-            console.warn(`Proctoring recording failed validation (${blob.size} bytes).`);
-            resolve(false);
-            return;
-          }
 
-          let ok = await uploadBlob(blob);
+          let ok = await uploadProctoringBlob(testId, token, blob);
           if (!ok) {
             await new Promise((r) => setTimeout(r, 1000));
-            ok = await uploadBlob(blob);
+            ok = await uploadProctoringBlob(testId, token, blob);
           }
           resolve(ok);
         } catch (err) {
@@ -573,6 +400,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         recordingChunksRef.current = [];
         recorder.ondataavailable = (event) => {
           if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
+          void uploadProgressSnapshot();
         };
         // Collect periodic chunks, but always keep every chunk from t=0 so the EBML header is present.
         recorder.start(2000);
@@ -661,19 +489,13 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       }
       setPhase("submitted");
       setMsg(null);
+      setVideoUploadState("uploading");
 
-      // Save answers to Supabase first; upload proctoring video in the background.
-      void (async () => {
-        try {
-          await stopRecordingAndUpload();
-        } catch (uploadErr) {
-          console.warn("Background proctoring video upload failed:", uploadErr);
-        } finally {
-          if (camStream) {
-            camStream.getTracks().forEach((track) => track.stop());
-          }
-        }
-      })();
+      const uploaded = await stopRecordingAndUpload();
+      if (camStream) {
+        camStream.getTracks().forEach((track) => track.stop());
+      }
+      setVideoUploadState(uploaded ? "done" : "failed");
     } catch (e: any) {
       submittingRef.current = false;
       setErr(e.message ?? "Submit failed"); setPhase("error");
@@ -707,7 +529,14 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
   // ── phase: submitted ────────────────────────────────────────────
   if (phase === "submitted" && submitted) {
-    return <ResultsView result={submitted} onRetake={() => { setPhase("retake-confirm"); setSubmitted(null); setAnswers({}); setCurrentIdx(0); }} onGoDashboard={() => window.location.href = "/employee/dashboard"} />;
+    return (
+      <ResultsView
+        result={submitted}
+        videoUploadState={videoUploadState}
+        onRetake={() => { setPhase("retake-confirm"); setSubmitted(null); setAnswers({}); setCurrentIdx(0); setVideoUploadState("pending"); }}
+        onGoDashboard={() => window.location.href = "/employee/dashboard"}
+      />
+    );
   }
 
   // ── phase: retake confirm ───────────────────────────────────────

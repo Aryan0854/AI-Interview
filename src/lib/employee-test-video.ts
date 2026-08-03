@@ -168,6 +168,35 @@ async function removeFromStorage(path: string): Promise<void> {
   }
 }
 
+/** Save in-progress recording bytes (no score/status changes). Used during live tests. */
+export async function saveEmployeeTestVideoProgress(testId: string, buffer: Buffer): Promise<boolean> {
+  const cleaned = repairWebmBuffer(buffer);
+  if (!hasEbmlHeader(cleaned) || cleaned.length < 1024) return false;
+
+  try {
+    await ensureRecordingsBucket();
+    const path = employeeTestVideoStoragePath(testId);
+    const { error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).upload(path, cleaned, {
+      contentType: "video/webm",
+      upsert: true,
+      cacheControl: "3600",
+    });
+    if (error) throw error;
+    return true;
+  } catch (storageErr) {
+    console.warn(`Employee test video progress save failed for ${testId}:`, storageErr);
+    try {
+      await ensureRuntimeUploadsDir();
+      const dir = join(getRuntimeUploadsRoot(), "employee_test_recordings");
+      await mkdir(dir, { recursive: true });
+      await writeFile(localVideoPath(testId), cleaned);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
   const cleaned = prepareWebmForStorage(buffer);
   if (!cleaned) {
