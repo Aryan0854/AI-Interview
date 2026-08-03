@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ResultsView, ConfirmModal } from "@/components/test-view";
-import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw, HelpCircle,
+import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw,
   Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Test, TestQuestion } from "@/types/learning";
@@ -150,24 +150,6 @@ function DifficultyBadge({ d }: { d: string }) {
   : d === "intermediate" ? "bg-amber-100  text-amber-700  border-amber-200"
   :                        "bg-red-100   text-red-700   border-red-200";
   return <span className={`text-[10px] px-2.5 py-1 rounded-full border ${cls} font-bold uppercase tracking-wider`}>{d}</span>;
-}
-
-// ── Finish button — disabled until all questions answered ───────────────
-
-function ConfettiButton({ quizDone, onClick }: { quizDone: boolean; onClick?: () => void }) {
-  if (!quizDone) {
-    return (
-      <Button disabled className="gap-1 bg-indigo-100 text-indigo-300 cursor-not-allowed" title="Finish test">
-        <HelpCircle className="w-4 h-4" /> Finish
-      </Button>
-    );
-  }
-
-  return (
-    <Button onClick={onClick} className="gap-1 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-md shadow-emerald-500/25">
-      <CheckCircle2 className="w-4 h-4" /> Finish
-    </Button>
-  );
 }
 
 // =====================================================================
@@ -643,11 +625,6 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     submittingRef.current = true;
     setMsg("Submitting…");
     try {
-      await stopRecordingAndUpload();
-      if (camStream) {
-        camStream.getTracks().forEach((track) => track.stop());
-      }
-
       const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,
         selected_index: selected,
@@ -683,6 +660,20 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         document.exitFullscreen().catch(() => {});
       }
       setPhase("submitted");
+      setMsg(null);
+
+      // Save answers to Supabase first; upload proctoring video in the background.
+      void (async () => {
+        try {
+          await stopRecordingAndUpload();
+        } catch (uploadErr) {
+          console.warn("Background proctoring video upload failed:", uploadErr);
+        } finally {
+          if (camStream) {
+            camStream.getTracks().forEach((track) => track.stop());
+          }
+        }
+      })();
     } catch (e: any) {
       submittingRef.current = false;
       setErr(e.message ?? "Submit failed"); setPhase("error");
@@ -959,13 +950,13 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           })}
         </div>
 
-        {/* Next / Finish */}
+        {/* Next — submit is only via the header button */}
         {hasNext ? (
           <Button className="gap-1 bg-primary hover:from-indigo-700 hover:to-violet-700 text-white shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/30 transition-all rounded-xl" onClick={() => setCurrentIdx((i) => i + 1)}>
             Next <ArrowRight className="w-4 h-4" />
           </Button>
         ) : (
-          <ConfettiButton quizDone={allAnswered} onClick={() => handleSubmit(answers)} />
+          <div className="w-[88px]" aria-hidden="true" />
         )}
       </div>
 

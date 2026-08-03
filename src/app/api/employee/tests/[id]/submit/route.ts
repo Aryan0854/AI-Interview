@@ -4,6 +4,26 @@ import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import { syncSubmitToSupabase } from "@/services/employee-test-supabase-sync";
 import { canSubmitTest, normalizeProctoring } from "@/lib/employee-proctoring";
+import { getOwnedTest } from "@/lib/employee-test-access";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
+const AI_ANALYSIS_TIMEOUT_MS = 12_000;
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /**
  * POST /api/employee/tests/:id/submit
@@ -27,10 +47,11 @@ export async function POST(
       return NextResponse.json({ error: "Empty answers" }, { status: 400 });
     }
 
-    const localTest = await localTestsDb.getTestById(id);
-    if (!localTest || localTest.employee_id !== auth.employeeId) {
+    const owned = await getOwnedTest(id, auth.employeeId);
+    if (!owned) {
       return NextResponse.json({ error: "Test not found" }, { status: 404 });
     }
+    const localTest = owned.test;
 
     if (localTest.status === "completed") {
       return NextResponse.json({ error: "Test already submitted." }, { status: 409 });
@@ -183,13 +204,17 @@ export async function POST(
     let aiAnalysis = "";
     try {
       const { askGemini } = await import("@/lib/learning-ai");
-      aiAnalysis = await askGemini("analyse_results", {
-        topic: testRow?.topic_title ?? "Unknown",
-        accuracy,
-        total: attempts.length,
-        correct,
-        wrongQuestions: wrongQuestions.slice(0, 5),
-      });
+      aiAnalysis = await withTimeout(
+        askGemini("analyse_results", {
+          topic: testRow?.topic_title ?? "Unknown",
+          accuracy,
+          total: attempts.length,
+          correct,
+          wrongQuestions: wrongQuestions.slice(0, 5),
+        }),
+        AI_ANALYSIS_TIMEOUT_MS,
+        ""
+      );
     } catch (aiErr) {
       console.warn("AI analysis failed or skipped:", aiErr);
     }
@@ -251,7 +276,7 @@ export async function POST(
         auth.employee
       );
     } catch (syncErr) {
-      console.warn("Supabase sync after submit failed:", syncErr);
+      console.error("Supabase sync after submit failed (test row may already be saved):", syncErr);
     }
 
     return NextResponse.json({

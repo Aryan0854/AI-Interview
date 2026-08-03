@@ -103,10 +103,16 @@ export class LocalTestsDb {
         inProgress = JSON.parse(inProgress);
       } catch (e) {}
     }
+    const employeeCode =
+      row.employee_code ||
+      (typeof row.employee_id === "string" &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(row.employee_id)
+        ? row.employee_id
+        : undefined);
     return {
       id: row.id,
-      employee_id: row.employee_code || row.employee_id,
-      employee_code: row.employee_code,
+      employee_id: employeeCode || row.employee_id,
+      employee_code: row.employee_code ?? employeeCode,
       topic_id: row.topic_id,
       subject_id: row.subject_id,
       difficulty: row.difficulty,
