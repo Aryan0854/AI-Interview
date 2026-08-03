@@ -55,6 +55,7 @@ export function DashboardInner() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [results, setResults]     = useState<any[]>([]);
   const [assignedTest, setAssignedTest] = useState<any>(null);
+  const [completedAssessment, setCompletedAssessment] = useState<any>(null);
   const [productQbEligible, setProductQbEligible] = useState(false);
   const [employeeProfile, setEmployeeProfile] = useState<{ employee_id: string; full_name: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +82,10 @@ export function DashboardInner() {
             ? { employee_id: profile.employee_id, full_name: profile.full_name ?? profile.employee_id }
             : null
         );
-        if (assigned?.test_id) setAssignedTest(assigned);
+        if (assigned?.active_test) setAssignedTest(assigned.active_test);
+        else if (assigned?.test_id) setAssignedTest(assigned);
+        else setAssignedTest(null);
+        setCompletedAssessment(assigned?.completed_test ?? null);
       } catch (e: any) { if (!cancelled) setErr(e.message); }
       finally { if (!cancelled) setLoading(false); }
     })();
@@ -98,7 +102,8 @@ export function DashboardInner() {
     
     // Provide safe fallbacks for empty analytics
     const totalTestsTaken = Math.max(displayResults.length, analytics.total_tests_taken || 0);
-    const averageScore = analytics.average_score || 0;
+    const averageScore =
+      totalTestsTaken > 0 ? (analytics.average_score || 0) : 0;
     const activeBreakdown = (analytics.subject_breakdown ?? []).filter(
       (s: any) => (s?.topic_count ?? 0) > 0
     );
@@ -298,21 +303,54 @@ export function DashboardInner() {
 
       <main className="max-w-full mx-auto px-6 md:px-12 -mt-6 pb-14 space-y-6 relative z-10">
 
-        {assignedTest && productQbEligible && assignedTest.status !== "completed" && (
+        {assignedTest && productQbEligible && (
           <Card className="p-6 bg-card border border-indigo-200 dark:border-indigo-900 shadow-soft">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-primary">Assigned Product Assessment</p>
                 <h2 className="mt-1 text-xl font-bold text-foreground">{assignedTest.topic_title}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {assignedTest.total_questions} questions · Ready to start
+                  {assignedTest.total_questions} questions ·{" "}
+                  {assignedTest.status === "in_progress"
+                    ? "In progress — resume where you left off"
+                    : "Ready to start"}
                 </p>
               </div>
               <Button
                 className="rounded-xl"
                 onClick={() => router.push(`/employee/tests/${assignedTest.test_id}`)}
               >
-                Start Assessment
+                {assignedTest.status === "in_progress" ? "Resume Assessment" : "Start Assessment"}
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {!assignedTest && completedAssessment && productQbEligible && (
+          <Card className="p-6 bg-card border border-emerald-200 dark:border-emerald-900/60 shadow-soft">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Assessment Completed
+                </p>
+                <h2 className="mt-1 text-xl font-bold text-foreground">{completedAssessment.topic_title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Score: {completedAssessment.score_correct}/{completedAssessment.total_questions} (
+                  {completedAssessment.score_percent}%)
+                  {completedAssessment.completed_at
+                    ? ` · ${toDateStr(completedAssessment.completed_at)}`
+                    : ""}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Contact your administrator if you need to retake this assessment.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => router.push(`/employee/tests/${completedAssessment.test_id}`)}
+              >
+                Review Results
               </Button>
             </div>
           </Card>
@@ -502,7 +540,9 @@ async function fetchAssignedTest(token: string): Promise<any | null> {
   });
   if (!r.ok) return null;
   const data = await r.json();
-  return data?.test_id ? data : null;
+  if (data?.active_test || data?.completed_test) return data;
+  if (data?.test_id) return data;
+  return null;
 }
 
 async function fetchEmployeeProfile(token: string): Promise<any | null> {

@@ -1,9 +1,11 @@
 import { supabase } from "@/lib/db";
 import { useSupabasePrimary } from "@/lib/db-mode";
 import type { EmployeeAccount } from "@/lib/employee-auth";
+import { readPersistedJson } from "@/lib/runtime-data";
 import {
   localTestsDb,
   type LocalTest,
+  type LocalTestAttempt,
   type LocalTestQuestion,
 } from "@/services/local-tests-db";
 
@@ -196,6 +198,64 @@ export async function syncLocalTestStateToSupabase(
     if (useSupabasePrimary()) {
       throw new Error(`Test ${testId} not found — cannot sync to Supabase`);
     }
+  }
+}
+
+/** Push completed tests from local JSON into Supabase when hosted DB is behind (e.g. after local submit). */
+export async function reconcileEmployeeTestsFromLocalJson(
+  employeeCode: string,
+  profile?: Partial<EmployeeAccount>
+): Promise<void> {
+  try {
+    const raw = await readPersistedJson("local_tests_db.json");
+    if (!raw) return;
+
+    const db = JSON.parse(raw) as {
+      tests: LocalTest[];
+      test_questions: LocalTestQuestion[];
+      test_attempts: LocalTestAttempt[];
+    };
+
+    const code = String(employeeCode ?? "").trim();
+    const localCompleted = (db.tests ?? []).filter(
+      (t) => t.employee_id === code && t.status === "completed"
+    );
+    if (!localCompleted.length) return;
+
+    const employeeUuid = await resolveEmployeeUuid(code, profile);
+
+    for (const test of localCompleted) {
+      const { data: remote } = await supabase
+        .from("tests")
+        .select("status")
+        .eq("id", test.id)
+        .maybeSingle();
+
+      if (remote?.status === "completed") continue;
+
+      const questions = (db.test_questions ?? []).filter((q) => q.test_id === test.id);
+      await syncTestToSupabase(test, employeeUuid, questions);
+
+      const attempts = (db.test_attempts ?? []).filter((a) => a.test_id === test.id);
+      if (attempts.length > 0) {
+        await syncAttemptsToSupabase(
+          test.id,
+          employeeUuid,
+          attempts.map((a) => ({
+            test_id: a.test_id,
+            employee_id: a.employee_id,
+            question_id: a.question_id,
+            selected_option_index: a.selected_option_index,
+            is_correct: a.is_correct,
+            time_taken_seconds: a.time_taken_seconds,
+            session_key: a.session_key,
+          })),
+          true
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("reconcileEmployeeTestsFromLocalJson failed:", err);
   }
 }
 

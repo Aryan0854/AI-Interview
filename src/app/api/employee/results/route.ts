@@ -3,6 +3,7 @@ import { supabase } from "@/lib/db";
 import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { localTestsDb, LocalTestsDb } from "@/services/local-tests-db";
 import { allowLocalTestsFallback } from "@/lib/db-mode";
+import { reconcileEmployeeTestsFromLocalJson } from "@/services/employee-test-supabase-sync";
 
 interface ResultItem {
   id: string;
@@ -167,6 +168,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    await reconcileEmployeeTestsFromLocalJson(auth.employeeId, auth.employee);
+
     const supabaseResults = await loadResultsFromSupabase(auth.employeeId);
     if (supabaseResults && supabaseResults.length > 0) {
       return NextResponse.json(supabaseResults);
