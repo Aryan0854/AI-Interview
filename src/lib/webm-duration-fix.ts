@@ -1,5 +1,8 @@
 import { Decoder, Reader, tools } from "ts-ebml";
 
+/** Full-file EBML scan is too slow/memory-heavy for long proctoring recordings (~100MB+). */
+export const MAX_WEBM_DURATION_FIX_BYTES = 8 * 1024 * 1024;
+
 function isValidWebmHeader(buffer: Buffer): boolean {
   return (
     buffer.length >= 4 &&
@@ -24,12 +27,19 @@ function tailsMatch(original: Buffer, candidate: Buffer, tailBytes = 4096): bool
  * Returns the original buffer when repair would risk playback (never corrupt source data).
  */
 export function fixWebmDurationBuffer(input: Buffer): Buffer {
-  if (input.length < 512 || !isValidWebmHeader(input)) return input;
+  if (
+    input.length < 512 ||
+    input.length > MAX_WEBM_DURATION_FIX_BYTES ||
+    !isValidWebmHeader(input)
+  ) {
+    return input;
+  }
 
   try {
     const decoder = new Decoder();
     const reader = new Reader();
-    const elms = decoder.decode(Uint8Array.from(input).buffer);
+    const arrayBuffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
+    const elms = decoder.decode(arrayBuffer as ArrayBuffer);
     elms.forEach((elm) => reader.read(elm));
     reader.stop();
 
@@ -54,7 +64,11 @@ export function fixWebmDurationBuffer(input: Buffer): Buffer {
 
     return fixed;
   } catch (err) {
-    console.warn("WebM duration metadata fix skipped, using original buffer:", err);
+    const detail =
+      err instanceof Error
+        ? err.message.replace(/[0-9a-f]{32,}/gi, "<binary>").slice(0, 160)
+        : String(err).slice(0, 160);
+    console.warn(`WebM duration metadata fix skipped (${input.length} bytes):`, detail);
     return input;
   }
 }

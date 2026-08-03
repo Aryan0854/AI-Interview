@@ -2,7 +2,7 @@ import { join } from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { supabaseServer } from "@/lib/db";
 import { ensureRuntimeUploadsDir, getRuntimeUploadsRoot } from "@/lib/runtime-data";
-import { fixWebmDurationBuffer } from "@/lib/webm-duration-fix";
+import { fixWebmDurationBuffer, MAX_WEBM_DURATION_FIX_BYTES } from "@/lib/webm-duration-fix";
 
 /** Avoid re-parsing WebM on every byte-range request during playback. */
 const preparedVideoCache = new Map<string, Buffer>();
@@ -287,6 +287,11 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
 
   const repaired = repairWebmBuffer(raw);
   if (!isValidWebmBuffer(repaired)) return null;
+
+  // Long recordings skip EBML rewrite — serve original bytes for fast, reliable playback.
+  if (repaired.length > MAX_WEBM_DURATION_FIX_BYTES) {
+    return rememberPreparedVideo(testId, repaired);
+  }
 
   const prepared = prepareWebmForPlayback(repaired);
   return rememberPreparedVideo(testId, prepared);
