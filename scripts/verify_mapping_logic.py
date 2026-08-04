@@ -18,7 +18,7 @@ def normalize_token(s):
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
-wb_qb = openpyxl.load_workbook("Question Bank-20th July '26.xlsx", data_only=True)
+wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
 
 # Question pools by canonical product key
 # Recognized product keys:

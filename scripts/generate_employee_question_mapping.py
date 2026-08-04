@@ -36,7 +36,7 @@ def get_product_key(raw_name, sheet_name=""):
 
 # 1. Load Question Bank
 print("Loading Question Bank...")
-wb_qb = openpyxl.load_workbook("Question Bank-20th July '26.xlsx", data_only=True)
+wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
 qb_by_product = {}
 
 for sheetname in wb_qb.sheetnames:
