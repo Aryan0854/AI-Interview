@@ -19,7 +19,7 @@ export function isFullscreenActive(): boolean {
 const BLOCKED_DEVTOOLS =
   /^(F12|F5|F11)$/i;
 
-type ProctorPhase = "loading" | "ready" | "running" | "retake-confirm" | "submitted" | "error";
+type ProctorPhase = "loading" | "ready" | "running" | "submitting" | "retake-confirm" | "submitted" | "error";
 
 export function useEmployeeProctoring(options: {
   testId: string;
