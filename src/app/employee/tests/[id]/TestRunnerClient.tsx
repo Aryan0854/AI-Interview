@@ -80,7 +80,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   }
 
   // ── state ──────────────────────────────────────────────────────
-  type Phase = "loading" | "ready" | "running" | "retake-confirm" | "submitted" | "error";
+  type Phase = "loading" | "ready" | "running" | "submitting" | "retake-confirm" | "submitted" | "error";
   type VideoUploadState = "pending" | "uploading" | "done" | "failed";
 
   const [phase,       setPhase]       = useState<Phase>("loading");
@@ -346,41 +346,48 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     await uploadProctoringProgress(testId, token, blob).catch(() => {});
   }, [testId, token]);
 
-  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
+  const finalizeRecordingBlob = useCallback(async (): Promise<Blob | null> => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === "inactive") {
-      console.warn("Proctoring recorder was not active at submit time.");
+    if (recorder && recorder.state !== "inactive") {
+      intentionalRecorderStopRef.current = true;
+      try {
+        await flushRecorderAndStop(recorder);
+      } catch {
+        /* use whatever chunks we have */
+      }
+    }
+    if (recordingChunksRef.current.length === 0) return null;
+    return new Blob(recordingChunksRef.current, {
+      type: recorder?.mimeType || "video/webm",
+    });
+  }, []);
+
+  const uploadRecordingBlob = useCallback(
+    async (blob: Blob): Promise<boolean> => {
+      if (blob.size <= 0) return false;
+      let ok = await uploadProctoringBlob(testId, token, blob);
+      if (!ok) {
+        await new Promise((r) => setTimeout(r, 1000));
+        ok = await uploadProctoringBlob(testId, token, blob);
+      }
+      return ok;
+    },
+    [testId, token]
+  );
+
+  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
+    try {
+      const blob = await finalizeRecordingBlob();
+      if (!blob || blob.size <= 0) {
+        console.warn("Proctoring recording blob is empty at submit time.");
+        return false;
+      }
+      return uploadRecordingBlob(blob);
+    } catch (err) {
+      console.warn("Failed to upload proctoring video:", err);
       return false;
     }
-
-    return new Promise<boolean>((resolve) => {
-      intentionalRecorderStopRef.current = true;
-      recorder.onstop = async () => {
-        try {
-          const blob = new Blob(recordingChunksRef.current, {
-            type: recorder.mimeType || "video/webm;codecs=vp8",
-          });
-          if (blob.size <= 0) {
-            console.warn("Proctoring recording blob is empty.");
-            resolve(false);
-            return;
-          }
-
-          let ok = await uploadProctoringBlob(testId, token, blob);
-          if (!ok) {
-            await new Promise((r) => setTimeout(r, 1000));
-            ok = await uploadProctoringBlob(testId, token, blob);
-          }
-          resolve(ok);
-        } catch (err) {
-          console.warn("Failed to upload proctoring video:", err);
-          resolve(false);
-        }
-      };
-
-      void flushRecorderAndStop(recorder).catch(() => resolve(false));
-    });
-  }, [testId, token]);
+  }, [finalizeRecordingBlob, uploadRecordingBlob]);
 
   const handleStartTest = async () => {
     // Camera permission UI must finish before fullscreen can activate reliably.
@@ -451,13 +458,17 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   async function handleSubmit(ans: Record<number, number>, opts?: { autoSubmitted?: boolean }) {
     if (submittingRef.current) return;
     submittingRef.current = true;
-    setMsg("Submitting…");
+    setPhase("submitting");
+    setMsg(null);
     try {
       const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,
         selected_index: selected,
         time_seconds: 0,
       }));
+
+      // Stop recorder first so the final WebM blob is complete before upload.
+      const recordingBlob = await finalizeRecordingBlob();
 
       const r = await fetch(`/api/employee/tests/${testId}/submit`, {
         method: "POST",
@@ -491,7 +502,9 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       setMsg(null);
       setVideoUploadState("uploading");
 
-      const uploaded = await stopRecordingAndUpload();
+      const uploaded = recordingBlob
+        ? await uploadRecordingBlob(recordingBlob)
+        : await stopRecordingAndUpload();
       if (camStream) {
         camStream.getTracks().forEach((track) => track.stop());
       }
@@ -523,6 +536,19 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
         <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
         <p className="font-medium">Loading questions…</p>
+      </div>
+    );
+  }
+
+  // ── phase: submitting ───────────────────────────────────────────
+  if (phase === "submitting") {
+    return (
+      <div className="fixed inset-0 z-[300] flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm px-6">
+        <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
+        <h2 className="text-lg font-bold text-foreground">Submitting your assessment</h2>
+        <p className="text-sm text-muted-foreground mt-2 text-center max-w-sm">
+          Saving your answers… Please do not close or refresh this page.
+        </p>
       </div>
     );
   }
@@ -667,10 +693,16 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           variant="outline"
           size="sm"
           className={`gap-1.5 rounded-lg border ${allAnswered ? "border-indigo-500 dark:border-indigo-700 text-primary bg-indigo-50 dark:bg-slate-900 font-semibold" : "border-border text-muted-foreground hover:bg-secondary"}`}
-          disabled={!allAnswered}
+          disabled={!allAnswered || submittingRef.current}
           onClick={() => handleSubmit(answers)}
         >
-          {allAnswered ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          {submittingRef.current ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : allAnswered ? (
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          ) : (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          )}
           Submit
         </Button>
       </header>
@@ -789,8 +821,8 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         )}
       </div>
 
-      {/* Message toast */}
-      {msg && (
+      {/* Message toast (non-submit notices) */}
+      {msg && phase === "running" && (
         <div className="text-center">
           <p className="text-sm text-slate-500 italic">{msg}</p>
         </div>

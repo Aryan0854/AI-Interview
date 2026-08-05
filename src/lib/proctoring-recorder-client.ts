@@ -61,46 +61,32 @@ export function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
 }
 
 const MIN_RECORDING_BYTES = 4096;
+/** Vercel serverless request body limit (~4.5MB); use direct-to-Supabase above this. */
+const VERCEL_BODY_SAFE_BYTES = 3.5 * 1024 * 1024;
 
-async function validateRecordingBlob(blob: Blob): Promise<boolean> {
-  if (blob.size < MIN_RECORDING_BYTES) return false;
-  try {
-    const sample = new Uint8Array(
-      await blob.slice(0, Math.min(blob.size, 65536)).arrayBuffer()
-    );
-    if (
-      sample[0] !== 0x1a ||
-      sample[1] !== 0x45 ||
-      sample[2] !== 0xdf ||
-      sample[3] !== 0xa3
-    ) {
-      return false;
-    }
-    const cluster = [0x1f, 0x43, 0xb6, 0x75];
-    for (let i = 0; i <= sample.length - 4; i++) {
-      if (
-        sample[i] === cluster[0] &&
-        sample[i + 1] === cluster[1] &&
-        sample[i + 2] === cluster[2] &&
-        sample[i + 3] === cluster[3]
-      ) {
-        return true;
-      }
-    }
-    return blob.size >= MIN_RECORDING_BYTES * 8;
-  } catch {
-    return false;
-  }
-}
-
-export async function uploadProctoringBlob(
+async function postVideoForm(
   testId: string,
   token: string,
-  blob: Blob
+  blob: Blob,
+  path: "upload_video" | "upload_video/progress"
 ): Promise<boolean> {
-  if (blob.size <= 0 || !token) return false;
-  if (!(await validateRecordingBlob(blob))) return false;
+  if (blob.size < MIN_RECORDING_BYTES || !token) return false;
+  const formData = new FormData();
+  formData.append(
+    "video",
+    new File([blob], `${testId}.webm`, { type: blob.type || "video/webm" })
+  );
+  const res = await fetch(`/api/employee/tests/${testId}/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) return false;
+  const payload = await res.json().catch(() => ({}));
+  return payload?.success !== false;
+}
 
+async function uploadViaSignedUrl(testId: string, token: string, blob: Blob): Promise<boolean> {
   const authHeaders = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -111,52 +97,36 @@ export async function uploadProctoringBlob(
       method: "POST",
       headers: authHeaders,
     });
-    if (urlRes.ok) {
-      const { signedUrl } = await urlRes.json();
-      if (signedUrl) {
-        const putRes = await fetch(signedUrl, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "video/webm",
-            "Cache-Control": "3600",
-          },
-          body: blob,
-        });
-        if (putRes.ok) {
-          const completeRes = await fetch(`/api/employee/tests/${testId}/upload_video`, {
-            method: "POST",
-            headers: authHeaders,
-            body: JSON.stringify({ complete: true }),
-          });
-          if (completeRes.ok) {
-            const payload = await completeRes.json().catch(() => ({}));
-            return Boolean(payload?.success);
-          }
-        }
-      }
-    }
+    if (!urlRes.ok) return false;
+
+    const { signedUrl } = await urlRes.json();
+    if (!signedUrl) return false;
+
+    const putRes = await fetch(signedUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "video/webm",
+        "Cache-Control": "3600",
+      },
+      body: blob,
+    });
+    if (!putRes.ok) return false;
+
+    const completeRes = await fetch(`/api/employee/tests/${testId}/upload_video`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({ complete: true }),
+    });
+    if (!completeRes.ok) return false;
+
+    const payload = await completeRes.json().catch(() => ({}));
+    return Boolean(payload?.success);
   } catch {
-    // fall through
+    return false;
   }
+}
 
-  if (blob.size <= 4 * 1024 * 1024) {
-    try {
-      const formData = new FormData();
-      formData.append("video", new File([blob], `${testId}.webm`, { type: "video/webm" }));
-      const res = await fetch(`/api/employee/tests/${testId}/upload_video`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        return Boolean(payload?.success);
-      }
-    } catch {
-      // fall through
-    }
-  }
-
+async function uploadViaChunks(testId: string, token: string, blob: Blob): Promise<boolean> {
   const CHUNK_SIZE = 2 * 1024 * 1024;
   const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
 
@@ -189,18 +159,40 @@ export async function uploadProctoringBlob(
   return false;
 }
 
+export async function uploadProctoringBlob(
+  testId: string,
+  token: string,
+  blob: Blob
+): Promise<boolean> {
+  if (blob.size < MIN_RECORDING_BYTES || !token) return false;
+
+  const strategies: Array<() => Promise<boolean>> =
+    blob.size > VERCEL_BODY_SAFE_BYTES
+      ? [
+          // Production (Vercel): bypass 4.5MB body limit via Supabase signed URL.
+          () => uploadViaSignedUrl(testId, token, blob),
+          () => uploadViaChunks(testId, token, blob),
+          () => postVideoForm(testId, token, blob, "upload_video/progress"),
+        ]
+      : [
+          // Local / small recordings: direct API upload is simplest.
+          () => postVideoForm(testId, token, blob, "upload_video"),
+          () => uploadViaSignedUrl(testId, token, blob),
+          () => uploadViaChunks(testId, token, blob),
+          () => postVideoForm(testId, token, blob, "upload_video/progress"),
+        ];
+
+  for (const strategy of strategies) {
+    if (await strategy()) return true;
+  }
+
+  return false;
+}
+
 export async function uploadProctoringProgress(
   testId: string,
   token: string,
   blob: Blob
 ): Promise<boolean> {
-  if (blob.size < 4096 || !token) return false;
-  const formData = new FormData();
-  formData.append("video", new File([blob], `${testId}-progress.webm`, { type: "video/webm" }));
-  const res = await fetch(`/api/employee/tests/${testId}/upload_video/progress`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: formData,
-  });
-  return res.ok;
+  return postVideoForm(testId, token, blob, "upload_video/progress");
 }

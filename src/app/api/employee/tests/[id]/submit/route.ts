@@ -9,22 +9,6 @@ import { getOwnedTest } from "@/lib/employee-test-access";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const AI_ANALYSIS_TIMEOUT_MS = 12_000;
-
-async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((resolve) => {
-        timer = setTimeout(() => resolve(fallback), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 /**
  * POST /api/employee/tests/:id/submit
  * Body: { answers: [{ question_id: string, selected_index: number, time_seconds: number }] }
@@ -191,41 +175,13 @@ export async function POST(
     const accuracy = round((correct / Math.max(1, totalQuestions)) * 100);
     const completedAt = new Date().toISOString();
 
-    const wrongQuestions = answers
-      .filter((a: any) => {
-        const q = questionsList.find((qq: any) => qq.id === a.question_id);
-        return q ? q.correct_option_index !== a.selected_index : true;
-      })
-      .map((a: any) => {
-        const q = questionsList.find((qq: any) => qq.id === a.question_id);
-        return q ? q.question_text : a.question_id;
-      });
-
-    let aiAnalysis = "";
-    try {
-      const { askGemini } = await import("@/lib/learning-ai");
-      aiAnalysis = await withTimeout(
-        askGemini("analyse_results", {
-          topic: testRow?.topic_title ?? "Unknown",
-          accuracy,
-          total: attempts.length,
-          correct,
-          wrongQuestions: wrongQuestions.slice(0, 5),
-        }),
-        AI_ANALYSIS_TIMEOUT_MS,
-        ""
-      );
-    } catch (aiErr) {
-      console.warn("AI analysis failed or skipped:", aiErr);
-    }
-
     const completionUpdates = {
       status: "completed" as const,
       completed_at: completedAt,
       score_correct: correct,
       score_total: totalQuestions,
       score_percent: accuracy,
-      ai_analysis: aiAnalysis || null,
+      ai_analysis: null,
       proctoring: {
         ...normalizeProctoring(localTest.proctoring),
         autoSubmitted:
@@ -245,7 +201,7 @@ export async function POST(
           score_correct: correct,
           score_total: totalQuestions,
           score_percent: accuracy,
-          ai_analysis: aiAnalysis || null,
+          ai_analysis: null,
         })
         .eq("id", id)
         .select("*")
@@ -285,7 +241,7 @@ export async function POST(
       total: totalQuestions,
       correct,
       accuracy,
-      ai_analysis: aiAnalysis,
+      ai_analysis: null,
     });
   } catch (e) {
     console.error("submit error:", e);

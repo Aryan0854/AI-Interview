@@ -197,6 +197,12 @@ export async function saveEmployeeTestVideoProgress(testId: string, buffer: Buff
   }
 }
 
+/** Strict save first; fall back to lenient repair path (production-safe for in-flight WebM). */
+export async function saveEmployeeTestVideoLenient(testId: string, buffer: Buffer): Promise<boolean> {
+  if (await saveEmployeeTestVideo(testId, buffer)) return true;
+  return saveEmployeeTestVideoProgress(testId, buffer);
+}
+
 export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
   const cleaned = prepareWebmForStorage(buffer);
   if (!cleaned) {

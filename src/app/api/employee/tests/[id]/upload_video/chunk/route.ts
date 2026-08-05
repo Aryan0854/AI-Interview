@@ -5,7 +5,7 @@ import { authenticateRequest } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import {
   getEmployeeTestVideoAdminUrl,
-  saveEmployeeTestVideo,
+  saveEmployeeTestVideoLenient,
 } from "@/lib/employee-test-video";
 import { markProctorVideoUploaded, normalizeProctoring } from "@/lib/employee-proctoring";
 import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
@@ -99,7 +99,7 @@ export async function POST(
       return NextResponse.json({ error: "Recording file is empty" }, { status: 400 });
     }
 
-    const saved = await saveEmployeeTestVideo(testId, fullBuffer);
+    const saved = await saveEmployeeTestVideoLenient(testId, fullBuffer);
     if (!saved) {
       return NextResponse.json({ error: "Failed to store recording in Supabase" }, { status: 500 });
     }
