@@ -378,6 +378,7 @@ export default function AdminDashboard() {
   const [allTestResults, setAllTestResults] = useState<any[]>([]);
   const [resourcePortalEmployees, setResourcePortalEmployees] = useState<any[]>([]);
   const [resettingTestId, setResettingTestId] = useState<string | null>(null);
+  const [deletingVideoTestId, setDeletingVideoTestId] = useState<string | null>(null);
   const [resetTargetEmployee, setResetTargetEmployee] = useState<{
     testId: string;
     employeeId: string;
@@ -948,6 +949,40 @@ export default function AdminDashboard() {
       setActionError(err.message || "Failed to reset test");
     } finally {
       setResettingTestId(null);
+    }
+  };
+
+  const handleDeleteEmployeeVideo = async (
+    testId: string,
+    employeeId: string,
+    employeeName: string
+  ) => {
+    const confirmed = window.confirm(
+      `Delete proctoring video only for ${employeeName || employeeId}?\n\nThis removes the recording from storage. Test score, status, and answers will NOT be changed.`
+    );
+    if (!confirmed) return;
+
+    setDeletingVideoTestId(testId);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/admin/employees/delete-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testId, employeeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete video");
+      setActionSuccess(
+        `Proctoring video deleted for ${employeeName || employeeId}. Score and test status unchanged.`
+      );
+      if (videoPreview?.testId === testId) {
+        setVideoPreview(null);
+      }
+      await loadEmployees({ fresh: true });
+    } catch (err: any) {
+      setActionError(err.message || "Failed to delete video");
+    } finally {
+      setDeletingVideoTestId(null);
     }
   };
 
@@ -3813,6 +3848,37 @@ export default function AdminDashboard() {
                                               <>
                                                 <RefreshCcw className="w-3.5 h-3.5 mr-1" />
                                                 Reset Test
+                                              </>
+                                            )}
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={
+                                              !videoTest?.hasVideo ||
+                                              deletingVideoTestId === videoTest?.testId
+                                            }
+                                            title={
+                                              videoTest?.hasVideo
+                                                ? "Delete proctoring video from storage only (score unchanged)"
+                                                : "No recording to delete"
+                                            }
+                                            onClick={() =>
+                                              videoTest &&
+                                              handleDeleteEmployeeVideo(
+                                                videoTest.testId,
+                                                portalEmployeeId(account),
+                                                portalEmployeeName(account)
+                                              )
+                                            }
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                          >
+                                            {deletingVideoTestId === videoTest?.testId ? (
+                                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                              <>
+                                                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                                Delete Video
                                               </>
                                             )}
                                           </Button>
