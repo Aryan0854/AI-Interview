@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { join } from "path";
 import { readFile } from "fs/promises";
 import { derivePortalTestStatus, type PortalTestStatus } from "@/lib/portal-test-status";
+import { formatProductDisplayName, formatTopicTitleForDisplay } from "@/lib/product-display-name";
 import { readPersistedJson } from "@/lib/runtime-data";
 
 export interface ResourcePortalEmployee {
@@ -20,6 +21,7 @@ export interface ResourcePortalEmployee {
   test_status: PortalTestStatus | null;
   score: number | null;
   score_max?: number;
+  completed_at?: string | null;
     tests: Array<{
     id: string;
     topicTitle: string;
@@ -372,9 +374,13 @@ export function mergeResourcePortalData(
 
     const answeredCount = primaryTest?.answeredCount ?? 0;
     const totalQuestions = primaryTest?.totalQuestions ?? row.assigned_question_count ?? 0;
+    const completedAt =
+      primaryCompleted?.completedAt ??
+      (primaryTest?.status === "completed" ? primaryTest?.completedAt ?? null : null);
 
     return {
       ...row,
+      product: formatProductDisplayName(row.product),
       test_id: primaryTest?.id ?? manifestTestId,
       test_status: derivePortalTestStatus({
         assignedQuestionCount: row.assigned_question_count || (manifestTestId ? 25 : 0),
@@ -386,9 +392,10 @@ export function mergeResourcePortalData(
       }),
       score,
       score_max: scoreMax,
+      completed_at: completedAt,
       tests: empTests.map((test) => ({
         id: test.id,
-        topicTitle: test.topicTitle,
+        topicTitle: formatTopicTitleForDisplay(test.topicTitle),
         subjectTitle: test.subjectTitle,
         difficulty: test.difficulty,
         totalQuestions: test.totalQuestions,

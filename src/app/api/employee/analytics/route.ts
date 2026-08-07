@@ -5,6 +5,7 @@ import { localTestsDb, LocalTestsDb } from "@/services/local-tests-db";
 import { allowLocalTestsFallback } from "@/lib/db-mode";
 import { computeReadinessScore, computeSkillLevel } from "@/lib/dashboard-analytics";
 import { reconcileEmployeeTestsFromLocalJson } from "@/services/employee-test-supabase-sync";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
 
 function round(n: number, d = 0) {
   const m = 10 ** d;
@@ -143,7 +144,7 @@ async function loadLocalAnalytics(employeeCode: string) {
     return {
       id: test.id,
       topic_id: test.topic_id,
-      topic_title: test.topic_title || test.topic_id,
+      topic_title: formatTopicTitleForDisplay(test.topic_title || test.topic_id),
       subject_id: test.subject_id,
       subject_title: test.subject_title || test.subject_id,
       difficulty: test.difficulty,
@@ -371,7 +372,7 @@ export async function GET(request: NextRequest) {
       return {
         id: test.id,
         topic_id: test.topic_id,
-        topic_title: topicTitleMap.get(test.topic_id) ?? test.topic_id,
+        topic_title: formatTopicTitleForDisplay(topicTitleMap.get(test.topic_id) ?? test.topic_id),
         subject_id: test.subject_id,
         subject_title: subjectTitleMap.get(test.subject_id) ?? test.subject_id,
         difficulty: test.difficulty as any,

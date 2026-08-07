@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequestAsync, isAssessmentOnlyEmployee, isProductQbEmployee } from "@/lib/employee-auth";
+import { formatProductDisplayName } from "@/lib/product-display-name";
 
 export async function GET(request: NextRequest) {
   const auth = await authenticateRequestAsync(request);
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
       department: auth.employee.department,
       role: auth.employee.role,
       is_first_login: auth.employee.is_first_login,
-      product: auth.employee.product ?? "",
+      product: formatProductDisplayName(auth.employee.product),
       product_qb_eligible: isProductQbEmployee(auth.employee),
       assessment_only: assessmentOnly,
     },

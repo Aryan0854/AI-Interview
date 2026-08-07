@@ -4,6 +4,7 @@ import { getEmployeeUuid } from "@/lib/employee-test-access";
 import { supabase } from "@/lib/db";
 import { reconcileEmployeeTestsFromLocalJson } from "@/services/employee-test-supabase-sync";
 import { employeeTestVideoExists } from "@/lib/employee-test-video";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
 
 const TOPIC_ID = "resource-product-assessment";
 
@@ -24,7 +25,7 @@ function mapCompletedTest(row: {
 
   return {
     test_id: row.id,
-    topic_title: row.topic_title ?? "Product Assessment",
+    topic_title: formatTopicTitleForDisplay(row.topic_title ?? "Product Assessment"),
     total_questions: total,
     score_correct: correct,
     score_percent: scorePercent,
@@ -96,7 +97,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       active_test: {
         test_id: activeRow.id,
-        topic_title: activeRow.topic_title ?? "Product Assessment",
+        topic_title: formatTopicTitleForDisplay(activeRow.topic_title ?? "Product Assessment"),
         subject_title: "Product Assessment",
         total_questions: activeRow.total_questions,
         status: activeRow.status,

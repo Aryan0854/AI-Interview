@@ -7,6 +7,7 @@ import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
 import { allowLocalTestsFallback } from '@/lib/db-mode';
+import { formatTopicTitleForDisplay } from '@/lib/product-display-name';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -301,6 +302,7 @@ export async function GET(request: NextRequest) {
   for (let i = 0; i < allTestResults.length; i++) {
     allTestResults[i] = {
       ...allTestResults[i],
+      topicTitle: formatTopicTitleForDisplay(allTestResults[i].topicTitle),
       hasRecording: recordingIds.has(String(allTestResults[i].id ?? "")),
     };
   }

@@ -15,6 +15,7 @@ import {
   getTestQuestionAttemptsBatch,
 } from "@/services/employee-test-attempts-service";
 import { getPortalTestStatusLabel } from "@/lib/portal-test-status";
+import { formatTopicTitleForDisplay, formatProductDisplayName } from "@/lib/product-display-name";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -22,6 +23,13 @@ export const maxDuration = 300;
 function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
   if (score === null || score === undefined) return "—";
   return `${score}/${scoreMax}`;
+}
+
+function formatExportCompletedAt(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 async function loadAllTestResults(): Promise<any[]> {
@@ -163,7 +171,10 @@ async function loadAllTestResults(): Promise<any[]> {
     }
   }
 
-  return allTestResults;
+  return allTestResults.map((test) => ({
+    ...test,
+    topicTitle: formatTopicTitleForDisplay(test.topicTitle),
+  }));
 }
 
 function styleHeaderRow(row: ExcelJS.Row) {
@@ -218,6 +229,7 @@ export async function GET(request: NextRequest) {
       "Email",
       "DDH",
       "Test Status",
+      "Completed On",
       "Score",
       "Remarks",
       "Assigned Questions & Answers",
@@ -284,10 +296,11 @@ export async function GET(request: NextRequest) {
         account.employee_id,
         account.role || "—",
         account.domain || "—",
-        account.product || "—",
+        formatProductDisplayName(account.product) || "—",
         account.email || "—",
         account.ddh || "—",
         getPortalTestStatusLabel(account.test_status),
+        formatExportCompletedAt(account.completed_at),
         account.score !== null && account.score !== undefined
           ? formatPortalScore(account.score, scoreMax)
           : "—",

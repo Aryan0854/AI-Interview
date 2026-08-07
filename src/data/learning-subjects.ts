@@ -1,3 +1,5 @@
+import { formatProductDisplayName } from "@/lib/product-display-name";
+
 /**
  * Portal learning subject cards shown on /employee/learn.
  */
@@ -29,7 +31,9 @@ export function buildLearningTopicsForEmployee(options: {
   if (options.productQbEligible) {
     topics.unshift({
       id: "resource-product-assessment",
-      title: options.product ? `${options.product} Question Bank` : "Product Question Bank",
+      title: options.product
+        ? `${formatProductDisplayName(options.product)} Question Bank`
+        : "Product Question Bank",
       description: "Your assigned product assessment from the question bank",
       icon: "Database",
       color: "#4338CA",

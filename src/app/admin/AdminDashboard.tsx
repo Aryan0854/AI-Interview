@@ -56,6 +56,7 @@ import {
   PORTAL_TEST_STATUS_FILTER_OPTIONS,
   type PortalTestStatusFilter,
 } from "@/lib/portal-test-status";
+import { formatProductDisplayName } from "@/lib/product-display-name";
 
 function formatSyncAge(date: Date): string {
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -75,6 +76,27 @@ function portalEmployeeName(account: { full_name?: string | null; employee_id?: 
 
 function portalEmployeeId(account: { employee_id?: string | null }): string {
   return account.employee_id?.trim() || "—";
+}
+
+function portalPrimaryCompletedAt(account: {
+  test_status?: string | null;
+  test_id?: string | null;
+  completed_at?: string | null;
+  tests?: Array<{ id: string; status?: string; completedAt?: string | null }>;
+}): string | null {
+  if (account.test_status !== "completed") return null;
+  if (account.completed_at) return account.completed_at;
+  const primary =
+    account.tests?.find((t) => t.id === account.test_id && t.status === "completed") ??
+    account.tests?.find((t) => t.status === "completed");
+  return primary?.completedAt ?? null;
+}
+
+function formatPortalCompletedAt(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function portalVideoTest(account: {
@@ -888,6 +910,7 @@ export default function AdminDashboard() {
         account.role?.toLowerCase().includes(term) ||
         account.domain?.toLowerCase().includes(term) ||
         account.product?.toLowerCase().includes(term) ||
+        (term.includes("nds") && account.product?.toLowerCase() === "sdl") ||
         account.email?.toLowerCase().includes(term) ||
         account.ddh?.toLowerCase().includes(term)
       );
@@ -3702,7 +3725,7 @@ export default function AdminDashboard() {
 
                     <div className="border border-border rounded-2xl overflow-hidden">
                       <div className="overflow-auto max-h-[600px]">
-                        <table className="w-full text-left border-collapse text-xs min-w-[1200px]">
+                        <table className="w-full text-left border-collapse text-xs min-w-[1320px]">
                           <thead>
                             <tr className="bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-border text-slate-500 font-extrabold uppercase tracking-wider text-[10px] sticky top-0 z-10">
                               <th className="p-3 w-10"></th>
@@ -3715,6 +3738,7 @@ export default function AdminDashboard() {
                               <th className="p-3">Emp Status</th>
                               <th className="p-3">Assigned Qs</th>
                               <th className="p-3">Test Status</th>
+                              <th className="p-3">Completed On</th>
                               <th className="p-3">Score</th>
                               <th className="p-3">Actions</th>
                             </tr>
@@ -3751,7 +3775,7 @@ export default function AdminDashboard() {
                                       <td className="p-3 font-bold text-slate-700 dark:text-slate-300">{portalEmployeeId(account)}</td>
                                       <td className="p-3 font-medium text-slate-600 dark:text-slate-400">{account.role || "—"}</td>
                                       <td className="p-3 font-medium text-slate-500">{account.domain || "—"}</td>
-                                      <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={account.product}>{account.product || "—"}</td>
+                                      <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={formatProductDisplayName(account.product)}>{formatProductDisplayName(account.product) || "—"}</td>
                                       <td className="p-3 text-slate-500 max-w-[180px] truncate" title={account.email}>{account.email || "—"}</td>
                                       <td className="p-3">
                                         <Badge className="border-0 text-[10px] px-2 py-0.5 font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/35 dark:text-indigo-300">
@@ -3767,6 +3791,9 @@ export default function AdminDashboard() {
                                         <Badge className={`border-0 text-[10px] px-2 py-0.5 font-bold ${getPortalTestStatusBadgeClass(account.test_status)}`}>
                                           {statusLabel}
                                         </Badge>
+                                      </td>
+                                      <td className="p-3 text-slate-500 font-medium whitespace-nowrap">
+                                        {formatPortalCompletedAt(portalPrimaryCompletedAt(account))}
                                       </td>
                                       <td className="p-3">
                                         <span className={`font-black text-sm ${
@@ -3887,7 +3914,7 @@ export default function AdminDashboard() {
                                     </tr>
                                     {isExpanded && (
                                       <tr className="bg-slate-50/40 dark:bg-slate-900/10">
-                                        <td colSpan={12} className="p-4 border-t border-b border-border/50">
+                                        <td colSpan={13} className="p-4 border-t border-b border-border/50">
                                           <div className="pl-6 space-y-4">
                                             {account.remarks && (
                                               <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
@@ -4150,7 +4177,7 @@ export default function AdminDashboard() {
                               })}
                             {filteredPortalEmployees.length === 0 && (
                               <tr>
-                                <td colSpan={12} className="text-center py-12 text-slate-400 italic">
+                                <td colSpan={13} className="text-center py-12 text-slate-400 italic">
                                   {resourcePortalEmployees.length === 0
                                     ? "No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root."
                                     : "No employees match the current search or test status filter."}
