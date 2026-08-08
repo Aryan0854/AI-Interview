@@ -55,6 +55,8 @@ import {
   matchesPortalTestStatusFilter,
   PORTAL_TEST_STATUS_FILTER_OPTIONS,
   type PortalTestStatusFilter,
+  formatPortalScore,
+  portalScorePercent,
 } from "@/lib/portal-test-status";
 import { formatProductDisplayName } from "@/lib/product-display-name";
 
@@ -145,16 +147,6 @@ function portalVideoFileName(employeeId: string, employeeName: string): string {
   const idPart = sanitizeDownloadPart(employeeId) || "employee";
   const namePart = sanitizeDownloadPart(employeeName);
   return namePart ? `${idPart}-${namePart}.webm` : `${idPart}.webm`;
-}
-
-function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
-  if (score === null || score === undefined) return "—";
-  return `${score}/${scoreMax}`;
-}
-
-function portalScorePercent(score: number | null | undefined, scoreMax = 25): number {
-  if (score === null || score === undefined || scoreMax <= 0) return 0;
-  return Math.round((score / scoreMax) * 100);
 }
 
 function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {

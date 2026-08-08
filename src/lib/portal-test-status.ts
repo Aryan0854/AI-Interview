@@ -112,3 +112,20 @@ export function matchesPortalTestStatusFilter(
   if (filter === "all") return true;
   return status === filter;
 }
+
+export function portalScorePercent(
+  score: number | null | undefined,
+  scoreMax = 25
+): number {
+  if (score === null || score === undefined || scoreMax <= 0) return 0;
+  return Math.round((score / scoreMax) * 100);
+}
+
+export function formatPortalScore(
+  score: number | null | undefined,
+  scoreMax = 25
+): string {
+  if (score === null || score === undefined) return "—";
+  const pct = portalScorePercent(score, scoreMax);
+  return `${score}/${scoreMax} (${pct}%)`;
+}

@@ -14,16 +14,11 @@ import {
   formatSubmittedAt,
   getTestQuestionAttemptsBatch,
 } from "@/services/employee-test-attempts-service";
-import { getPortalTestStatusLabel } from "@/lib/portal-test-status";
+import { getPortalTestStatusLabel, formatPortalScore } from "@/lib/portal-test-status";
 import { formatTopicTitleForDisplay, formatProductDisplayName } from "@/lib/product-display-name";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
-  if (score === null || score === undefined) return "—";
-  return `${score}/${scoreMax}`;
-}
 
 function formatExportCompletedAt(value: string | null | undefined): string {
   if (!value) return "—";
