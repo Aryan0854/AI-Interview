@@ -911,7 +911,11 @@ export default function AdminDashboard() {
 
   const portalDashboardStats = useMemo(() => {
     const scored = resourcePortalEmployees.filter((e) => e.score !== null && e.score !== undefined);
-    const completed = resourcePortalEmployees.filter((e) => e.test_status === "completed").length;
+    const completed = resourcePortalEmployees.filter(
+      (e) =>
+        e.test_status === "completed" ||
+        (Array.isArray(e.tests) && e.tests.some((t: any) => t?.status === "completed"))
+    ).length;
     const pending = resourcePortalEmployees.filter((e) =>
       e.test_status === "pending" ||
       e.test_status === "not_started" ||

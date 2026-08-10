@@ -80,11 +80,71 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  const [employeesInitial, manifest] = await Promise.all([
+  /** Full roster from Supabase — never drop DB rows just because local /tmp JSON is incomplete. */
+  const loadEmployeesFromSupabase = async (): Promise<EmployeeRecord[]> => {
+    try {
+      const pageSize = 1000;
+      let from = 0;
+      const rows: EmployeeRecord[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from("employees")
+          .select(
+            "employee_id, email, full_name, department, role, ai_readiness_score, product"
+          )
+          .order("employee_id", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        if (!data?.length) break;
+        for (const row of data) {
+          if (!row.employee_id) continue;
+          rows.push({
+            employee_id: String(row.employee_id),
+            full_name: row.full_name || String(row.employee_id),
+            email: row.email || "",
+            department: row.department || "",
+            skills: row.product ? String(row.product) : "",
+            grade: "",
+            designation: row.role || "employee",
+            status: "Active",
+            shortlisted: false,
+            score: typeof row.ai_readiness_score === "number" ? row.ai_readiness_score : 0,
+            matchingSkills: [],
+          });
+        }
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return rows;
+    } catch (err) {
+      console.warn("Failed to load employees from Supabase:", err);
+      return [];
+    }
+  };
+
+  const mergeEmployeeRosters = (primary: EmployeeRecord[], secondary: EmployeeRecord[]) => {
+    const byId = new Map<string, EmployeeRecord>();
+    for (const emp of secondary) {
+      const key = String(emp.employee_id || "").trim().toUpperCase();
+      if (!key) continue;
+      byId.set(key, emp);
+    }
+    // Primary (usually Corp Pool JSON) wins on overlapping fields so screening skills stay intact.
+    for (const emp of primary) {
+      const key = String(emp.employee_id || "").trim().toUpperCase();
+      if (!key) continue;
+      const prev = byId.get(key);
+      byId.set(key, prev ? { ...prev, ...emp, skills: emp.skills || prev.skills } : emp);
+    }
+    return Array.from(byId.values());
+  };
+
+  const [employeesFromFile, employeesFromDb, manifest] = await Promise.all([
     loadEmployeesFromFile(),
+    loadEmployeesFromSupabase(),
     loadEmployeeTestManifest(),
   ]);
-  let employees = employeesInitial;
+  let employees = mergeEmployeeRosters(employeesFromFile, employeesFromDb);
 
   // Query MCQ test results from Supabase (production source of truth),
   // with a hard timeout so a slow DB cannot block the portal indefinitely.

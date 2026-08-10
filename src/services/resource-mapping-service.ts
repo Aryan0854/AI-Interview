@@ -358,21 +358,21 @@ export function mergeResourcePortalData(
     const empTests = testsByEmployee.get(normalizeEmployeeId(row.employee_id)) || [];
     const manifestTestId = manifest[row.employee_id] ?? manifest[normalizeEmployeeId(row.employee_id)] ?? null;
     const completed = empTests.filter((test) => test.status === "completed");
-    // Prefer a completed attempt for the assigned test / product assessment so
-    // completed scores do not disappear behind a newer empty assignment row.
-    const primaryTest =
-      empTests.find((test) => test.id === manifestTestId && test.status === "completed") ??
-      empTests.find(
-        (test) => test.topicId === "resource-product-assessment" && test.status === "completed"
-      ) ??
-      completed[0] ??
+
+    // Keep the current assignment (manifest) as primary when present — do not hide Supabase rows.
+    // If that assignment is completed, use it; otherwise keep the live assignment and still
+    // expose every attempt under `tests` (including older completed ones).
+    const assignedTest =
       empTests.find((test) => test.id === manifestTestId) ??
       empTests.find((test) => test.topicId === "resource-product-assessment") ??
-      empTests[0] ??
       null;
-
     const primaryCompleted =
-      completed.find((test) => test.id === primaryTest?.id) ?? completed[0] ?? null;
+      completed.find((test) => test.id === assignedTest?.id) ??
+      completed.find((test) => test.id === manifestTestId) ??
+      completed.find((test) => test.topicId === "resource-product-assessment") ??
+      null;
+    const primaryTest = primaryCompleted ?? assignedTest ?? completed[0] ?? empTests[0] ?? null;
+
     const score =
       primaryCompleted != null
         ? (primaryCompleted.correctCount ??
@@ -391,21 +391,21 @@ export function mergeResourcePortalData(
     const rawStatus =
       primaryCompleted?.status === "completed"
         ? "completed"
-        : primaryTest?.status ?? null;
+        : assignedTest?.status ?? primaryTest?.status ?? null;
 
     return {
       ...row,
       product: formatProductDisplayName(row.product),
-      test_id: primaryTest?.id ?? manifestTestId,
+      test_id: assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
       test_status: derivePortalTestStatus({
         assignedQuestionCount: row.assigned_question_count || (manifestTestId ? 25 : 0),
-        testId: primaryTest?.id ?? manifestTestId,
+        testId: assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
         rawStatus,
         answeredCount,
         totalQuestions,
-        startedAt: primaryTest?.startedAt ?? null,
+        startedAt: assignedTest?.startedAt ?? primaryTest?.startedAt ?? null,
       }),
-      score,
+      score: score ?? (rawStatus === "completed" ? primaryTest?.correctCount ?? primaryTest?.score ?? null : null),
       score_max: scoreMax,
       completed_at: completedAt,
       tests: empTests.map((test) => ({
