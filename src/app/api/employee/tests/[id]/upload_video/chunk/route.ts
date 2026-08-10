@@ -5,13 +5,14 @@ import { authenticateRequest } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import {
   getEmployeeTestVideoAdminUrl,
-  saveEmployeeTestVideo,
+  saveEmployeeTestVideoLenient,
 } from "@/lib/employee-test-video";
+import { markProctorVideoUploaded, normalizeProctoring } from "@/lib/employee-proctoring";
 import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
 import { getRuntimeUploadsRoot } from "@/lib/runtime-data";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function chunkDir(testId: string) {
   return join(getRuntimeUploadsRoot(), "video_upload_chunks", testId);
@@ -22,7 +23,12 @@ async function markVideoReady(
   employee: Parameters<typeof syncLocalTestStateToSupabase>[1]
 ) {
   const videoUrl = getEmployeeTestVideoAdminUrl(testId);
-  await localTestsDb.updateTest(testId, { session_recording_url: videoUrl });
+  const test = await localTestsDb.getTestById(testId);
+  const proctoring = markProctorVideoUploaded(normalizeProctoring(test?.proctoring));
+  await localTestsDb.updateTest(testId, {
+    session_recording_url: videoUrl,
+    proctoring,
+  });
 
   try {
     await syncLocalTestStateToSupabase(testId, employee);
@@ -93,7 +99,7 @@ export async function POST(
       return NextResponse.json({ error: "Recording file is empty" }, { status: 400 });
     }
 
-    const saved = await saveEmployeeTestVideo(testId, fullBuffer);
+    const saved = await saveEmployeeTestVideoLenient(testId, fullBuffer);
     if (!saved) {
       return NextResponse.json({ error: "Failed to store recording in Supabase" }, { status: 500 });
     }

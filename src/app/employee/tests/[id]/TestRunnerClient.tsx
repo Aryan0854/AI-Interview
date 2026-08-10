@@ -4,40 +4,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ResultsView, ConfirmModal } from "@/components/test-view";
-import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw, HelpCircle,
+import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw,
   Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Test, TestQuestion } from "@/types/learning";
 import { useEmployeeProctoring, isFullscreenActive } from "@/hooks/useEmployeeProctoring";
 import type { EmployeeProctoringState } from "@/lib/employee-proctoring";
+import {
+  createMediaRecorder,
+  flushRecorderAndStop,
+  uploadProctoringBlob,
+  uploadProctoringProgress,
+} from "@/lib/proctoring-recorder-client";
+import VideoCatchupClient from "./VideoCatchupClient";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIME_LIMIT_SECONDS = 1800;
-
-function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
-  if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
-  const mimeTypes = [
-    "video/webm;codecs=vp9",
-    "video/webm;codecs=vp8",
-    "video/webm",
-  ];
-  for (const type of mimeTypes) {
-    if (MediaRecorder.isTypeSupported?.(type)) {
-      return new MediaRecorder(stream, {
-        mimeType: type,
-        videoBitsPerSecond: 400_000,
-      });
-    }
-  }
-  try {
-    return new MediaRecorder(stream, { videoBitsPerSecond: 400_000 });
-  } catch {
-    return null;
-  }
-}
 
 function durationToLabel(d: number): string {
   const m = Math.floor(d / 60);
@@ -81,33 +66,22 @@ function DifficultyBadge({ d }: { d: string }) {
   return <span className={`text-[10px] px-2.5 py-1 rounded-full border ${cls} font-bold uppercase tracking-wider`}>{d}</span>;
 }
 
-// ── Finish button — disabled until all questions answered ───────────────
-
-function ConfettiButton({ quizDone, onClick }: { quizDone: boolean; onClick?: () => void }) {
-  if (!quizDone) {
-    return (
-      <Button disabled className="gap-1 bg-indigo-100 text-indigo-300 cursor-not-allowed" title="Finish test">
-        <HelpCircle className="w-4 h-4" /> Finish
-      </Button>
-    );
-  }
-
-  return (
-    <Button onClick={onClick} className="gap-1 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-md shadow-emerald-500/25">
-      <CheckCircle2 className="w-4 h-4" /> Finish
-    </Button>
-  );
-}
-
 // =====================================================================
 // CLIENT SUB-COMPONENT
 // =====================================================================
 
 export default function TestRunnerClient({ testId }: { testId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const uploadVideoOnly = searchParams.get("uploadVideo") === "1";
+
+  if (uploadVideoOnly) {
+    return <VideoCatchupClient testId={testId} />;
+  }
 
   // ── state ──────────────────────────────────────────────────────
-  type Phase = "loading" | "ready" | "running" | "retake-confirm" | "submitted" | "error";
+  type Phase = "loading" | "ready" | "running" | "submitting" | "retake-confirm" | "submitted" | "error";
+  type VideoUploadState = "pending" | "uploading" | "done" | "failed";
 
   const [phase,       setPhase]       = useState<Phase>("loading");
   const [err,         setErr]         = useState<string | null>(null);
@@ -119,6 +93,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const [timeLeft,    setTimeLeft]    = useState<number | null>(null);
   const [msg,         setMsg]         = useState<string | null>(null);
   const [submitted,   setSubmitted]   = useState<{ correct: number; total: number; accuracy_pct: number; ai_analysis?: string; topic_title: string } | null>(null);
+  const [videoUploadState, setVideoUploadState] = useState<VideoUploadState>("pending");
 
   const savedRef     = useRef(false);
   const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -130,11 +105,13 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
   const [clmReady, setClmReady] = useState(false);
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
+  const [awaitingFullscreen, setAwaitingFullscreen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStartRef = useRef<number | null>(null);
   const intentionalRecorderStopRef = useRef(false);
+  const lastProgressUploadRef = useRef(0);
 
   useEffect(() => {
     setToken(window.localStorage.getItem("employee_token") ?? "");
@@ -151,10 +128,25 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       } else if ((docEl as any).msRequestFullscreen) {
         await (docEl as any).msRequestFullscreen();
       }
+      return isFullscreenActive();
     } catch (err) {
       console.warn("Fullscreen request rejected or failed:", err);
+      return false;
     }
   }, []);
+
+  useEffect(() => {
+    if (phase !== "running" || !awaitingFullscreen) return;
+    const syncFullscreen = () => {
+      if (isFullscreenActive()) setAwaitingFullscreen(false);
+    };
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    document.addEventListener("webkitfullscreenchange", syncFullscreen);
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreen);
+    };
+  }, [phase, awaitingFullscreen]);
 
   // Bind camera stream to video element when it becomes available
   useEffect(() => {
@@ -342,137 +334,63 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     intentionalRecorderStopRef,
   });
 
-  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
+  const uploadProgressSnapshot = useCallback(async () => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === "inactive") {
-      console.warn("Proctoring recorder was not active at submit time.");
-      return false;
-    }
-
-    const uploadBlob = async (blob: Blob): Promise<boolean> => {
-      if (blob.size <= 0 || !token) return false;
-
-      const authHeaders = {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      };
-
-      // Production: direct upload to Supabase Storage (serverless-safe)
-      try {
-        const urlRes = await fetch(`/api/employee/tests/${testId}/video-upload-url`, {
-          method: "POST",
-          headers: authHeaders,
-        });
-        if (urlRes.ok) {
-          const { signedUrl } = await urlRes.json();
-          if (signedUrl) {
-            const putRes = await fetch(signedUrl, {
-              method: "PUT",
-              headers: { "Content-Type": blob.type || "video/webm" },
-              body: blob,
-            });
-            if (putRes.ok) {
-              const completeRes = await fetch(`/api/employee/tests/${testId}/upload_video`, {
-                method: "POST",
-                headers: authHeaders,
-                body: JSON.stringify({ complete: true }),
-              });
-              if (completeRes.ok) {
-                const payload = await completeRes.json().catch(() => ({}));
-                return Boolean(payload?.success);
-              }
-            }
-          }
-        }
-      } catch (directErr) {
-        console.warn("Direct Supabase video upload failed, trying chunk fallback:", directErr);
-      }
-
-      // Fallback: chunked server upload (local dev only)
-      const CHUNK_SIZE = 2 * 1024 * 1024;
-      const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
-
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const slice = blob.slice(
-          chunkIndex * CHUNK_SIZE,
-          Math.min(blob.size, (chunkIndex + 1) * CHUNK_SIZE)
-        );
-        const formData = new FormData();
-        formData.append("chunkIndex", String(chunkIndex));
-        formData.append("totalChunks", String(totalChunks));
-        formData.append(
-          "chunk",
-          new File([slice], `${testId}-chunk-${chunkIndex}.webm`, {
-            type: blob.type || "video/webm",
-          })
-        );
-
-        const res = await fetch(`/api/employee/tests/${testId}/upload_video/chunk`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-
-        if (!res.ok) {
-          console.warn("Video chunk upload failed:", await res.text().catch(() => ""));
-          return false;
-        }
-
-        const payload = await res.json().catch(() => ({}));
-        if (payload?.complete && payload?.success) {
-          return true;
-        }
-      }
-
-      return false;
-    };
-
-    return await new Promise<boolean>((resolve) => {
-      recorder.onstop = async () => {
-        try {
-          const blob = new Blob(recordingChunksRef.current, {
-            type: recorder.mimeType || "video/webm",
-          });
-          if (blob.size <= 0) {
-            console.warn("Proctoring recording blob is empty.");
-            resolve(false);
-            return;
-          }
-
-          let ok = await uploadBlob(blob);
-          if (!ok) {
-            await new Promise((r) => setTimeout(r, 800));
-            ok = await uploadBlob(blob);
-          }
-          resolve(ok);
-        } catch (err) {
-          console.warn("Failed to upload proctoring video:", err);
-          resolve(false);
-        }
-      };
-
-      try {
-        if (recorder.state === "recording") {
-          recorder.requestData();
-        }
-      } catch {
-        // ignore
-      }
-      intentionalRecorderStopRef.current = true;
-      recorder.stop();
+    if (!token || !recorder || recordingChunksRef.current.length === 0) return;
+    const now = Date.now();
+    if (now - lastProgressUploadRef.current < 45000) return;
+    lastProgressUploadRef.current = now;
+    const blob = new Blob(recordingChunksRef.current, {
+      type: recorder.mimeType || "video/webm",
     });
+    await uploadProctoringProgress(testId, token, blob).catch(() => {});
   }, [testId, token]);
 
-  const handleStartTest = async () => {
-    try {
-      await requestFullscreen();
-    } catch (err) {
-      console.warn("Fullscreen request failed:", err);
+  const finalizeRecordingBlob = useCallback(async (): Promise<Blob | null> => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      intentionalRecorderStopRef.current = true;
+      try {
+        await flushRecorderAndStop(recorder);
+      } catch {
+        /* use whatever chunks we have */
+      }
     }
-    if (!isFullscreenActive()) {
-      console.warn("Fullscreen not active; continuing without it.");
-    }
+    if (recordingChunksRef.current.length === 0) return null;
+    return new Blob(recordingChunksRef.current, {
+      type: recorder?.mimeType || "video/webm",
+    });
+  }, []);
 
+  const uploadRecordingBlob = useCallback(
+    async (blob: Blob): Promise<boolean> => {
+      if (blob.size <= 0) return false;
+      let ok = await uploadProctoringBlob(testId, token, blob);
+      if (!ok) {
+        await new Promise((r) => setTimeout(r, 1000));
+        ok = await uploadProctoringBlob(testId, token, blob);
+      }
+      return ok;
+    },
+    [testId, token]
+  );
+
+  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
+    try {
+      const blob = await finalizeRecordingBlob();
+      if (!blob || blob.size <= 0) {
+        console.warn("Proctoring recording blob is empty at submit time.");
+        return false;
+      }
+      return uploadRecordingBlob(blob);
+    } catch (err) {
+      console.warn("Failed to upload proctoring video:", err);
+      return false;
+    }
+  }, [finalizeRecordingBlob, uploadRecordingBlob]);
+
+  const handleStartTest = async () => {
+    // Camera permission UI must finish before fullscreen can activate reliably.
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480, facingMode: "user" },
@@ -489,12 +407,22 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         recordingChunksRef.current = [];
         recorder.ondataavailable = (event) => {
           if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
+          void uploadProgressSnapshot();
         };
-        recorder.start(1000);
+        // Collect periodic chunks, but always keep every chunk from t=0 so the EBML header is present.
+        recorder.start(2000);
         recordingStartRef.current = Date.now();
       }
     } catch (err) {
       console.warn("Failed to access webcam; continuing without camera:", err);
+    }
+
+    // Brief pause lets the browser close the camera permission banner before fullscreen.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    let enteredFullscreen = await requestFullscreen();
+    if (!enteredFullscreen) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      enteredFullscreen = await requestFullscreen();
     }
 
     // If starting fresh (pending), update status and started_at in backend
@@ -519,6 +447,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     }
 
     setPhase("running");
+    setAwaitingFullscreen(!isFullscreenActive());
   };
 
   // ── handlers ───────────────────────────────────────────────────
@@ -529,18 +458,17 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   async function handleSubmit(ans: Record<number, number>, opts?: { autoSubmitted?: boolean }) {
     if (submittingRef.current) return;
     submittingRef.current = true;
-    setMsg("Submitting…");
+    setPhase("submitting");
+    setMsg(null);
     try {
-      await stopRecordingAndUpload();
-      if (camStream) {
-        camStream.getTracks().forEach((track) => track.stop());
-      }
-
       const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,
         selected_index: selected,
         time_seconds: 0,
       }));
+
+      // Stop recorder first so the final WebM blob is complete before upload.
+      const recordingBlob = await finalizeRecordingBlob();
 
       const r = await fetch(`/api/employee/tests/${testId}/submit`, {
         method: "POST",
@@ -571,6 +499,16 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         document.exitFullscreen().catch(() => {});
       }
       setPhase("submitted");
+      setMsg(null);
+      setVideoUploadState("uploading");
+
+      const uploaded = recordingBlob
+        ? await uploadRecordingBlob(recordingBlob)
+        : await stopRecordingAndUpload();
+      if (camStream) {
+        camStream.getTracks().forEach((track) => track.stop());
+      }
+      setVideoUploadState(uploaded ? "done" : "failed");
     } catch (e: any) {
       submittingRef.current = false;
       setErr(e.message ?? "Submit failed"); setPhase("error");
@@ -602,9 +540,29 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     );
   }
 
+  // ── phase: submitting ───────────────────────────────────────────
+  if (phase === "submitting") {
+    return (
+      <div className="fixed inset-0 z-[300] flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm px-6">
+        <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
+        <h2 className="text-lg font-bold text-foreground">Submitting your assessment</h2>
+        <p className="text-sm text-muted-foreground mt-2 text-center max-w-sm">
+          Saving your answers… Please do not close or refresh this page.
+        </p>
+      </div>
+    );
+  }
+
   // ── phase: submitted ────────────────────────────────────────────
   if (phase === "submitted" && submitted) {
-    return <ResultsView result={submitted} onRetake={() => { setPhase("retake-confirm"); setSubmitted(null); setAnswers({}); setCurrentIdx(0); }} onGoDashboard={() => window.location.href = "/employee/dashboard"} />;
+    return (
+      <ResultsView
+        result={submitted}
+        videoUploadState={videoUploadState}
+        onRetake={() => { setPhase("retake-confirm"); setSubmitted(null); setAnswers({}); setCurrentIdx(0); setVideoUploadState("pending"); }}
+        onGoDashboard={() => window.location.href = "/employee/dashboard"}
+      />
+    );
   }
 
   // ── phase: retake confirm ───────────────────────────────────────
@@ -715,7 +673,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const selected   = answers[currentIdx];
 
   return (
-    <div className={`max-w-3xl mx-auto px-4 py-6 space-y-6 ${phase === "running" ? "select-none" : ""} ${showProctorWarning ? "pointer-events-none" : ""}`}>
+    <div className={`max-w-3xl mx-auto px-4 py-6 space-y-6 ${phase === "running" ? "select-none" : ""} ${showProctorWarning || awaitingFullscreen ? "pointer-events-none" : ""}`}>
 
       {/* ── Header bar ──────────────────────────────────────────── */}
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -735,10 +693,16 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           variant="outline"
           size="sm"
           className={`gap-1.5 rounded-lg border ${allAnswered ? "border-indigo-500 dark:border-indigo-700 text-primary bg-indigo-50 dark:bg-slate-900 font-semibold" : "border-border text-muted-foreground hover:bg-secondary"}`}
-          disabled={!allAnswered}
+          disabled={!allAnswered || submittingRef.current}
           onClick={() => handleSubmit(answers)}
         >
-          {allAnswered ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          {submittingRef.current ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : allAnswered ? (
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          ) : (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          )}
           Submit
         </Button>
       </header>
@@ -847,20 +811,46 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           })}
         </div>
 
-        {/* Next / Finish */}
+        {/* Next — submit is only via the header button */}
         {hasNext ? (
           <Button className="gap-1 bg-primary hover:from-indigo-700 hover:to-violet-700 text-white shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/30 transition-all rounded-xl" onClick={() => setCurrentIdx((i) => i + 1)}>
             Next <ArrowRight className="w-4 h-4" />
           </Button>
         ) : (
-          <ConfettiButton quizDone={allAnswered} onClick={() => handleSubmit(answers)} />
+          <div className="w-[88px]" aria-hidden="true" />
         )}
       </div>
 
-      {/* Message toast */}
-      {msg && (
+      {/* Message toast (non-submit notices) */}
+      {msg && phase === "running" && (
         <div className="text-center">
           <p className="text-sm text-slate-500 italic">{msg}</p>
+        </div>
+      )}
+
+      {/* Fullscreen gate — shown when camera permission blocked initial fullscreen */}
+      {awaitingFullscreen && phase === "running" && !showProctorWarning && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 pointer-events-auto">
+          <div className="bg-card rounded-2xl shadow-xl max-w-md w-full p-6 border border-indigo-100 dark:border-indigo-950/30 text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-950/30 flex items-center justify-center mx-auto text-indigo-600 dark:text-indigo-400">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-foreground">Enter Fullscreen to Begin</h3>
+            <p className="text-sm text-muted-foreground">
+              This assessment runs in fullscreen. Click below after allowing camera access.
+            </p>
+            <Button
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3 font-semibold text-sm"
+              onClick={async () => {
+                const ok = await requestFullscreen();
+                if (ok || isFullscreenActive()) {
+                  setAwaitingFullscreen(false);
+                }
+              }}
+            >
+              Enter Fullscreen &amp; Continue
+            </Button>
+          </div>
         </div>
       )}
 

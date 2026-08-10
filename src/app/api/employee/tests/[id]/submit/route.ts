@@ -4,6 +4,10 @@ import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import { syncSubmitToSupabase } from "@/services/employee-test-supabase-sync";
 import { canSubmitTest, normalizeProctoring } from "@/lib/employee-proctoring";
+import { getOwnedTest } from "@/lib/employee-test-access";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
 
 /**
  * POST /api/employee/tests/:id/submit
@@ -27,10 +31,11 @@ export async function POST(
       return NextResponse.json({ error: "Empty answers" }, { status: 400 });
     }
 
-    const localTest = await localTestsDb.getTestById(id);
-    if (!localTest || localTest.employee_id !== auth.employeeId) {
+    const owned = await getOwnedTest(id, auth.employeeId);
+    if (!owned) {
       return NextResponse.json({ error: "Test not found" }, { status: 404 });
     }
+    const localTest = owned.test;
 
     if (localTest.status === "completed") {
       return NextResponse.json({ error: "Test already submitted." }, { status: 409 });
@@ -170,37 +175,13 @@ export async function POST(
     const accuracy = round((correct / Math.max(1, totalQuestions)) * 100);
     const completedAt = new Date().toISOString();
 
-    const wrongQuestions = answers
-      .filter((a: any) => {
-        const q = questionsList.find((qq: any) => qq.id === a.question_id);
-        return q ? q.correct_option_index !== a.selected_index : true;
-      })
-      .map((a: any) => {
-        const q = questionsList.find((qq: any) => qq.id === a.question_id);
-        return q ? q.question_text : a.question_id;
-      });
-
-    let aiAnalysis = "";
-    try {
-      const { askGemini } = await import("@/lib/learning-ai");
-      aiAnalysis = await askGemini("analyse_results", {
-        topic: testRow?.topic_title ?? "Unknown",
-        accuracy,
-        total: attempts.length,
-        correct,
-        wrongQuestions: wrongQuestions.slice(0, 5),
-      });
-    } catch (aiErr) {
-      console.warn("AI analysis failed or skipped:", aiErr);
-    }
-
     const completionUpdates = {
       status: "completed" as const,
       completed_at: completedAt,
       score_correct: correct,
       score_total: totalQuestions,
       score_percent: accuracy,
-      ai_analysis: aiAnalysis || null,
+      ai_analysis: null,
       proctoring: {
         ...normalizeProctoring(localTest.proctoring),
         autoSubmitted:
@@ -220,7 +201,7 @@ export async function POST(
           score_correct: correct,
           score_total: totalQuestions,
           score_percent: accuracy,
-          ai_analysis: aiAnalysis || null,
+          ai_analysis: null,
         })
         .eq("id", id)
         .select("*")
@@ -251,7 +232,7 @@ export async function POST(
         auth.employee
       );
     } catch (syncErr) {
-      console.warn("Supabase sync after submit failed:", syncErr);
+      console.error("Supabase sync after submit failed (test row may already be saved):", syncErr);
     }
 
     return NextResponse.json({
@@ -260,7 +241,7 @@ export async function POST(
       total: totalQuestions,
       correct,
       accuracy,
-      ai_analysis: aiAnalysis,
+      ai_analysis: null,
     });
   } catch (e) {
     console.error("submit error:", e);

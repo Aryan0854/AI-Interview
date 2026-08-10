@@ -1,6 +1,6 @@
 import openpyxl
 
-wb = openpyxl.load_workbook("Question Bank-20th July '26.xlsx", data_only=True)
+wb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
 sheet_cmg = wb['CMG']
 rows = list(sheet_cmg.iter_rows(values_only=True))
 print("CMG Sheet row count:", len(rows))

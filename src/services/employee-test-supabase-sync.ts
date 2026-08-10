@@ -1,9 +1,11 @@
 import { supabase } from "@/lib/db";
 import { useSupabasePrimary } from "@/lib/db-mode";
 import type { EmployeeAccount } from "@/lib/employee-auth";
+import { readPersistedJson, writePersistedJson } from "@/lib/runtime-data";
 import {
   localTestsDb,
   type LocalTest,
+  type LocalTestAttempt,
   type LocalTestQuestion,
 } from "@/services/local-tests-db";
 
@@ -196,6 +198,110 @@ export async function syncLocalTestStateToSupabase(
     if (useSupabasePrimary()) {
       throw new Error(`Test ${testId} not found — cannot sync to Supabase`);
     }
+  }
+}
+
+/** Push completed tests from local JSON into Supabase when hosted DB is behind (e.g. after local submit). */
+export async function reconcileEmployeeTestsFromLocalJson(
+  employeeCode: string,
+  profile?: Partial<EmployeeAccount>
+): Promise<void> {
+  try {
+    const raw = await readPersistedJson("local_tests_db.json");
+    if (!raw) return;
+
+    const db = JSON.parse(raw) as {
+      tests: LocalTest[];
+      test_questions: LocalTestQuestion[];
+      test_attempts: LocalTestAttempt[];
+    };
+
+    const code = String(employeeCode ?? "").trim();
+    const localCompleted = (db.tests ?? []).filter(
+      (t) => t.employee_id === code && t.status === "completed"
+    );
+    if (!localCompleted.length) return;
+
+    const employeeUuid = await resolveEmployeeUuid(code, profile);
+
+    for (const test of localCompleted) {
+      const { data: remote } = await supabase
+        .from("tests")
+        .select("status")
+        .eq("id", test.id)
+        .maybeSingle();
+
+      if (remote?.status === "completed") continue;
+      // Never overwrite an admin reset (remote pending) with stale local completed rows.
+      if (remote?.status === "pending" && test.status === "completed") continue;
+
+      const questions = (db.test_questions ?? []).filter((q) => q.test_id === test.id);
+      await syncTestToSupabase(test, employeeUuid, questions);
+
+      const attempts = (db.test_attempts ?? []).filter((a) => a.test_id === test.id);
+      if (attempts.length > 0) {
+        await syncAttemptsToSupabase(
+          test.id,
+          employeeUuid,
+          attempts.map((a) => ({
+            test_id: a.test_id,
+            employee_id: a.employee_id,
+            question_id: a.question_id,
+            selected_option_index: a.selected_option_index,
+            is_correct: a.is_correct,
+            time_taken_seconds: a.time_taken_seconds,
+            session_key: a.session_key,
+          })),
+          true
+        );
+      }
+    }
+  } catch (err) {
+    console.warn("reconcileEmployeeTestsFromLocalJson failed:", err);
+  }
+}
+
+/** Clear stale completed state from local JSON so dashboard sync cannot undo admin reset. */
+export async function clearLocalTestSnapshotAfterReset(testId: string): Promise<void> {
+  try {
+    const raw = await readPersistedJson("local_tests_db.json");
+    if (!raw) return;
+
+    const db = JSON.parse(raw) as {
+      tests: LocalTest[];
+      test_questions: LocalTestQuestion[];
+      test_attempts: LocalTestAttempt[];
+    };
+
+    let changed = false;
+    db.tests = (db.tests ?? []).map((t) => {
+      if (t.id !== testId) return t;
+      changed = true;
+      return {
+        ...t,
+        status: "pending" as const,
+        in_progress: null,
+        current_question_index: 0,
+        started_at: null,
+        completed_at: null,
+        session_recording_url: undefined,
+        proctoring: undefined,
+        score_correct: null,
+        score_total: null,
+        score_percent: null,
+        ai_analysis: null,
+      };
+    });
+
+    const beforeAttempts = (db.test_attempts ?? []).length;
+    db.test_attempts = (db.test_attempts ?? []).filter((a) => a.test_id !== testId);
+    if (db.test_attempts.length !== beforeAttempts) changed = true;
+
+    if (changed) {
+      await writePersistedJson("local_tests_db.json", JSON.stringify(db, null, 2));
+    }
+  } catch (err) {
+    console.warn("clearLocalTestSnapshotAfterReset failed:", err);
   }
 }
 

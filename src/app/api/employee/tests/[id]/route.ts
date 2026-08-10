@@ -5,6 +5,8 @@ import { localTestsDb } from "@/services/local-tests-db";
 import { writeLog } from "@/lib/structured-logger";
 import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
 import { useSupabasePrimary } from "@/lib/db-mode";
+import { employeeTestVideoExists } from "@/lib/employee-test-video";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
 
 import { fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
 import {
@@ -121,7 +123,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    return NextResponse.json({ test: testRow, questions });
+    const has_recording = await employeeTestVideoExists(id);
+    return NextResponse.json({
+      test: {
+        ...testRow,
+        topic_title: formatTopicTitleForDisplay(testRow.topic_title),
+      },
+      questions,
+      has_recording,
+    });
   } catch (e) {
     console.error("GET /employee/tests/[id] error:", e);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

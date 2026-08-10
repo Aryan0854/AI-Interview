@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
 import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { getEmployeeUuid } from "@/lib/employee-test-access";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,7 +19,12 @@ export async function GET(request: NextRequest) {
       .order("started_at", { ascending: false })
       .limit(10);
 
-    return NextResponse.json(data ?? []);
+    return NextResponse.json(
+      (data ?? []).map((test) => ({
+        ...test,
+        topic_title: formatTopicTitleForDisplay(test.topic_title),
+      }))
+    );
   } catch (e) {
     console.error("GET /employee/tests error:", e);
     return NextResponse.json([]);

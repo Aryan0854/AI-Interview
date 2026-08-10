@@ -4,6 +4,8 @@ import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { localTestsDb, LocalTestsDb } from "@/services/local-tests-db";
 import { allowLocalTestsFallback } from "@/lib/db-mode";
 import { computeReadinessScore, computeSkillLevel } from "@/lib/dashboard-analytics";
+import { reconcileEmployeeTestsFromLocalJson } from "@/services/employee-test-supabase-sync";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
 
 function round(n: number, d = 0) {
   const m = 10 ** d;
@@ -142,7 +144,7 @@ async function loadLocalAnalytics(employeeCode: string) {
     return {
       id: test.id,
       topic_id: test.topic_id,
-      topic_title: test.topic_title || test.topic_id,
+      topic_title: formatTopicTitleForDisplay(test.topic_title || test.topic_id),
       subject_id: test.subject_id,
       subject_title: test.subject_title || test.subject_id,
       difficulty: test.difficulty,
@@ -210,6 +212,8 @@ export async function GET(request: NextRequest) {
   const employeeCode = auth.employee.employee_id;
 
   try {
+    await reconcileEmployeeTestsFromLocalJson(employeeCode, auth.employee);
+
     // Try Supabase first
     const { data: empRow, error: empErr } = await supabase
       .from("employees")
@@ -238,6 +242,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const { data: ct, error: ctErr } = await supabase
+      .from("tests")
+      .select("id, total_questions, completed_at, subject_id, in_progress, score_percent, score_correct")
+      .eq("employee_id", userUuid)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false });
+    if (ctErr) throw ctErr;
+    const completedTests = ct ?? [];
+    const completedTestIds = new Set(completedTests.map((t: { id: string }) => t.id));
+
     const { data: att, error: attErr } = await supabase
       .from("test_attempts")
       .select("test_id, is_correct")
@@ -245,17 +259,14 @@ export async function GET(request: NextRequest) {
     if (attErr) throw attErr;
     const attempts = att ?? [];
 
-    const correctAttempts = attempts.filter((item: any) => item.is_correct).length;
-    const averageScore = attempts.length ? round((correctAttempts / attempts.length) * 100) : 0;
-
-    const { data: ct, error: ctErr } = await supabase
-      .from("tests")
-      .select("id, total_questions, completed_at, subject_id, in_progress")
-      .eq("employee_id", userUuid)
-      .eq("status", "completed")
-      .order("completed_at", { ascending: false });
-    if (ctErr) throw ctErr;
-    const completedTests = ct ?? [];
+    const completedAttempts = attempts.filter((item: { test_id: string }) =>
+      completedTestIds.has(item.test_id)
+    );
+    const correctAttempts = completedAttempts.filter((item: { is_correct: boolean }) => item.is_correct).length;
+    const averageScore =
+      (totalTests ?? 0) > 0 && completedAttempts.length
+        ? round((correctAttempts / completedAttempts.length) * 100)
+        : 0;
 
     const totalLearningMins = completedTests.reduce(
       (sum, test) => sum + ((test.total_questions as number) * 2),
@@ -350,13 +361,18 @@ export async function GET(request: NextRequest) {
 
     const recentResults = (recentTests ?? []).map((test) => {
       const atts = attempts.filter((a: any) => a.test_id === test.id);
-      const correct = atts.filter((item: any) => item.is_correct).length;
-      const accuracy_pct = atts.length ? round((correct / atts.length) * 100) : 0;
+      const correct =
+        (test as { score_correct?: number | null }).score_correct ??
+        atts.filter((item: any) => item.is_correct).length;
+      const totalQs = (test.total_questions as number) || 25;
+      const accuracy_pct =
+        (test as { score_percent?: number | null }).score_percent ??
+        (atts.length ? round((correct / atts.length) * 100) : totalQs > 0 ? round((correct / totalQs) * 100) : 0);
 
       return {
         id: test.id,
         topic_id: test.topic_id,
-        topic_title: topicTitleMap.get(test.topic_id) ?? test.topic_id,
+        topic_title: formatTopicTitleForDisplay(topicTitleMap.get(test.topic_id) ?? test.topic_id),
         subject_id: test.subject_id,
         subject_title: subjectTitleMap.get(test.subject_id) ?? test.subject_id,
         difficulty: test.difficulty as any,

@@ -12,15 +12,15 @@ from pathlib import Path
 
 import openpyxl
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+from qb_new_parser import build_alias_bank
 
 ROOT = Path(__file__).resolve().parents[1]
 MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
-QUESTION_BANK_FILE = ROOT / "Question Bank-20th July '26.xlsx"
 QB_SOURCE_FILE = ROOT / "QB-new.xlsx"
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 LOCAL_TESTS_FILE = ROOT / "uploads" / "local_tests_db.json"
 MANIFEST_FILE = ROOT / "uploads" / "employee_test_manifest.json"
+PROFILES_FILE = ROOT / "src" / "data" / "resource_portal_profiles.json"
 
 TOPIC_ID = "resource-product-assessment"
 SUBJECT_ID = "resource-subject"
@@ -60,82 +60,10 @@ def strip_category_prefix(text: str) -> str:
 
 
 def load_question_bank():
-    """Load MCQ bank from generated Question Bank export."""
-    bank: dict[str, dict] = {}
-
-    def flush_current(current, current_key):
-        if not current or len(current["options"]) < 2:
-            return
-        key = normalize_text(current["question_text"])
-        if key not in bank:
-            bank[key] = current.copy()
-
-    # Try generated question bank export first
-    if QUESTION_BANK_FILE.exists():
-        wb = openpyxl.load_workbook(QUESTION_BANK_FILE, data_only=True)
-        for sheet_name in wb.sheetnames:
-            sheet = wb[sheet_name]
-            rows = list(sheet.iter_rows(values_only=True))
-            if not rows:
-                continue
-
-            header = [clean_str(c) for c in rows[0]]
-            col = {h.lower(): i for i, h in enumerate(header)}
-
-            q_col = next((col[k] for k in col if k == "question" or k.endswith("question")), None)
-            opt_col = next((col[k] for k in col if "option" in k), None)
-            correct_col = next((col[k] for k in col if "correct" in k), None)
-            prod_col = next((col[k] for k in col if "product" in k), None)
-            cat_col = next((col[k] for k in col if "category" in k), None)
-
-            if q_col is None or opt_col is None:
-                continue
-
-            current_key = None
-            current = None
-
-            for row in rows[1:]:
-                q_text = clean_str(row[q_col]) if q_col < len(row) else ""
-                option = clean_str(row[opt_col]) if opt_col is not None and opt_col < len(row) else ""
-                if not q_text or not option:
-                    continue
-
-                key = normalize_text(q_text)
-                if key != current_key:
-                    flush_current(current, current_key)
-                    current_key = key
-                    product = clean_str(row[prod_col]) if prod_col is not None and prod_col < len(row) else sheet_name
-                    category = clean_str(row[cat_col]) if cat_col is not None and cat_col < len(row) else ""
-                    plain = q_text
-                    display = f"[{category}] {plain}" if category else plain
-                    current = {
-                        "question_text": display,
-                        "plain_text": plain,
-                        "options": [],
-                        "correct_option_index": 0,
-                        "explanation": "Imported from Question Bank.",
-                        "difficulty": "medium",
-                        "product": product or sheet_name,
-                        "category": category,
-                        "topic_title": category or product or sheet_name,
-                    }
-
-                current["options"].append(option)
-                if correct_col is not None and correct_col < len(row):
-                    correctness = clean_str(row[correct_col]).lower()
-                    if correctness in {"correct", "true", "yes"}:
-                        current["correct_option_index"] = len(current["options"]) - 1
-
-            flush_current(current, current_key)
-
-    # Index by display text and plain text for mapping lookup
-    alias_bank: dict[str, dict] = {}
-    for item in bank.values():
-        alias_bank[normalize_text(item["question_text"])] = item
-        plain = item.get("plain_text") or strip_category_prefix(item["question_text"])
-        alias_bank[normalize_text(plain)] = item
-
-    return alias_bank
+    """Load MCQ bank directly from QB-new.xlsx (sole question source)."""
+    if not QB_SOURCE_FILE.exists():
+        raise FileNotFoundError(f"Missing question source: {QB_SOURCE_FILE.name}")
+    return build_alias_bank(QB_SOURCE_FILE)
 
 
 def load_mapping_rows():
@@ -167,6 +95,30 @@ def load_mapping_rows():
             }
         )
     return employees
+
+
+def export_portal_profiles(employees):
+    profiles = []
+    for emp in employees:
+        assigned = emp.get("assigned_questions") or []
+        profiles.append(
+            {
+                "employee_id": emp["employee_id"],
+                "full_name": emp.get("full_name") or emp["employee_id"],
+                "role": emp.get("role") or "employee",
+                "domain": emp.get("department") or "",
+                "product": emp.get("product") or "",
+                "email": emp.get("email") or "",
+                "ddh": emp.get("ddh") or "",
+                "emp_status": emp.get("emp_status") or "",
+                "remarks": emp.get("remarks") or "",
+                "assigned_questions": assigned,
+                "assigned_question_count": len(assigned),
+            }
+        )
+    PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROFILES_FILE.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+    return len(profiles)
 
 
 def hash_password(password: str):
@@ -321,13 +273,16 @@ def build_tests(employees, bank):
 
 
 def main():
-    print("Loading Question Bank...")
+    print("Loading question bank from QB-new.xlsx...")
     bank = load_question_bank()
-    print(f"Loaded {len(bank)} unique MCQ questions from Question Bank.")
+    print(f"Loaded {len(bank)} unique MCQ questions from {QB_SOURCE_FILE.name}.")
 
     print("Loading Resource Question Mapping...")
     employees = load_mapping_rows()
     print(f"Loaded {len(employees)} employees from mapping file.")
+
+    export_portal_profiles(employees)
+    print(f"Exported portal profiles JSON: {PROFILES_FILE}")
 
     created_accounts = ensure_accounts(employees)
     print(f"Ensured employee accounts ({created_accounts} new accounts added).")
@@ -358,4 +313,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     main()

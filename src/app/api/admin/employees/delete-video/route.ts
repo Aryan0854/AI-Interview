@@ -5,11 +5,11 @@ import { supabase } from "@/lib/db";
 import { writeLog } from "@/lib/structured-logger";
 import { cacheStore } from "@/lib/cache-store";
 import { deleteEmployeeTestVideo } from "@/lib/employee-test-video";
-import { resetTestInSupabase, clearLocalTestSnapshotAfterReset, resolveEmployeeUuid } from "@/services/employee-test-supabase-sync";
 
 /**
- * POST /api/admin/employees/reset-test
- * Resets an employee test session while keeping the originally assigned questions.
+ * POST /api/admin/employees/delete-video
+ * Deletes ONLY the proctoring video file from storage (Supabase + local fallback).
+ * Does not change test status, scores, attempts, or assigned questions.
  */
 export async function POST(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -54,73 +54,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Assigned test not found for this employee" }, { status: 404 });
     }
 
-    const existingQuestions = await localTestsDb.getQuestions(resolvedTestId);
-
-    // Delete recording first so a retake always starts clean.
     await deleteEmployeeTestVideo(resolvedTestId);
 
-    // Postgres is source of truth in production.
-    await resetTestInSupabase(resolvedTestId);
-    await clearLocalTestSnapshotAfterReset(resolvedTestId);
-
-    try {
-      await localTestsDb.updateTest(resolvedTestId, {
-        status: "pending",
-        in_progress: null,
-        current_question_index: 0,
-        started_at: null,
-        completed_at: null,
-        session_recording_url: null as any,
-        proctoring: null as any,
-        score_correct: null,
-        score_total: null,
-        score_percent: null,
-        ai_analysis: null,
-      });
-      await localTestsDb.deleteAttempts(resolvedTestId);
-    } catch {
-      // test may exist only in Supabase after migration
-    }
-
-    if (employeeId) {
-      try {
-        const employeeUuid = await resolveEmployeeUuid(employeeId);
-        await supabase
-          .from("employees")
-          .update({
-            ai_readiness_score: 0,
-            xp_points: 0,
-            skill_level: "beginner",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", employeeUuid);
-      } catch {
-        // non-fatal
-      }
-    }
-
-    // Best-effort second delete in case upload raced with reset.
-    await deleteEmployeeTestVideo(resolvedTestId);
     cacheStore.invalidate("employees");
 
     await writeLog(
       "employee",
-      "ADMIN_RESET_EMPLOYEE_TEST",
+      "ADMIN_DELETE_EMPLOYEE_TEST_VIDEO",
       "success",
-      `Admin reset test ${resolvedTestId}${employeeId ? ` for employee ${employeeId}` : ""} (questions preserved: ${existingQuestions.length})`
+      `Admin deleted proctoring video only for test ${resolvedTestId}${employeeId ? ` (employee ${employeeId})` : ""}`
     );
 
     return NextResponse.json({
       success: true,
       testId: resolvedTestId,
-      preservedQuestions: existingQuestions.length,
+      message: "Proctoring video deleted. Test score and status unchanged.",
     });
   } catch (error: any) {
     await writeLog(
       "employee",
-      "ADMIN_RESET_EMPLOYEE_TEST_FAILED",
+      "ADMIN_DELETE_EMPLOYEE_TEST_VIDEO_FAILED",
       "failed",
-      `Admin reset test failed: ${error.message}`
+      `Admin delete video failed: ${error.message}`
     );
     return NextResponse.json({ error: error.message || "Internal error" }, { status: 500 });
   }
