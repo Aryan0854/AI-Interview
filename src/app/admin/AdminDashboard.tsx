@@ -910,12 +910,18 @@ export default function AdminDashboard() {
   }, [resourcePortalEmployees, testResultsSearch, testStatusFilter]);
 
   const portalDashboardStats = useMemo(() => {
-    const scored = resourcePortalEmployees.filter((e) => e.score !== null);
+    const scored = resourcePortalEmployees.filter((e) => e.score !== null && e.score !== undefined);
+    const completed = resourcePortalEmployees.filter((e) => e.test_status === "completed").length;
+    const pending = resourcePortalEmployees.filter((e) =>
+      e.test_status === "pending" ||
+      e.test_status === "not_started" ||
+      e.test_status === "in_progress"
+    ).length;
     return {
       mapped: resourcePortalEmployees.length,
-      assigned: resourcePortalEmployees.filter((e) => e.test_id).length,
-      pending: resourcePortalEmployees.filter((e) => e.test_status === "pending").length,
-      completed: resourcePortalEmployees.filter((e) => e.test_status === "completed").length,
+      assigned: resourcePortalEmployees.filter((e) => e.test_id || (e.assigned_question_count ?? 0) > 0).length,
+      pending,
+      completed,
       globalAvgScore:
         scored.length > 0
           ? Math.round(scored.reduce((acc, curr) => acc + (curr.score || 0), 0) / scored.length)

@@ -357,19 +357,29 @@ export function mergeResourcePortalData(
   return mappingRows.map((row) => {
     const empTests = testsByEmployee.get(normalizeEmployeeId(row.employee_id)) || [];
     const manifestTestId = manifest[row.employee_id] ?? manifest[normalizeEmployeeId(row.employee_id)] ?? null;
+    const completed = empTests.filter((test) => test.status === "completed");
+    // Prefer a completed attempt for the assigned test / product assessment so
+    // completed scores do not disappear behind a newer empty assignment row.
     const primaryTest =
+      empTests.find((test) => test.id === manifestTestId && test.status === "completed") ??
+      empTests.find(
+        (test) => test.topicId === "resource-product-assessment" && test.status === "completed"
+      ) ??
+      completed[0] ??
       empTests.find((test) => test.id === manifestTestId) ??
       empTests.find((test) => test.topicId === "resource-product-assessment") ??
       empTests[0] ??
       null;
 
-    const completed = empTests.filter((test) => test.status === "completed");
     const primaryCompleted =
       completed.find((test) => test.id === primaryTest?.id) ?? completed[0] ?? null;
     const score =
-      primaryCompleted && primaryCompleted.correctCount != null
-        ? primaryCompleted.correctCount
-        : primaryCompleted?.score ?? null;
+      primaryCompleted != null
+        ? (primaryCompleted.correctCount ??
+            primaryCompleted.score ??
+            primaryCompleted.answers_correct ??
+            null)
+        : null;
     const scoreMax = primaryTest?.totalQuestions ?? row.assigned_question_count ?? 25;
 
     const answeredCount = primaryTest?.answeredCount ?? 0;
@@ -378,6 +388,11 @@ export function mergeResourcePortalData(
       primaryCompleted?.completedAt ??
       (primaryTest?.status === "completed" ? primaryTest?.completedAt ?? null : null);
 
+    const rawStatus =
+      primaryCompleted?.status === "completed"
+        ? "completed"
+        : primaryTest?.status ?? null;
+
     return {
       ...row,
       product: formatProductDisplayName(row.product),
@@ -385,7 +400,7 @@ export function mergeResourcePortalData(
       test_status: derivePortalTestStatus({
         assignedQuestionCount: row.assigned_question_count || (manifestTestId ? 25 : 0),
         testId: primaryTest?.id ?? manifestTestId,
-        rawStatus: primaryTest?.status ?? null,
+        rawStatus,
         answeredCount,
         totalQuestions,
         startedAt: primaryTest?.startedAt ?? null,

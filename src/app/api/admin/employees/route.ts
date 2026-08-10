@@ -25,6 +25,9 @@ import {
 import { normalizeProctoring } from '@/lib/employee-proctoring';
 import { listEmployeeTestRecordingIds } from '@/lib/employee-test-video';
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -37,7 +40,17 @@ export async function GET(request: NextRequest) {
 
   const cached = !skipCache && cacheStore.get("employees", 120000, activeJdId);
   if (cached && !isExport) {
-    return NextResponse.json(cached);
+    // Never trust a cached payload that lost live test results while roster still has assignments.
+    const cachedResults = Array.isArray(cached.allTestResults) ? cached.allTestResults.length : 0;
+    const cachedPortal = Array.isArray(cached.resourcePortalEmployees)
+      ? cached.resourcePortalEmployees
+      : [];
+    const assignedWithoutLive =
+      cachedPortal.filter((e: any) => e?.test_id || (e?.assigned_question_count ?? 0) > 0).length > 0 &&
+      cachedResults === 0;
+    if (!assignedWithoutLive) {
+      return NextResponse.json(cached);
+    }
   }
 
   const jsonPath = getEmployeesJsonPath();
@@ -127,7 +140,7 @@ export async function GET(request: NextRequest) {
         if (!empId) return;
 
         const totalQs = (test as any).score_total ?? test.total_questions ?? 25;
-        const score = (test as any).score_correct ?? 0;
+        const score = (test as any).score_correct ?? (test as any).answers_correct ?? 0;
         const scorePercent =
           (test as any).score_percent ??
           (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
@@ -164,7 +177,7 @@ export async function GET(request: NextRequest) {
         if (!empId) return;
 
         const totalQs = row.score_total ?? row.total_questions ?? 25;
-        const score = row.score_correct ?? 0;
+        const score = row.score_correct ?? row.answers_correct ?? 0;
         const scorePercent =
           row.score_percent ??
           (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
@@ -201,13 +214,20 @@ export async function GET(request: NextRequest) {
   }
   };
 
-  await Promise.all([
-    applyJdSkillMatch(),
-    Promise.race([
+  await applyJdSkillMatch();
+
+  // Always await Supabase results. A short race previously returned the portal
+  // with an empty result set on slow cold starts, making every test look "Not Started".
+  try {
+    await Promise.race([
       loadSupabaseResults(),
-      new Promise<void>((resolve) => setTimeout(resolve, 5000)),
-    ]),
-  ]);
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error("supabase_results_timeout")), 25_000)
+      ),
+    ]);
+  } catch (err) {
+    console.warn("Supabase employee test results load timed out or failed:", err);
+  }
 
   // Overlay / fill from local JSON when allowed (also used as prod fallback if Supabase timed out)
   if (allowLocalTestsFallback() || allTestResults.length === 0) {
@@ -358,8 +378,17 @@ export async function GET(request: NextRequest) {
       console.warn("Failed to load employee portal mapping:", mappingErr);
     }
 
-    cacheStore.set("employees", { employees, allTestResults, resourcePortalEmployees }, activeJdId);
-    return NextResponse.json({ employees, allTestResults, resourcePortalEmployees });
+    const payload = { employees, allTestResults, resourcePortalEmployees };
+    const blankLiveResults =
+      allTestResults.length === 0 &&
+      resourcePortalEmployees.some((e: any) => e?.test_id || (e?.assigned_question_count ?? 0) > 0);
+    if (!blankLiveResults) {
+      cacheStore.set("employees", payload, activeJdId);
+    } else {
+      cacheStore.invalidate("employees");
+    }
+
+    return NextResponse.json(payload);
   }
 
   return NextResponse.json({ employees, allTestResults });
