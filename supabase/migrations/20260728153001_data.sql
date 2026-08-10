@@ -1,7 +1,8 @@
--- 1. Learning Subjects (14)
+-- 1. Learning Subjects (14) - Idempotent Insert
 -- ---------------------------------------------------------------------------
 INSERT INTO learning_subjects (title, description, icon, color, order_index)
-VALUES
+SELECT v.title, v.description, v.icon, v.color, v.order_index
+FROM (VALUES
   ('Artificial Intelligence',         'Neural networks, expert systems, and foundational AI theory',                           'Brain',             '#3b82f6', 1),
   ('Machine Learning',               'Supervised, unsupervised, and reinforcement learning algorithms',                       'Activity',          '#8b5cf6', 2),
   ('Data Science',                   'Statistics, EDA, and end-to-end data pipelines',                                        'BarChart3',         '#10b981', 3),
@@ -15,53 +16,65 @@ VALUES
   ('MLOps',                          'CI/CD for ML, model serving, monitoring, and drift detection',                          'Gauge',             '#f97316', 11),
   ('Data Engineering',               'Pipelines, ETL/ELT, orchestration with Airflow / dbt, lakehouse',                      'GitBranch',         '#14b8a6', 12),
   ('Large Language Models',         'Prompt engineering, fine-tuning, RAG, function calling, evaluation',                   'Bot',               '#a855f7', 13),
-  ('AI Ethics & Governance',        'Bias mitigation, responsible AI, EU AI Act, model auditing',                           'Shield',            '#64748b', 14);
+  ('AI Ethics & Governance',        'Bias mitigation, responsible AI, EU AI Act, model auditing',                           'Shield',            '#64748b', 14)
+) AS v(title, description, icon, color, order_index)
+WHERE NOT EXISTS (SELECT 1 FROM learning_subjects s WHERE s.title = v.title);
 
 -- ---------------------------------------------------------------------------
 -- 2. Modules — Artificial Intelligence (subject 1)
 -- ---------------------------------------------------------------------------
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Introduction to AI',          'History, definitions, and key milestones of artificial intelligence',       1 FROM learning_subjects WHERE title = 'Artificial Intelligence';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Search Algorithms',          'BFS, DFS, A*, minimax, and alpha-beta pruning',                            2 FROM learning_subjects WHERE title = 'Artificial Intelligence';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Knowledge Representation',   'Ontologies, logic, frames, and semantic networks',                         3 FROM learning_subjects WHERE title = 'Artificial Intelligence';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Expert Systems',            'Rule-based systems, inference engines, and MYCIN architecture',            4 FROM learning_subjects WHERE title = 'Artificial Intelligence';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'AI Agents',                 'Goal-directed agents, environments, and utility-based decision-making',    5 FROM learning_subjects WHERE title = 'Artificial Intelligence';
+SELECT s.id, v.title, v.description, v.ord
+FROM learning_subjects s
+CROSS JOIN (VALUES
+  ('Introduction to AI',          'History, definitions, and key milestones of artificial intelligence',       1),
+  ('Search Algorithms',          'BFS, DFS, A*, minimax, and alpha-beta pruning',                            2),
+  ('Knowledge Representation',   'Ontologies, logic, frames, and semantic networks',                         3),
+  ('Expert Systems',            'Rule-based systems, inference engines, and MYCIN architecture',            4),
+  ('AI Agents',                 'Goal-directed agents, environments, and utility-based decision-making',    5)
+) AS v(title, description, ord)
+WHERE s.title = 'Artificial Intelligence'
+  AND NOT EXISTS (SELECT 1 FROM learning_modules m WHERE m.subject_id = s.id AND m.title = v.title);
 
 -- ---------------------------------------------------------------------------
 -- 3. Modules — Machine Learning (subject 2)
 -- ---------------------------------------------------------------------------
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Supervised Learning',       'Linear/logistic regression, decision trees, k-NN, and SVM',            1 FROM learning_subjects WHERE title = 'Machine Learning';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Unsupervised Learning',     'K-means, PCA, t-SNE, and Gaussian mixture models',                       2 FROM learning_subjects WHERE title = 'Machine Learning';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Reinforcement Learning',    'Q-learning, policy gradients, and actor-critic architectures',           3 FROM learning_subjects WHERE title = 'Machine Learning';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Model Evaluation',         'Metrics, cross-validation, ROC-AUC, F1, and hyperparameter tuning',    4 FROM learning_subjects WHERE title = 'Machine Learning';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Ensemble Methods',         'Random forests, XGBoost, bagging, and boosting',                         5 FROM learning_subjects WHERE title = 'Machine Learning';
+SELECT s.id, v.title, v.description, v.ord
+FROM learning_subjects s
+CROSS JOIN (VALUES
+  ('Supervised Learning',       'Linear/logistic regression, decision trees, k-NN, and SVM',            1),
+  ('Unsupervised Learning',     'K-means, PCA, t-SNE, and Gaussian mixture models',                       2),
+  ('Reinforcement Learning',    'Q-learning, policy gradients, and actor-critic architectures',           3),
+  ('Model Evaluation',         'Metrics, cross-validation, ROC-AUC, F1, and hyperparameter tuning',    4),
+  ('Ensemble Methods',         'Random forests, XGBoost, bagging, and boosting',                         5)
+) AS v(title, description, ord)
+WHERE s.title = 'Machine Learning'
+  AND NOT EXISTS (SELECT 1 FROM learning_modules m WHERE m.subject_id = s.id AND m.title = v.title);
 
 -- ---------------------------------------------------------------------------
--- 4. Modules — Data Science (subject 3)  (sample only — extend as needed)
+-- 4. Modules — Data Science (subject 3)
 -- ---------------------------------------------------------------------------
 INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Statistical Foundations',   'Probability, distributions, hypothesis testing, and Bayesian inference', 1 FROM learning_subjects WHERE title = 'Data Science';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'EDA & Visualization',       'Matplotlib, seaborn, EDA techniques, and storytelling with data',        2 FROM learning_subjects WHERE title = 'Data Science';
-INSERT INTO learning_modules (subject_id, title, description, order_index)
-SELECT id, 'Pandas & NumPy Deep Dive',  'Vectorised operations, pivoting, and time-series analysis',              3 FROM learning_subjects WHERE title = 'Data Science';
+SELECT s.id, v.title, v.description, v.ord
+FROM learning_subjects s
+CROSS JOIN (VALUES
+  ('Statistical Foundations',   'Probability, distributions, hypothesis testing, and Bayesian inference', 1),
+  ('EDA & Visualization',       'Matplotlib, seaborn, EDA techniques, and storytelling with data',        2),
+  ('Pandas & NumPy Deep Dive',  'Vectorised operations, pivoting, and time-series analysis',              3)
+) AS v(title, description, ord)
+WHERE s.title = 'Data Science'
+  AND NOT EXISTS (SELECT 1 FROM learning_modules m WHERE m.subject_id = s.id AND m.title = v.title);
 
--- Remaining 11 subjects get a single generic module each as a starting point
+-- Remaining 11 subjects get a single generic module each
 INSERT INTO learning_modules (subject_id, title, description, order_index)
 SELECT id, 'Core Concepts', 'Foundational topics for ' || title, 1
-FROM learning_subjects WHERE title NOT IN ('Artificial Intelligence','Machine Learning','Data Science');
+FROM learning_subjects s
+WHERE title NOT IN ('Artificial Intelligence','Machine Learning','Data Science')
+  AND NOT EXISTS (SELECT 1 FROM learning_modules m WHERE m.subject_id = s.id AND m.title = 'Core Concepts');
 
 -- ============================================================
--- 5. Topics  (SQL names from snake_case; not lucide)
+-- 5. Topics
 -- ============================================================
 
 -- ---------- Artificial Intelligence subject ----------
@@ -77,6 +90,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Introduction to AI'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -90,6 +104,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Search Algorithms'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -102,6 +117,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Knowledge Representation'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -114,6 +130,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'Expert Systems'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -126,6 +143,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Artificial Intelligence')
   AND m.title = 'AI Agents'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 -- ---------- Machine Learning subject ----------
@@ -141,6 +159,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Supervised Learning'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -154,6 +173,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Unsupervised Learning'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -166,6 +186,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Reinforcement Learning'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -179,6 +200,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Model Evaluation'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -192,6 +214,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Machine Learning')
   AND m.title = 'Ensemble Methods'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 -- ---------- Data Science subject ----------
@@ -205,6 +228,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Data Science')
   AND m.title = 'Statistical Foundations'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -217,6 +241,7 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Data Science')
   AND m.title = 'EDA & Visualization'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
@@ -229,9 +254,10 @@ CROSS JOIN (VALUES
 ) AS t(title, difficulty, ord, mins)
 WHERE m.subject_id IN (SELECT id FROM learning_subjects WHERE title = 'Data Science')
   AND m.title = 'Pandas & NumPy Deep Dive'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY t.ord;
 
--- ---------- All 11 remaining subjects (each has "Core Concepts" module) ----------
+-- ---------- All 11 remaining subjects ----------
 INSERT INTO learning_topics (module_id, title, difficulty, order_index, estimated_minutes)
 SELECT m.id, t.title, t.difficulty::difficulty_level, t.ord, t.mins
 FROM learning_modules m
@@ -241,11 +267,9 @@ CROSS JOIN (VALUES
   ('Advanced Topics',               'advanced',    3, 35)
 ) AS t(title, difficulty, ord, mins)
 WHERE m.title = 'Core Concepts'
+  AND NOT EXISTS (SELECT 1 FROM learning_topics tp WHERE tp.module_id = m.id AND tp.title = t.title)
 ORDER BY m.subject_id, t.ord;
 
--- ============================================================
--- Seed completed
--- ============================================================
 
 -- ---------------------------------------------------------------------------
 -- Employee seed data (2 sample employees)

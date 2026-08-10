@@ -151,22 +151,28 @@ export default function EmployeeAuthGate({ children }: { children: React.ReactNo
     };
   }, [loading, isOnLiveTest]);
 
-  useEffect(() => {
-    let countdownTimer: any;
-    if (isIdle && !isOnLiveTest) {
-      countdownTimer = setInterval(() => {
-        setCountdown(prev => {
-          if (prev <= 1) {
-            clearInterval(countdownTimer);
-            handleLogout("inactivity");
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+ useEffect(() => {
+  let countdownTimer: NodeJS.Timeout;
+
+  if (isIdle && !isOnLiveTest) {
+    countdownTimer = setInterval(() => {
+      setCountdown(prev => Math.max(prev - 1, 0));
+    }, 1000);
+  }
+
+  return () => {
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
     }
-    return () => clearInterval(countdownTimer);
-  }, [isIdle, isOnLiveTest]);
+  };
+}, [isIdle, isOnLiveTest]);
+
+useEffect(() => {
+  if (isIdle && countdown <= 0) {
+    handleLogout("inactivity");
+  }
+}, [isIdle, countdown]);
+
 
   if (loading) {
     return (

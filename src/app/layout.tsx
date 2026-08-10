@@ -36,6 +36,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
            (function() {
              if (typeof window === 'undefined') return;
 
+             // Only block DevTools and right-click in production (not on localhost)
+             var isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+             if (isLocalhost) return;
+
              // Disable right-click context menu site-wide
              document.addEventListener('contextmenu', function(e) {
                e.preventDefault();
