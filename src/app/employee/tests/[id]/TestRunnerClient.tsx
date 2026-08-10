@@ -168,7 +168,15 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           },
         });
         if (!r.ok) {
-          throw new Error("Failed to load test");
+          const errBody = await r.text();
+          let message = "Failed to load test";
+          try {
+            const parsed = JSON.parse(errBody);
+            message = parsed.error ?? message;
+          } catch {
+            if (errBody?.trim()) message = errBody;
+          }
+          throw new Error(message);
         }
         const { test: testData, questions: questionsData } = await r.json();
         if (cancelled) return;
@@ -241,7 +249,9 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   }, [phase, timeLeft]);
 
   const answersRef = useRef(answers);
-  const handleSubmitRef = useRef<(ans: Record<number, number>) => void>(() => {});
+  const handleSubmitRef = useRef<
+    (ans: Record<number, number>, opts?: { autoSubmitted?: boolean; timeExpired?: boolean }) => void
+  >(() => {});
 
   useEffect(() => {
     answersRef.current = answers;
@@ -250,7 +260,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   // Auto-submit when time expires
   useEffect(() => {
     if (timeLeft === 0 && phase === "running") {
-      handleSubmitRef.current(answersRef.current);
+      handleSubmitRef.current(answersRef.current, { autoSubmitted: true, timeExpired: true });
     }
   }, [timeLeft, phase]);
 
@@ -426,6 +436,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     }
 
     // If starting fresh (pending), update status and started_at in backend
+    const limit = test?.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS;
     if (test && test.status === "pending") {
       const startTime = new Date().toISOString();
       try {
@@ -443,7 +454,25 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       } catch (err) {
         console.warn("Failed to update test start time in database:", err);
       }
-      setTimeLeft(test.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS);
+      setTimeLeft(limit);
+    } else if (test && test.status === "in_progress") {
+      const remaining = timeLeft ?? limit;
+      if (remaining <= 0) {
+        const startTime = new Date().toISOString();
+        try {
+          await fetch(`/api/employee/tests/${testId}`, {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ started_at: startTime }),
+          });
+        } catch (err) {
+          console.warn("Failed to refresh test timer in database:", err);
+        }
+        setTimeLeft(limit);
+      }
     }
 
     setPhase("running");
@@ -455,13 +484,22 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const hasPrevious = currentIdx > 0;
   const hasNext     = currentIdx < (questions?.length ?? 0) - 1;
 
-  async function handleSubmit(ans: Record<number, number>, opts?: { autoSubmitted?: boolean }) {
+  async function handleSubmit(
+    ans: Record<number, number>,
+    opts?: { autoSubmitted?: boolean; timeExpired?: boolean }
+  ) {
     if (submittingRef.current) return;
+    const answerEntries = Object.entries(ans);
+    const isAuto = opts?.autoSubmitted === true || opts?.timeExpired === true;
+    if (answerEntries.length === 0 && !isAuto) {
+      setErr("Please answer at least one question before submitting.");
+      return;
+    }
     submittingRef.current = true;
     setPhase("submitting");
     setMsg(null);
     try {
-      const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
+      const responseList = answerEntries.map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,
         selected_index: selected,
         time_seconds: 0,
@@ -478,13 +516,20 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         },
         body: JSON.stringify({
           answers: responseList,
-          autoSubmitted: opts?.autoSubmitted === true || warningCount >= 3,
+          autoSubmitted: isAuto || warningCount >= 3,
         }),
       });
 
       if (!r.ok) {
         const errorText = await r.text();
-        throw new Error(errorText || "Submit failed");
+        let message = "Submit failed";
+        try {
+          const parsed = JSON.parse(errorText);
+          message = parsed.error ?? message;
+        } catch {
+          if (errorText?.trim()) message = errorText;
+        }
+        throw new Error(message);
       }
 
       const res = await r.json();
@@ -531,7 +576,29 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const answeredCount  = Object.keys(answers).length;
   const allAnswered    = questions ? answeredCount >= questions.length : false;
 
-  if (!currentQ) {
+  // ── phase: loading ─────────────────────────────────────────────
+  if (phase === "loading") {
+    return (
+      <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
+        <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
+        <p className="font-medium">Preparing your test…</p>
+      </div>
+    );
+  }
+
+  if ((phase === "ready" || phase === "running") && (!questions || questions.length === 0)) {
+    return (
+      <div className="py-16 mx-auto max-w-md text-center space-y-6">
+        <XCircle className="w-10 h-10 text-red-500 mx-auto" />
+        <p className="text-red-600 font-medium">
+          No questions are available for this assessment. Please contact your administrator.
+        </p>
+        <Button onClick={() => router.push("/employee/dashboard")}>Back to Dashboard</Button>
+      </div>
+    );
+  }
+
+  if (!currentQ && phase === "running") {
     return (
       <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
         <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
@@ -651,16 +718,6 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           {test?.status === "in_progress" ? "Resume Assessment" : "Start Assessment"}{" "}
           <ArrowRight className="w-4 h-4" />
         </Button>
-      </div>
-    );
-  }
-
-  // ── phase: loading ─────────────────────────────────────────────
-  if (phase === "loading") {
-    return (
-      <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
-        <p className="font-medium">Preparing your test…</p>
       </div>
     );
   }

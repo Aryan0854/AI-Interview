@@ -27,7 +27,11 @@ export async function POST(
 
     const body = await request.json();
     const answers = body.answers ?? [];
-    if (!Array.isArray(answers) || answers.length === 0) {
+    const autoSubmitted = body.autoSubmitted === true;
+    if (!Array.isArray(answers)) {
+      return NextResponse.json({ error: "Invalid answers" }, { status: 400 });
+    }
+    if (answers.length === 0 && !autoSubmitted) {
       return NextResponse.json({ error: "Empty answers" }, { status: 400 });
     }
 
@@ -42,7 +46,7 @@ export async function POST(
     }
 
     const submitCheck = canSubmitTest(localTest);
-    if (!submitCheck.ok && submitCheck.code === "NOT_STARTED") {
+    if (!autoSubmitted && !submitCheck.ok && submitCheck.code === "NOT_STARTED") {
       return NextResponse.json({ error: submitCheck.error }, { status: 400 });
     }
 

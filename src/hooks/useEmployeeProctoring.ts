@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   EMPLOYEE_PROCTOR_MAX_VIOLATIONS,
   EMPLOYEE_PROCTOR_VIOLATION_COOLDOWN_MS,
+  EMPLOYEE_PROCTOR_START_GRACE_MS,
   type EmployeeProctoringState,
 } from "@/lib/employee-proctoring";
 
@@ -55,8 +56,17 @@ export function useEmployeeProctoring(options: {
   const lastTriggerRef = useRef<Record<string, number>>({});
   const autoSubmitTriggeredRef = useRef(false);
   const everHadFullscreenRef = useRef(false);
+  const runningStartedAtRef = useRef<number | null>(null);
   const onAutoSubmitRef = useRef(onAutoSubmit);
   onAutoSubmitRef.current = onAutoSubmit;
+
+  useEffect(() => {
+    if (phase === "running") {
+      runningStartedAtRef.current = Date.now();
+    } else {
+      runningStartedAtRef.current = null;
+    }
+  }, [phase]);
 
   useEffect(() => {
     if (initialProctoring?.warningCount != null) {
@@ -119,6 +129,11 @@ export function useEmployeeProctoring(options: {
     (violationType: string, detail?: string) => {
       if (phase !== "running") return;
       if (autoSubmitTriggeredRef.current) return;
+
+      const startedAt = runningStartedAtRef.current;
+      if (startedAt && Date.now() - startedAt < EMPLOYEE_PROCTOR_START_GRACE_MS) {
+        return;
+      }
 
       const nowMs = Date.now();
       const lastForType = lastTriggerRef.current[violationType] ?? 0;

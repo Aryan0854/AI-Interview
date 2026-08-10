@@ -4,6 +4,8 @@
 
 export const EMPLOYEE_PROCTOR_MAX_VIOLATIONS = 5;
 export const EMPLOYEE_PROCTOR_VIOLATION_COOLDOWN_MS = 2500;
+/** Ignore proctor violations briefly after entering the running phase (camera/fullscreen prompts). */
+export const EMPLOYEE_PROCTOR_START_GRACE_MS = 20_000;
 
 export type ProctorAnomalyCategory =
   | "face"
