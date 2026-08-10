@@ -1,0 +1,23 @@
+node_modules
+.next
+.git
+.gitignore
+README.md
+.env
+.env.local
+.env.*.local
+!.env.azure.example
+uploads/*
+!uploads/.gitkeep
+scripts/__pycache__
+**/__pycache__
+*.pyc
+.agent
+.cursor
+terminals
+docs/BR
+docs/JD
+docs/Resumes
+docs/Corp Pool
+*.md
+!docs/supabase-schema/*.sql
