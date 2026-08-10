@@ -339,7 +339,7 @@ export default function AdminDashboard() {
 
   // Invite Configuration Modal states
   const [inviteTargetResume, setInviteTargetResume] = useState<any | null>(null);
-  const [inviteType, setInviteType] = useState<"technical" | "non-technical">("technical");
+  const [inviteType, setInviteType] = useState<"technical" | "non-technical" | "both">("technical");
   
   // Tech section counts
   const [countOverlapping, setCountOverlapping] = useState(8);
@@ -2262,16 +2262,29 @@ export default function AdminDashboard() {
     try {
       const interviewConfig = {
         interviewType: inviteType,
-        sections: inviteType === "technical" ? {
-          overlapping: countOverlapping,
-          gap: countGap,
-          projects: countProjects,
-          coding: countCoding
-        } : {
-          behavioral: countBehavioral,
-          leadership: countLeadership,
-          softskills: countSoftSkills
-        }
+        sections:
+          inviteType === "technical"
+            ? {
+                overlapping: countOverlapping,
+                gap: countGap,
+                projects: countProjects,
+                coding: countCoding,
+              }
+            : inviteType === "non-technical"
+              ? {
+                  behavioral: countBehavioral,
+                  leadership: countLeadership,
+                  softskills: countSoftSkills,
+                }
+              : {
+                  overlapping: countOverlapping,
+                  gap: countGap,
+                  projects: countProjects,
+                  coding: countCoding,
+                  behavioral: countBehavioral,
+                  leadership: countLeadership,
+                  softskills: countSoftSkills,
+                },
       };
 
       const response = await fetch(`/api/admin/resumes/${resume.id}/invite`, {
@@ -5830,7 +5843,7 @@ export default function AdminDashboard() {
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest">
                   Assessment Focus
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <button
                     type="button"
                     onClick={() => setInviteType("technical")}
@@ -5840,8 +5853,8 @@ export default function AdminDashboard() {
                         : "border-border text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
                     }`}
                   >
-                    <span className="font-extrabold">Technical Assessment</span>
-                    <span className="text-[10px] opacity-75 font-normal">Includes coding & IDE challenges</span>
+                    <span className="font-extrabold">Technical</span>
+                    <span className="text-[10px] opacity-75 font-normal">Only technical questions</span>
                   </button>
 
                   <button
@@ -5853,8 +5866,21 @@ export default function AdminDashboard() {
                         : "border-border text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
                     }`}
                   >
-                    <span className="font-extrabold">Non-Technical Focus</span>
-                    <span className="text-[10px] opacity-75 font-normal">Behavioral & soft skills (No IDE)</span>
+                    <span className="font-extrabold">Non-Technical</span>
+                    <span className="text-[10px] opacity-75 font-normal">Only non-technical questions</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setInviteType("both")}
+                    className={`py-3 px-4 rounded-2xl border text-center font-bold text-xs transition-all flex flex-col items-center gap-1.5 ${
+                      inviteType === "both"
+                        ? "border-indigo-600 bg-indigo-50/50 text-indigo-700 dark:bg-indigo-950/20 dark:text-violet-400"
+                        : "border-border text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <span className="font-extrabold">Both</span>
+                    <span className="text-[10px] opacity-75 font-normal">Technical + non-technical</span>
                   </button>
                 </div>
               </div>
@@ -5865,101 +5891,117 @@ export default function AdminDashboard() {
                   Define Questions per Section
                 </span>
 
-                {inviteType === "technical" ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Overlapping (JD+CV)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countOverlapping}
-                        onChange={(e) => setCountOverlapping(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        JD Gaps Skill
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countGap}
-                        onChange={(e) => setCountGap(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        CV Projects Skill
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countProjects}
-                        onChange={(e) => setCountProjects(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Coding Challenges (IDE)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={10}
-                        value={countCoding}
-                        onChange={(e) => setCountCoding(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
+                {(inviteType === "technical" || inviteType === "both") && (
+                  <div className="space-y-3">
+                    {inviteType === "both" && (
+                      <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block">
+                        Technical Questions
+                      </span>
+                    )}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Overlapping (JD+CV)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countOverlapping}
+                          onChange={(e) => setCountOverlapping(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          JD Gaps Skill
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countGap}
+                          onChange={(e) => setCountGap(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          CV Projects Skill
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countProjects}
+                          onChange={(e) => setCountProjects(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Coding Challenges (IDE)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={countCoding}
+                          onChange={(e) => setCountCoding(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Behavioral Questions
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countBehavioral}
-                        onChange={(e) => setCountBehavioral(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Leadership & Collaboration
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countLeadership}
-                        onChange={(e) => setCountLeadership(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Problem Solving & Soft Skills
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countSoftSkills}
-                        onChange={(e) => setCountSoftSkills(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
+                )}
+
+                {(inviteType === "non-technical" || inviteType === "both") && (
+                  <div className={`space-y-3 ${inviteType === "both" ? "pt-2 border-t border-slate-200 dark:border-slate-800" : ""}`}>
+                    {inviteType === "both" && (
+                      <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block">
+                        Non-Technical Questions
+                      </span>
+                    )}
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Behavioral Questions
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countBehavioral}
+                          onChange={(e) => setCountBehavioral(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Leadership & Collaboration
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countLeadership}
+                          onChange={(e) => setCountLeadership(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Problem Solving & Soft Skills
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countSoftSkills}
+                          onChange={(e) => setCountSoftSkills(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}

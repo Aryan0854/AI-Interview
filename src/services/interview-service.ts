@@ -286,14 +286,25 @@ export class InterviewService {
       }
     };
 
-    const isTech = config.interviewType === 'technical';
+    const interviewType = config.interviewType || "technical";
+    const includeTech = interviewType === "technical" || interviewType === "both";
+    const includeNonTech = interviewType === "non-technical" || interviewType === "both";
     const jdText = await getJobDescriptionText(resume.report?.jdId);
 
     let questions: string[] = [];
 
+    const mapQuestionObjects = (raw: any[]): string[] =>
+      raw.map((qObj: any) => {
+        if (typeof qObj === "string") return qObj;
+        if (qObj && typeof qObj === "object" && typeof qObj.question === "string") {
+          return qObj.question;
+        }
+        throw new Error("Invalid question object format");
+      });
+
     // Use Gemini if available
     try {
-      if (isTech) {
+      if (includeTech) {
         const sections = config.sections || { overlapping: 8, gap: 3, projects: 4, coding: 2 };
         const overlappingCount = sections.overlapping !== undefined ? Number(sections.overlapping) : 8;
         const gapCount = sections.gap !== undefined ? Number(sections.gap) : 3;
@@ -367,22 +378,30 @@ export class InterviewService {
              - Make sure the coding challenges strictly align with the candidate's seniority level.
              - The challenges MUST be actual programming tasks (e.g., "Write a function that...") that require writing code to solve a specific problem. Do NOT ask conceptual, theoretical, system design, or verbal questions.
 
-          2. STRUCTURED PROBLEM STATEMENT:
+          2. PROGRAMMING LANGUAGE:
+             - Infer the candidate's primary language from the JD/CV.
+             - Supported IDE languages: JavaScript, TypeScript, Python, C++, Java.
+             - Prefer TypeScript when the CV/JD emphasizes TypeScript / Angular / NestJS / typed frontend work.
+             - Prefer JavaScript when the CV/JD emphasizes JavaScript / Node / React without TypeScript.
+             - Explicitly name the target language in the challenge text (e.g. "Write a function in TypeScript..." or "Write a function in JavaScript...").
+             - Use a starter signature matching that language (TypeScript: \`function solution(): void { ... }\`, JavaScript: \`function solution() { ... }\`, Python: \`def solution():\`, etc.).
+
+          3. STRUCTURED PROBLEM STATEMENT:
              - The question text MUST contain:
                - A clear description of the problem.
                - The expected input and output.
                - Constraints (e.g., time complexity, memory, input size).
                - At least 2 examples with inputs and expected outputs.
-               - A starter function signature (e.g., \`function solution() { ... }\`).
+               - A starter function signature matching the named language.
              - The question text MUST start with 'Coding Challenge: '.
 
-          3. OUTPUT FORMAT:
+          4. OUTPUT FORMAT:
              - Return ONLY a JSON array of exactly ${codingCount} objects.
              - Do not include any explanation or commentary.
              - Follow this JSON schema exactly:
              [
                {
-                 "question": "Coding Challenge: The detailed problem description with signature, inputs/outputs, constraints, and examples",
+                 "question": "Coding Challenge: The detailed problem description with named language, signature, inputs/outputs, constraints, and examples",
                  "difficulty": "Easy" | "Medium" | "Hard",
                  "source": "JD+CV Match",
                  "skill": "Algorithms / Data Structures / Coding",
@@ -399,16 +418,10 @@ export class InterviewService {
           }
         }
 
-        const rawQuestions = [...rawVerbal, ...rawCoding];
-        questions = rawQuestions.map((qObj: any) => {
-          if (typeof qObj === 'string') return qObj;
-          if (qObj && typeof qObj === 'object' && typeof qObj.question === 'string') {
-            return qObj.question;
-          }
-          throw new Error("Invalid question object format");
-        });
-      } else {
-        // Non-technical Interview
+        questions.push(...mapQuestionObjects([...rawVerbal, ...rawCoding]));
+      }
+
+      if (includeNonTech) {
         const sections = config.sections || { behavioral: 5, leadership: 5, softskills: 5 };
         const behavioralCount = sections.behavioral !== undefined ? Number(sections.behavioral) : 5;
         const leadershipCount = sections.leadership !== undefined ? Number(sections.leadership) : 5;
@@ -459,18 +472,17 @@ export class InterviewService {
           throw new Error(`Invalid format: expected ${totalNonTechCount} questions in non-technical array`);
         }
 
-        questions = rawNonTech.map((qObj: any) => {
-          if (typeof qObj === 'string') return qObj;
-          if (qObj && typeof qObj === 'object' && typeof qObj.question === 'string') {
-            return qObj.question;
-          }
-          throw new Error("Invalid question object format");
-        });
+        questions.push(...mapQuestionObjects(rawNonTech));
+      }
+
+      if (!questions.length) {
+        throw new Error("No questions generated for the selected assessment focus.");
       }
     } catch (err) {
       console.warn("Failed to generate questions with AI, falling back to dynamic defaults.", err);
-      
-      if (isTech) {
+      questions = [];
+
+      if (includeTech) {
         const sections = config.sections || { overlapping: 8, gap: 3, projects: 4, coding: 2 };
         const overlappingCount = sections.overlapping !== undefined ? Number(sections.overlapping) : 8;
         const gapCount = sections.gap !== undefined ? Number(sections.gap) : 3;
@@ -521,13 +533,11 @@ export class InterviewService {
           `How do you handle secrets management and environment configurations securely in a cloud deployment?`
         ];
 
-        // Slice/repeat verbal list to match count
         const totalVerbalNeeded = overlappingCount + gapCount + projectsCount;
         for (let i = 0; i < totalVerbalNeeded; i++) {
           questions.push(defaultVerbalList[i % defaultVerbalList.length]);
         }
 
-        // Coding challenges list
         const codingChallengesList = [
           `Coding Challenge: Write a function in JavaScript to check if a string is a palindrome. The function should ignore case and non-alphanumeric characters. Include examples and edge case handling.`,
           `Coding Challenge: Write a function in JavaScript that takes an array of integers and a target sum, and returns an array of indices of the two numbers that add up to the target sum (Two Sum problem).`
@@ -536,8 +546,9 @@ export class InterviewService {
         for (let i = 0; i < codingCount; i++) {
           questions.push(codingChallengesList[i % codingChallengesList.length]);
         }
-      } else {
-        // Non-technical fallbacks
+      }
+
+      if (includeNonTech) {
         const sections = config.sections || { behavioral: 5, leadership: 5, softskills: 5 };
         const behavioralCount = sections.behavioral !== undefined ? Number(sections.behavioral) : 5;
         const leadershipCount = sections.leadership !== undefined ? Number(sections.leadership) : 5;

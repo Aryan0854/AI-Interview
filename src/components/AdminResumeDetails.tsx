@@ -980,6 +980,26 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                                   {report.verification.confidence || 0}%
                                 </div>
                               </div>
+                              <div>
+                                <span className="block text-[10px] text-muted-foreground uppercase font-black tracking-wider">Selected ID Type</span>
+                                <div className="text-sm font-black mt-1 text-foreground">
+                                  {report.verification.selectedIdType || "—"}
+                                </div>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] text-muted-foreground uppercase font-black tracking-wider">Detected ID Type</span>
+                                <div className={cn(
+                                  "text-sm font-black mt-1",
+                                  report.verification.idTypeMatched === false ? "text-rose-500" : "text-foreground"
+                                )}>
+                                  {report.verification.detectedIdType || "—"}
+                                  {typeof report.verification.idTypeMatched === "boolean" && (
+                                    <span className="ml-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      ({report.verification.idTypeMatched ? "match" : "mismatch"})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </div>
 
@@ -987,6 +1007,16 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block text-left">Biometric Match Rationale</span>
                             <div className="p-4 rounded-2xl border border-border bg-indigo-50/15 dark:bg-slate-900/30 text-xs font-semibold leading-relaxed text-muted-foreground">
                               {report.verification.reason || "No detail provided by the matching engine."}
+                              {report.verification.failureCode ? (
+                                <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                  Failure code: {report.verification.failureCode}
+                                  {report.verification.engine ? ` · Engine: ${report.verification.engine}` : ""}
+                                </div>
+                              ) : report.verification.engine ? (
+                                <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                  Engine: {report.verification.engine}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
 

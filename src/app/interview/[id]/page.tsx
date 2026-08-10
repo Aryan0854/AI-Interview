@@ -8,8 +8,25 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Mic, MicOff, CheckCircle, ArrowRight, ShieldAlert, Loader2, Sparkles, Bot, Volume2, RotateCcw, ChevronDown, ChevronUp, Code2, AlertCircle, Camera, Upload, ShieldCheck } from 'lucide-react';
+import { Mic, MicOff, CheckCircle, ArrowRight, ShieldAlert, Loader2, Sparkles, Bot, Volume2, RotateCcw, ChevronDown, ChevronUp, Code2, AlertCircle, AlertTriangle, Camera, Upload, ShieldCheck } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
+import {
+  GOVERNMENT_ID_TYPES,
+  getIdTypeLabel,
+  type GovernmentIdType,
+} from '@/lib/identity-verification-shared';
+
+const CODING_LANGUAGES = [
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'python', label: 'Python' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'java', label: 'Java' },
+] as const;
+
+const LANGUAGE_LABELS: Record<string, string> = Object.fromEntries(
+  CODING_LANGUAGES.map((l) => [l.value, l.label])
+);
 
 const DEFAULT_TEMPLATES: Record<string, string> = {
   javascript: `// JavaScript Code Template\n\nfunction solution() {\n  // Write your code here\n  \n  return;\n}`,
@@ -18,6 +35,17 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   cpp: `// C++ Code Template\n#include <iostream>\nusing namespace std;\n\nvoid solution() {\n    // Write your code here\n}`,
   java: `// Java Code Template\npublic class Solution {\n    public static void solution() {\n        // Write your code here\n    }\n}`
 };
+
+/** Infer the language named in the coding challenge prompt (if any). */
+function detectChallengeTargetLanguage(question: string): string | null {
+  const q = question.toLowerCase();
+  if (/\btypescript\b/.test(q)) return 'typescript';
+  if (/\bjavascript\b/.test(q) || /\bnode\.?js\b/.test(q)) return 'javascript';
+  if (/\bpython\b/.test(q)) return 'python';
+  if (/\bc\+\+\b/.test(q) || /\bcpp\b/.test(q)) return 'cpp';
+  if (/\bjava\b/.test(q)) return 'java';
+  return null;
+}
 
 const TOTAL_SECONDS = 15 * 60;
 const COMPLETION_TEXT = "The interview has concluded. Your responses have been securely shared with the recruitment team for review. We will contact you regarding the next steps.";
@@ -81,11 +109,22 @@ export default function CandidatePortal() {
 
   // Identity Verification States
   const [showIdVerification, setShowIdVerification] = useState(false);
+  const [selectedIdType, setSelectedIdType] = useState<GovernmentIdType | ''>('');
   const [idImageBase64, setIdImageBase64] = useState<string | null>(null);
   const [selfieImageBase64, setSelfieImageBase64] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
-  const [verificationResult, setVerificationResult] = useState<{ matched: boolean; confidence: number; reason: string } | null>(null);
+  const [verificationResult, setVerificationResult] = useState<{
+    matched: boolean;
+    confidence: number;
+    reason: string;
+    selectedIdType?: string | null;
+    detectedIdType?: string | null;
+    idTypeMatched?: boolean;
+    faceMatched?: boolean;
+    failureCode?: string | null;
+    isSystemError?: boolean;
+  } | null>(null);
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -150,6 +189,7 @@ export default function CandidatePortal() {
       secondsLeft,
       warningCount,
       violations,
+      selectedIdType,
       idImageBase64,
       selfieImageBase64,
       verificationResult,
@@ -170,6 +210,7 @@ export default function CandidatePortal() {
     secondsLeft,
     warningCount,
     violations,
+    selectedIdType,
     idImageBase64,
     selfieImageBase64,
     verificationResult,
@@ -266,6 +307,7 @@ export default function CandidatePortal() {
         setViolations(saved.violations || []);
         setIdImageBase64(saved.idImageBase64);
         setSelfieImageBase64(saved.selfieImageBase64);
+        setSelectedIdType(saved.selectedIdType || '');
         setVerificationResult(saved.verificationResult);
         setHasAgreed(saved.hasAgreed);
         setSelectedLanguage(saved.selectedLanguage || 'javascript');
@@ -1007,7 +1049,36 @@ export default function CandidatePortal() {
     }
   }, [showIdVerification, idImageBase64, selfieImageBase64]);
 
-  const captureImageFromWebcam = (target: 'id' | 'selfie') => {
+  const compressImageDataUrl = async (
+    dataUrl: string,
+    maxWidth = 1280,
+    quality = 0.72
+  ): Promise<string> => {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / Math.max(img.width, 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  const captureImageFromWebcam = async (target: 'id' | 'selfie') => {
+    if (target === 'id' && !selectedIdType) {
+      setVerificationError('Select the government ID type before capturing.');
+      return;
+    }
     if (!verificationVideoRef.current) {
       console.warn("No verification video element found to capture image.");
       return;
@@ -1018,8 +1089,12 @@ export default function CandidatePortal() {
       canvas.height = verificationVideoRef.current.videoHeight || 480;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        // Mirror-corrected capture for natural orientation
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
         ctx.drawImage(verificationVideoRef.current, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
+        const raw = canvas.toDataURL('image/jpeg', 0.92);
+        const dataUrl = await compressImageDataUrl(raw);
         if (target === 'id') {
           setIdImageBase64(dataUrl);
         } else {
@@ -1033,19 +1108,33 @@ export default function CandidatePortal() {
     }
   };
 
-  const handleIdFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleIdFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!selectedIdType) {
+      setVerificationError('Select the government ID type before uploading.');
+      e.target.value = '';
+      return;
+    }
+
     if (file.size > 5 * 1024 * 1024) {
       setVerificationError("File is too large (max 5MB)");
+      e.target.value = '';
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setVerificationError('Please upload a PNG or JPG image of your ID.');
+      e.target.value = '';
       return;
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       if (event.target?.result) {
-        setIdImageBase64(event.target.result as string);
+        const compressed = await compressImageDataUrl(event.target.result as string);
+        setIdImageBase64(compressed);
         setVerificationError(null);
       }
     };
@@ -1053,6 +1142,10 @@ export default function CandidatePortal() {
   };
 
   const handleVerifyIdentity = async () => {
+    if (!selectedIdType) {
+      setVerificationError('Select the government ID type used for capture.');
+      return;
+    }
     if (!idImageBase64 || !selfieImageBase64) {
       setVerificationError("Both Government ID and Selfie snapshot are required.");
       return;
@@ -1067,7 +1160,7 @@ export default function CandidatePortal() {
       window.clearTimeout(verificationTimeoutRef.current);
     }
 
-    // Set 7-minute timeout (7 * 60 * 1000 = 420000ms)
+    // Hosted Gemini path should finish far sooner; keep a hard client ceiling.
     verificationTimeoutRef.current = window.setTimeout(() => {
       setShowManualCheckNotice(true);
       setVerificationResult({
@@ -1075,15 +1168,17 @@ export default function CandidatePortal() {
         confidence: 0,
         reason: "Timeout: Manual check will be conducted.",
         isSystemError: true
-      } as any);
+      });
       setIsVerifying(false);
-    }, 7 * 60 * 1000);
+      verificationTimeoutRef.current = null;
+    }, 2 * 60 * 1000);
 
     try {
       const res = await fetch(`/api/interview/${resumeId}/verify_id`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          idType: selectedIdType,
           idImage: idImageBase64,
           selfieImage: selfieImageBase64
         })
@@ -1094,16 +1189,14 @@ export default function CandidatePortal() {
         throw new Error(data.error || "Biometric verification failed.");
       }
 
-      // If the timeout has already triggered and handled it, do nothing
-      if (verificationTimeoutRef.current === null) return;
+      if (verificationTimeoutRef.current === null && !data.matched) return;
 
       setVerificationResult(data);
-      if (!data.matched) {
+      if (!data.matched && !data.isSystemError) {
         setVerificationError(`Verification Failed: ${data.reason}`);
       }
     } catch (err: any) {
       console.error(err);
-      // If the timeout has already triggered and handled it, do nothing
       if (verificationTimeoutRef.current === null) return;
       setVerificationError(err.message || "An unexpected error occurred during verification.");
     } finally {
@@ -2261,11 +2354,39 @@ export default function CandidatePortal() {
                 <div className="text-left">
                   <h3 className="text-sm font-black text-slate-855 dark:text-slate-200 uppercase tracking-wider mb-2">Step 1: Capture or Upload Government ID</h3>
                   <p className="text-xs text-muted-foreground leading-relaxed font-semibold">
-                    Please hold your Government ID (Driver's License, Passport, or National ID card) up to the camera or upload a scanned image file. Ensure all details are clearly legible and the face photo on the ID is fully visible.
+                    Select your ID type, then hold the physical card to the camera or upload a clear scan. The face photo on the ID must be fully visible — the system verifies both the card type and that the selfie matches the ID photo.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2 text-left">
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                    Select Government ID Type
+                  </label>
+                  <select
+                    value={selectedIdType}
+                    onChange={(e) => {
+                      setSelectedIdType(e.target.value as GovernmentIdType | '');
+                      setVerificationError(null);
+                    }}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl px-3 py-2.5 text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Choose ID type…</option>
+                    {GOVERNMENT_ID_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {verificationError && !idImageBase64 && (
+                  <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p className="text-[11px] font-semibold leading-relaxed">{verificationError}</p>
+                  </div>
+                )}
+
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${!selectedIdType ? 'opacity-50 pointer-events-none' : ''}`}>
                   {/* Webcam Snap Panel */}
                   <div className="flex flex-col gap-3">
                     <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest text-left">Camera Capture</span>
@@ -2282,6 +2403,7 @@ export default function CandidatePortal() {
                       </div>
                       <Button
                         onClick={() => captureImageFromWebcam('id')}
+                        disabled={!selectedIdType}
                         className="absolute bottom-3 bg-indigo-600/90 hover:bg-indigo-700 text-white font-bold rounded-xl px-4 py-2 gap-2 text-xs backdrop-blur-sm z-10 shadow-lg"
                       >
                         <Camera className="w-3.5 h-3.5" /> Capture ID Photo
@@ -2298,9 +2420,10 @@ export default function CandidatePortal() {
                       <span className="text-[9px] text-muted-foreground mt-1 font-semibold">Accepts PNG, JPG, JPEG (Max 5MB)</span>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/png,image/jpeg,image/jpg,image/webp"
                         onChange={handleIdFileUpload}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        disabled={!selectedIdType}
+                        className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
                       />
                     </div>
                   </div>
@@ -2354,8 +2477,10 @@ export default function CandidatePortal() {
                   <div className="flex items-center gap-3">
                     <img src={idImageBase64} className="w-14 h-10 object-cover rounded-lg border border-slate-250 dark:border-slate-700" alt="Captured ID" />
                     <div className="text-left">
-                      <span className="block text-xs font-black text-slate-800 dark:text-slate-200">Government ID Saved</span>
-                      <span className="block text-[9px] text-emerald-500 dark:text-emerald-400 font-extrabold uppercase tracking-wider mt-0.5">Ready for verification</span>
+                      <span className="block text-xs font-black text-slate-800 dark:text-slate-200">
+                        {getIdTypeLabel(selectedIdType) || 'Government ID'} Saved
+                      </span>
+                      <span className="block text-[9px] text-emerald-500 dark:text-emerald-400 font-extrabold uppercase tracking-wider mt-0.5">Ready for selfie match</span>
                     </div>
                   </div>
                   <Button
@@ -2382,9 +2507,9 @@ export default function CandidatePortal() {
                       <Loader2 className="w-14 h-14 text-primary animate-spin" />
                       <Sparkles className="w-6 h-6 text-purple-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
                     </div>
-                    <h3 className="text-lg font-black text-slate-855 dark:text-slate-100">Comparing Biometric Signatures...</h3>
+                    <h3 className="text-lg font-black text-slate-855 dark:text-slate-100">Verifying Identity…</h3>
                     <p className="text-xs text-slate-550 dark:text-slate-400 mt-2 max-w-sm font-semibold leading-relaxed">
-                      AI is evaluating facial geometry, mapping features from the ID card to the live selfie, and checking authenticity. This will take just a few seconds.
+                      Checking that the document matches the selected ID type, then matching the face on the card to your live selfie. This usually takes a few seconds.
                     </p>
                   </div>
                 )}
@@ -2498,10 +2623,15 @@ export default function CandidatePortal() {
                     <span className="text-xs bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 px-3.5 py-0.5 rounded-full font-black mt-1">
                       Biometric Match Confidence: {verificationResult.confidence}%
                     </span>
+                    {(verificationResult.selectedIdType || selectedIdType) && (
+                      <span className="text-[10px] text-slate-500 font-bold mt-2 uppercase tracking-wider">
+                        ID type confirmed: {getIdTypeLabel(verificationResult.selectedIdType || selectedIdType)}
+                      </span>
+                    )}
 
                     <div className="my-4 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-150 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-355 text-xs font-semibold leading-relaxed text-left w-full">
                       <strong className="block mb-1 text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-450">Biometric Matching Rationale:</strong>
-                      {verificationResult.reason}
+                      {verificationResult.reason || 'Your identity has been verified successfully.'}
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 my-6 w-full max-w-md">
@@ -3713,11 +3843,11 @@ export default function CandidatePortal() {
                             onChange={(e) => setSelectedLanguage(e.target.value)}
                             className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl px-2.5 py-1 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer shadow-sm animate-none"
                           >
-                            <option value="javascript">JavaScript</option>
-                            <option value="typescript">TypeScript</option>
-                            <option value="python">Python</option>
-                            <option value="cpp">C++</option>
-                            <option value="java">Java</option>
+                            {CODING_LANGUAGES.map((lang) => (
+                              <option key={lang.value} value={lang.value}>
+                                {lang.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
 
@@ -3750,7 +3880,32 @@ export default function CandidatePortal() {
                         </div>
                       </div>
 
-
+                      {(() => {
+                        const challengeTargetLanguage = detectChallengeTargetLanguage(
+                          questions[currentIndex] || ''
+                        );
+                        if (!challengeTargetLanguage || challengeTargetLanguage === selectedLanguage) {
+                          return null;
+                        }
+                        const targetLabel =
+                          LANGUAGE_LABELS[challengeTargetLanguage] || challengeTargetLanguage;
+                        const selectedLabel =
+                          LANGUAGE_LABELS[selectedLanguage] || selectedLanguage;
+                        return (
+                          <div
+                            role="alert"
+                            className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-300/80 bg-amber-50 px-3.5 py-3 text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
+                          >
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                            <p className="text-[11px] leading-relaxed font-semibold">
+                              <span className="font-black">Language Mismatch Warning: </span>
+                              This coding challenge appears to target {targetLabel}, but you have
+                              selected {selectedLabel}. The evaluation will still run in the
+                              selected language and may affect scoring.
+                            </p>
+                          </div>
+                        );
+                      })()}
 
                       {/* Editor Workspace Container */}
                       <div className="relative flex-1 flex border border-border rounded-2xl overflow-hidden bg-slate-950 text-slate-100 font-mono text-[13px] leading-relaxed min-h-[280px]">

@@ -1,13 +1,18 @@
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
+export const maxDuration = 120;
 
-import { NextRequest, NextResponse } from 'next/server';
-import { join } from 'path';
-import { writeFile, mkdir } from 'fs/promises';
-import { resumeService } from '@/services/resume-service';
-import { supabaseServer } from '@/lib/db';
-import { geminiEngine } from '@/lib/gemini-ai';
-import { auditLogService } from '@/services/audit-log-service';
-import { getClientIp } from '@/lib/security';
+import { NextRequest, NextResponse } from "next/server";
+import { join } from "path";
+import { writeFile, mkdir } from "fs/promises";
+import { resumeService } from "@/services/resume-service";
+import { supabaseServer } from "@/lib/db";
+import { auditLogService } from "@/services/audit-log-service";
+import { getClientIp } from "@/lib/security";
+import {
+  verifyCandidateIdentity,
+  isGovernmentIdType,
+  getIdTypeLabel,
+} from "@/lib/identity-verification";
 
 function getUploadsRoot() {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -26,21 +31,20 @@ async function uploadToSupabase(buffer: Buffer, filename: string, mimeType: stri
     const { data: buckets, error: listErr } = await supabaseServer.storage.listBuckets();
     if (listErr) throw listErr;
 
-    const bucketExists = buckets?.some(b => b.id === 'verifications') ?? false;
+    const bucketExists = buckets?.some((b) => b.id === "verifications") ?? false;
     if (!bucketExists) {
-      const { error: createErr } = await supabaseServer.storage.createBucket('verifications', {
-        public: true,
-        allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp']
+      const { error: createErr } = await supabaseServer.storage.createBucket("verifications", {
+        public: false,
+        allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+        fileSizeLimit: 8 * 1024 * 1024,
       });
       if (createErr) throw createErr;
     }
 
-    const { error: uploadErr } = await supabaseServer.storage
-      .from('verifications')
-      .upload(filename, buffer, {
-        contentType: mimeType,
-        upsert: true
-      });
+    const { error: uploadErr } = await supabaseServer.storage.from("verifications").upload(filename, buffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
 
     if (uploadErr) throw uploadErr;
     return true;
@@ -50,6 +54,16 @@ async function uploadToSupabase(buffer: Buffer, filename: string, mimeType: stri
   }
 }
 
+function parseBase64(base64Str: string) {
+  const match = base64Str.match(/^data:([^;]+);base64,(.+)$/);
+  if (match) {
+    return { mimeType: match[1], buffer: Buffer.from(match[2], "base64") };
+  }
+  return { mimeType: "image/jpeg", buffer: Buffer.from(base64Str, "base64") };
+}
+
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -57,80 +71,100 @@ export async function POST(
   const ip = getClientIp(request);
   try {
     const { id } = await params;
-    
-    // 1. Fetch candidate resume record
+
     const resume = await resumeService.getCachedResume(id, true);
     if (!resume) {
-      return NextResponse.json({ error: 'Resume record not found' }, { status: 404 });
+      return NextResponse.json({ error: "Resume record not found" }, { status: 404 });
     }
 
-    const { idImage, selfieImage } = await request.json();
+    const body = await request.json();
+    const { idImage, selfieImage, idType } = body || {};
+
     if (!idImage || !selfieImage) {
-      return NextResponse.json({ error: 'ID image and Selfie snapshot are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "ID image and Selfie snapshot are required" },
+        { status: 400 }
+      );
     }
 
-    // 2. Parse Base64 Image parts
-    const parseBase64 = (base64Str: string) => {
-      const match = base64Str.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        return { mimeType: match[1], buffer: Buffer.from(match[2], 'base64') };
-      }
-      return { mimeType: 'image/png', buffer: Buffer.from(base64Str, 'base64') };
-    };
+    if (!isGovernmentIdType(idType)) {
+      return NextResponse.json(
+        {
+          error:
+            "Select a valid government ID type (Aadhar Card, Driving License, PAN Card, or Voter ID).",
+          failureCode: "invalid_id_type",
+        },
+        { status: 400 }
+      );
+    }
 
     const parsedId = parseBase64(idImage);
     const parsedSelfie = parseBase64(selfieImage);
 
-    const idFilename = `${id}_id.png`;
-    const selfieFilename = `${id}_selfie.png`;
+    if (parsedId.buffer.length > MAX_IMAGE_BYTES || parsedSelfie.buffer.length > MAX_IMAGE_BYTES) {
+      return NextResponse.json(
+        { error: "Image too large. Please recapture or upload a smaller file (max ~5MB)." },
+        { status: 413 }
+      );
+    }
 
-    // 3. Save files (Supabase Storage with Local Fallback)
+    if (parsedId.buffer.length < 2_000 || parsedSelfie.buffer.length < 2_000) {
+      return NextResponse.json(
+        { error: "Image appears empty or corrupted. Please recapture and try again." },
+        { status: 400 }
+      );
+    }
+
+    const idFilename = `${id}_id.jpg`;
+    const selfieFilename = `${id}_selfie.jpg`;
+
     const uploadedId = await uploadToSupabase(parsedId.buffer, idFilename, parsedId.mimeType);
     if (!uploadedId) {
       await saveFileLocally(parsedId.buffer, idFilename);
     }
 
-    const uploadedSelfie = await uploadToSupabase(parsedSelfie.buffer, selfieFilename, parsedSelfie.mimeType);
+    const uploadedSelfie = await uploadToSupabase(
+      parsedSelfie.buffer,
+      selfieFilename,
+      parsedSelfie.mimeType
+    );
     if (!uploadedSelfie) {
       await saveFileLocally(parsedSelfie.buffer, selfieFilename);
     }
 
-    // 4. Perform Biometric Comparison using local Faceproj script
-    let matchResult;
-    let isSystemError = false;
-    try {
-      matchResult = await geminiEngine.verifyFaceMatch(
-        idImage,
-        parsedId.mimeType,
-        selfieImage,
-        parsedSelfie.mimeType
-      );
-    } catch (aiErr: any) {
-      console.error("Local face verification error:", aiErr);
-      isSystemError = true;
-      matchResult = {
-        matched: false,
-        confidence: 0,
-        reason: `Local biometric matching engine encountered an error. Images have been saved for manual audit.`
-      };
-    }
+    const matchResult = await verifyCandidateIdentity({
+      idImageBase64: idImage,
+      selfieImageBase64: selfieImage,
+      selectedIdType: idType,
+    });
 
-    // 5. Persist verification details in resume report
+    const isSystemError = Boolean(matchResult.isSystemError);
+
     resume.report = {
       ...(resume.report || {}),
       verification: {
-        status: isSystemError ? "system_error" : (matchResult.matched ? "verified" : "failed"),
+        status: isSystemError
+          ? "system_error"
+          : matchResult.matched
+            ? "verified"
+            : "failed",
         matched: matchResult.matched,
         confidence: matchResult.confidence,
         reason: matchResult.reason,
+        selectedIdType: matchResult.selectedIdType,
+        detectedIdType: matchResult.detectedIdType,
+        idTypeMatched: matchResult.idTypeMatched,
+        faceMatched: matchResult.faceMatched,
+        failureCode: matchResult.failureCode || null,
+        engine: matchResult.engine,
         verifiedAt: new Date().toISOString(),
         idImageUrl: `/api/interview/${id}/verification/id`,
         selfieImageUrl: `/api/interview/${id}/verification/selfie`,
-        systemError: isSystemError
-      }
+        systemError: isSystemError,
+      },
     } as any;
 
-    const { error: dbError } = await supabaseServer.from('resumes').upsert({
+    const { error: dbError } = await supabaseServer.from("resumes").upsert({
       id: resume.id,
       filename: resume.filename,
       text_content: resume.originalText,
@@ -138,7 +172,7 @@ export async function POST(
       analysis: JSON.stringify(resume.analysis),
       enhanced: JSON.stringify(resume.enhanced),
       report: JSON.stringify(resume.report),
-      error: resume.error || null
+      error: resume.error || null,
     });
 
     if (dbError) {
@@ -146,17 +180,18 @@ export async function POST(
       throw new Error(`Database Error: ${dbError.message}`);
     }
 
-    // 6. Log event in Audit Log
     await auditLogService.addLog({
       actorEmail: resume.parsed?.personal?.email || `candidate_${id}`,
-      action: isSystemError 
+      action: isSystemError
         ? "CANDIDATE_IDENTITY_SYSTEM_ERROR"
-        : (matchResult.matched ? "CANDIDATE_IDENTITY_VERIFIED" : "CANDIDATE_IDENTITY_FAILED"),
+        : matchResult.matched
+          ? "CANDIDATE_IDENTITY_VERIFIED"
+          : "CANDIDATE_IDENTITY_FAILED",
       target: id,
-      details: isSystemError 
-        ? `Biometric service unavailable. ID and Selfie saved for manual review.`
-        : `Confidence: ${matchResult.confidence}%. Rationale: ${matchResult.reason}`,
-      ipAddress: ip
+      details: isSystemError
+        ? `Biometric service unavailable. ID (${getIdTypeLabel(idType)}) and Selfie saved for manual review.`
+        : `Type=${idType} detected=${matchResult.detectedIdType} typeOk=${matchResult.idTypeMatched} faceOk=${matchResult.faceMatched} confidence=${matchResult.confidence}% engine=${matchResult.engine}. ${matchResult.reason}`,
+      ipAddress: ip,
     });
 
     return NextResponse.json({
@@ -164,10 +199,19 @@ export async function POST(
       matched: matchResult.matched,
       confidence: matchResult.confidence,
       reason: matchResult.reason,
-      isSystemError: isSystemError
+      selectedIdType: matchResult.selectedIdType,
+      detectedIdType: matchResult.detectedIdType,
+      idTypeMatched: matchResult.idTypeMatched,
+      faceMatched: matchResult.faceMatched,
+      failureCode: matchResult.failureCode || null,
+      engine: matchResult.engine,
+      isSystemError,
     });
   } catch (error: any) {
-    console.error('ID verification API error:', error);
-    return NextResponse.json({ error: error.message || 'Verification processing failed' }, { status: 500 });
+    console.error("ID verification API error:", error);
+    return NextResponse.json(
+      { error: error.message || "Verification processing failed" },
+      { status: 500 }
+    );
   }
 }
