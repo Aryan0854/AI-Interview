@@ -1273,7 +1273,7 @@ export default function AdminDashboard() {
       const [resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] = await Promise.all([
         withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 20000, "resumes"),
         withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
-        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`), 60000, "employees"),
+        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1`), 60000, "employees"),
         withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
         withTimeout(fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`), 15000, "logs"),
         withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),

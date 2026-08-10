@@ -175,65 +175,125 @@ export async function GET(request: NextRequest) {
     }
   };
 
+  const resolveEmployeeCode = (code: unknown, name: unknown): string | null => {
+    const fromCode = String(code ?? "").trim();
+    if (fromCode) return fromCode;
+    // Some completed rows store the numeric emp id in employee_name when employee_code is null.
+    const fromName = String(name ?? "").trim();
+    if (/^\d{4,}$/.test(fromName)) return fromName;
+    return null;
+  };
+
+  const pushResultRow = (row: {
+    id: string;
+    employeeUuid: string | null;
+    employeeId: string;
+    employeeName: string;
+    topicId: string | null;
+    topicTitle: string;
+    subjectId: string | null;
+    subjectTitle: string;
+    difficulty: string;
+    totalQuestions: number;
+    status: string;
+    answeredCount: number;
+    correctCount: number;
+    score: number;
+    scorePercent: number;
+    videoUrl: string | null;
+    proctoring: ReturnType<typeof normalizeProctoring>;
+    startedAt: string | null;
+    completedAt: string | null;
+  }) => {
+    allTestResults.push(row);
+    const list = testResultsMap.get(row.employeeId) || [];
+    list.push({
+      status: row.status,
+      score: row.scorePercent,
+      completedAt: row.completedAt,
+    });
+    testResultsMap.set(row.employeeId, list);
+  };
+
+  const loadFromTestsTable = async () => {
+    const { data: dbTests, error: dbTestsError } = await supabase.from("tests").select("*");
+    if (dbTestsError) throw dbTestsError;
+
+    const { data: employeeRows } = await supabase
+      .from("employees")
+      .select("id, employee_id, full_name");
+    const employeeUuidMap = new Map<string, { employee_id: string; full_name: string }>();
+    (employeeRows ?? []).forEach((row) => {
+      if (row.id) employeeUuidMap.set(row.id, row);
+    });
+
+    (dbTests ?? []).forEach((test) => {
+      const linked = employeeUuidMap.get(String(test.employee_id ?? ""));
+      const empId = resolveEmployeeCode(
+        (test as any).employee_code || linked?.employee_id,
+        linked?.full_name
+      );
+      if (!empId) return;
+
+      const totalQs = (test as any).score_total ?? test.total_questions ?? 25;
+      const score = (test as any).score_correct ?? (test as any).answers_correct ?? 0;
+      const scorePercent =
+        (test as any).score_percent ??
+        (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
+
+      pushResultRow({
+        id: test.id,
+        employeeUuid: test.employee_id,
+        employeeId: empId,
+        employeeName: linked?.full_name || empId,
+        topicId: test.topic_id,
+        topicTitle: (test as any).topic_title || "Unknown Topic",
+        subjectId: test.subject_id,
+        subjectTitle: (test as any).subject_title || "Unknown Subject",
+        difficulty: test.difficulty,
+        totalQuestions: totalQs,
+        status: test.status,
+        answeredCount: 0,
+        correctCount: score,
+        score,
+        scorePercent,
+        videoUrl: (test as any).session_recording_url || null,
+        proctoring: normalizeProctoring((test as any).proctoring),
+        startedAt: test.started_at,
+        completedAt: test.completed_at,
+      });
+    });
+  };
+
   const loadSupabaseResults = async () => {
   try {
-    const { data: viewRows, error: viewError } = await supabase
-      .from("employee_test_results")
-      .select("*");
+    // Paginate — default PostgREST page size can truncate large result sets.
+    const pageSize = 1000;
+    let from = 0;
+    const viewRows: any[] = [];
+    let viewError: { message?: string } | null = null;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("employee_test_results")
+        .select("*")
+        .range(from, from + pageSize - 1);
+      if (error) {
+        viewError = error;
+        break;
+      }
+      if (!data?.length) break;
+      viewRows.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
 
     if (viewError) {
       // View may not exist on older schemas — fall back to tests table
-      const { data: dbTests, error: dbTestsError } = await supabase.from("tests").select("*");
-      if (dbTestsError) throw dbTestsError;
-
-      const { data: employeeRows } = await supabase
-        .from("employees")
-        .select("id, employee_id, full_name");
-      const employeeUuidMap = new Map<string, { employee_id: string; full_name: string }>();
-      (employeeRows ?? []).forEach((row) => {
-        if (row.id) employeeUuidMap.set(row.id, row);
-      });
-
-      (dbTests ?? []).forEach((test) => {
-        const linked = employeeUuidMap.get(String(test.employee_id ?? ""));
-        const empId = (test as any).employee_code || linked?.employee_id;
-        if (!empId) return;
-
-        const totalQs = (test as any).score_total ?? test.total_questions ?? 25;
-        const score = (test as any).score_correct ?? (test as any).answers_correct ?? 0;
-        const scorePercent =
-          (test as any).score_percent ??
-          (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
-
-        allTestResults.push({
-          id: test.id,
-          employeeUuid: test.employee_id,
-          employeeId: empId,
-          employeeName: linked?.full_name || empId,
-          topicId: test.topic_id,
-          topicTitle: (test as any).topic_title || "Unknown Topic",
-          subjectId: test.subject_id,
-          subjectTitle: (test as any).subject_title || "Unknown Subject",
-          difficulty: test.difficulty,
-          totalQuestions: totalQs,
-          status: test.status,
-          answeredCount: 0,
-          correctCount: score,
-          score,
-          scorePercent,
-          videoUrl: (test as any).session_recording_url || null,
-          proctoring: normalizeProctoring((test as any).proctoring),
-          startedAt: test.started_at,
-          completedAt: test.completed_at,
-        });
-
-        const list = testResultsMap.get(empId) || [];
-        list.push({ status: test.status, score: scorePercent, completedAt: test.completed_at });
-        testResultsMap.set(empId, list);
-      });
+      await loadFromTestsTable();
     } else {
-      (viewRows ?? []).forEach((row: any) => {
-        const empId = row.employee_code;
+      viewRows.forEach((row: any) => {
+        const empId = resolveEmployeeCode(row.employee_code, row.employee_name);
         if (!empId) return;
 
         const totalQs = row.score_total ?? row.total_questions ?? 25;
@@ -242,7 +302,7 @@ export async function GET(request: NextRequest) {
           row.score_percent ??
           (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
 
-        allTestResults.push({
+        pushResultRow({
           id: row.test_id,
           employeeUuid: null,
           employeeId: empId,
@@ -263,11 +323,12 @@ export async function GET(request: NextRequest) {
           startedAt: row.started_at,
           completedAt: row.completed_at,
         });
-
-        const list = testResultsMap.get(empId) || [];
-        list.push({ status: row.status, score: scorePercent, completedAt: row.completed_at });
-        testResultsMap.set(empId, list);
       });
+
+      // View returned rows we couldn't map (null employee_code) or was empty — use tests table.
+      if (allTestResults.length === 0) {
+        await loadFromTestsTable();
+      }
     }
   } catch (err) {
     console.error("Failed to fetch test results from Supabase:", err);
@@ -282,7 +343,7 @@ export async function GET(request: NextRequest) {
     await Promise.race([
       loadSupabaseResults(),
       new Promise<void>((_, reject) =>
-        setTimeout(() => reject(new Error("supabase_results_timeout")), 25_000)
+        setTimeout(() => reject(new Error("supabase_results_timeout")), 50_000)
       ),
     ]);
   } catch (err) {
@@ -323,18 +384,21 @@ export async function GET(request: NextRequest) {
 
         const existingIdx = resultIndexById.get(test.id);
         if (existingIdx !== undefined) {
+          const existing = allTestResults[existingIdx];
+          // Never downgrade a completed Supabase result to a stale local pending row.
+          const keepCompleted =
+            existing.status === "completed" && test.status !== "completed";
           allTestResults[existingIdx] = {
-            ...allTestResults[existingIdx],
-            status: test.status,
-            answeredCount,
-            correctCount,
-            score,
-            scorePercent,
-            // Local row is authoritative — do not keep a stale Supabase video URL.
-            videoUrl: test.session_recording_url || null,
-            proctoring: normalizeProctoring(test.proctoring),
-            startedAt: test.started_at,
-            completedAt: test.completed_at,
+            ...existing,
+            status: keepCompleted ? existing.status : test.status,
+            answeredCount: keepCompleted ? existing.answeredCount : answeredCount,
+            correctCount: keepCompleted ? existing.correctCount : correctCount,
+            score: keepCompleted ? existing.score : score,
+            scorePercent: keepCompleted ? existing.scorePercent : scorePercent,
+            videoUrl: test.session_recording_url || existing.videoUrl || null,
+            proctoring: normalizeProctoring(test.proctoring ?? existing.proctoring),
+            startedAt: keepCompleted ? existing.startedAt : test.started_at,
+            completedAt: keepCompleted ? existing.completedAt : test.completed_at,
           };
         } else {
           const matchingEmp = employeesById.get(String(empId).trim().toUpperCase());

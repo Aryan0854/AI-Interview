@@ -10,9 +10,13 @@ if (!supabaseUrl || !supabaseAnonKey || !supabaseUrl.startsWith('http')) {
 
 const validUrl = supabaseUrl.startsWith('http') ? supabaseUrl : 'https://placeholder.supabase.co';
 
+// Portal roster + test-results loads can exceed 15s on Vercel cold starts.
+// Aborting early left allTestResults empty and every employee looked "Not Started".
+const SUPABASE_FETCH_TIMEOUT_MS = 45_000;
+
 const timeoutFetch = (url: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), SUPABASE_FETCH_TIMEOUT_MS);
   return fetch(url, {
     ...options,
     signal: controller.signal,
