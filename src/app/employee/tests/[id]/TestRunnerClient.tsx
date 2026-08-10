@@ -199,6 +199,23 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           const lastIdx = Math.max(...Object.keys(saved).map(Number), 0) + 1;
           setCurrentIdx(Math.min(lastIdx, (questionsData ?? []).length - 1));
         }
+
+        if (testData.status === "completed") {
+          const total = testData.total_questions ?? questionsData?.length ?? 25;
+          const correct = testData.score_correct ?? 0;
+          const accuracy =
+            testData.score_percent ??
+            (total > 0 ? Math.round((correct / total) * 100) : 0);
+          setSubmitted({
+            correct,
+            total,
+            accuracy_pct: accuracy,
+            topic_title: testData.topic_title ?? "",
+          });
+          setPhase("submitted");
+          return;
+        }
+
         setPhase("ready");
       } catch (e: any) {
         if (!cancelled) {
@@ -533,6 +550,22 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       }
 
       const res = await r.json();
+      if (res.alreadyCompleted) {
+        setSubmitted({
+          correct: res.correct ?? 0,
+          total: res.total ?? questions?.length ?? 25,
+          accuracy_pct: res.accuracy ?? 0,
+          topic_title: (test as any)?.topic_title ?? "",
+        });
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        setPhase("submitted");
+        setMsg(null);
+        setVideoUploadState("done");
+        submittingRef.current = false;
+        return;
+      }
       setSubmitted({
         correct: res.correct,
         total: res.total,

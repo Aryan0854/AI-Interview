@@ -42,7 +42,20 @@ export async function POST(
     const localTest = owned.test;
 
     if (localTest.status === "completed") {
-      return NextResponse.json({ error: "Test already submitted." }, { status: 409 });
+      const totalQuestions = localTest.total_questions ?? 25;
+      const correct = localTest.score_correct ?? 0;
+      const accuracy =
+        localTest.score_percent ??
+        (totalQuestions > 0 ? round((correct / totalQuestions) * 100) : 0);
+      return NextResponse.json({
+        success: true,
+        alreadyCompleted: true,
+        testId: id,
+        total: totalQuestions,
+        correct,
+        accuracy,
+        ai_analysis: localTest.ai_analysis ?? null,
+      });
     }
 
     const submitCheck = canSubmitTest(localTest);
