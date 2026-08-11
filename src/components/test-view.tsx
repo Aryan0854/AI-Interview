@@ -71,8 +71,7 @@ function ResultsView(props: {
       )}
       {videoUploadState === "failed" && (
         <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/20 p-4 text-sm text-amber-900 dark:text-amber-200">
-          Proctoring video could not be saved. Your score is already recorded — use{" "}
-          <strong>Upload Proctoring Video</strong> on your dashboard to add it without retaking the test.
+          Proctoring video could not be saved. Your score is already recorded.
         </div>
       )}
 

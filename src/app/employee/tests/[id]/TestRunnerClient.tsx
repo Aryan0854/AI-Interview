@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ResultsView, ConfirmModal } from "@/components/test-view";
 import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw,
   Loader2, AlertTriangle } from "lucide-react";
@@ -16,7 +16,6 @@ import {
   uploadProctoringBlob,
   uploadProctoringProgress,
 } from "@/lib/proctoring-recorder-client";
-import VideoCatchupClient from "./VideoCatchupClient";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,12 +71,6 @@ function DifficultyBadge({ d }: { d: string }) {
 
 export default function TestRunnerClient({ testId }: { testId: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const uploadVideoOnly = searchParams.get("uploadVideo") === "1";
-
-  if (uploadVideoOnly) {
-    return <VideoCatchupClient testId={testId} />;
-  }
 
   // ── state ──────────────────────────────────────────────────────
   type Phase = "loading" | "ready" | "running" | "submitting" | "retake-confirm" | "submitted" | "error";

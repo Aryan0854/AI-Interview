@@ -344,32 +344,16 @@ export function DashboardInner() {
                     : ""}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {completedAssessment.recording_missing
-                    ? "Your score is saved, but the proctoring video is missing. Please upload it below."
-                    : "Contact your administrator if you need to retake this assessment."}
+                  Contact your administrator if you need to retake this assessment.
                 </p>
               </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                {completedAssessment.recording_missing && (
-                  <Button
-                    className="rounded-xl"
-                    onClick={() =>
-                      router.push(
-                        `/employee/tests/${completedAssessment.test_id}?uploadVideo=1`
-                      )
-                    }
-                  >
-                    Upload Proctoring Video
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={() => router.push(`/employee/tests/${completedAssessment.test_id}`)}
-                >
-                  Review Results
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => router.push(`/employee/tests/${completedAssessment.test_id}`)}
+              >
+                Review Results
+              </Button>
             </div>
           </Card>
         )}
