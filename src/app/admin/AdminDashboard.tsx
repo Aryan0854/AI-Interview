@@ -432,6 +432,7 @@ export default function AdminDashboard() {
   const [selectedResumeIds, setSelectedResumeIds] = useState<string[]>([]);
   const [selectedEmailIds, setSelectedEmailIds] = useState<string[]>([]);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [selectedPortalEmployeeIds, setSelectedPortalEmployeeIds] = useState<string[]>([]);
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(false);
@@ -911,6 +912,44 @@ export default function AdminDashboard() {
       );
     });
   }, [resourcePortalEmployees, testResultsSearch, testStatusFilter]);
+
+  const selectedPortalVideoTargets = useMemo(() => {
+    return selectedPortalEmployeeIds
+      .map((id) => {
+        const account = resourcePortalEmployees.find((entry) => entry.employee_id === id);
+        if (!account) return null;
+        const videoTest = portalVideoTest(account);
+        return videoTest?.hasVideo
+          ? { employeeId: id, testId: videoTest.testId }
+          : null;
+      })
+      .filter(Boolean) as Array<{ employeeId: string; testId: string }>;
+  }, [selectedPortalEmployeeIds, resourcePortalEmployees]);
+
+  const handleTogglePortalEmployeeSelect = (id: string) => {
+    setSelectedPortalEmployeeIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleAllPortalEmployees = () => {
+    const currentListIds = filteredPortalEmployees.map((account) => account.employee_id);
+    const allSelected =
+      currentListIds.length > 0 &&
+      currentListIds.every((id) => selectedPortalEmployeeIds.includes(id));
+    if (allSelected) {
+      setSelectedPortalEmployeeIds((prev) => prev.filter((id) => !currentListIds.includes(id)));
+    } else {
+      setSelectedPortalEmployeeIds((prev) => Array.from(new Set([...prev, ...currentListIds])));
+    }
+  };
+
+  const handleBulkDeletePortalVideos = () => {
+    if (selectedPortalVideoTargets.length === 0) return;
+    setDeleteTargetId("bulk-portal-videos");
+    setDeletePasswordInput("");
+    setDeleteModalError(null);
+  };
 
   const portalDashboardStats = useMemo(() => {
     const scored = resourcePortalEmployees.filter((e) => e.score !== null && e.score !== undefined);
@@ -2431,6 +2470,42 @@ export default function AdminDashboard() {
       return;
     }
 
+    if (targetId === "bulk-portal-videos") {
+      setActionLoading("bulk-portal-videos");
+      setActionError(null);
+      try {
+        const response = await fetch("/api/admin/employees/delete-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: selectedPortalVideoTargets }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to delete proctoring videos");
+
+        const deletedCount = data.deletedCount ?? selectedPortalVideoTargets.length;
+        const skippedCount = data.skippedCount ?? 0;
+        setActionSuccess(
+          skippedCount > 0
+            ? `${deletedCount} proctoring video(s) deleted. ${skippedCount} skipped (no recording or not found).`
+            : `${deletedCount} proctoring video(s) deleted successfully. Scores and test status unchanged.`
+        );
+        setSelectedPortalEmployeeIds([]);
+        setTimeout(() => setActionSuccess(null), 4000);
+        if (videoPreview?.testId && selectedPortalVideoTargets.some((item) => item.testId === videoPreview.testId)) {
+          if (videoPreview.url?.startsWith("blob:")) {
+            URL.revokeObjectURL(videoPreview.url);
+          }
+          setVideoPreview(null);
+        }
+        await loadEmployees({ fresh: true });
+      } catch (error: any) {
+        setActionError(error.message || "Failed to delete proctoring videos.");
+      } finally {
+        setActionLoading(null);
+      }
+      return;
+    }
+
     if (targetId === "clear-outbox") {
       setIsEmailsLoading(true);
       setActionError(null);
@@ -3741,11 +3816,57 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
+                    {selectedPortalEmployeeIds.length > 0 && (
+                      <div className="flex items-center justify-between p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
+                        <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                          {selectedPortalEmployeeIds.length} employee
+                          {selectedPortalEmployeeIds.length > 1 ? "s" : ""} selected
+                          {selectedPortalVideoTargets.length > 0
+                            ? ` · ${selectedPortalVideoTargets.length} with recording`
+                            : " · none with a recording to delete"}
+                        </span>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={
+                            actionLoading === "bulk-portal-videos" ||
+                            selectedPortalVideoTargets.length === 0
+                          }
+                          onClick={handleBulkDeletePortalVideos}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-500/25"
+                        >
+                          {actionLoading === "bulk-portal-videos" ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-3.5 h-3.5" /> Delete Selected Videos
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+
                     <div className="border border-border rounded-2xl overflow-hidden">
                       <div className="overflow-auto max-h-[600px]">
-                        <table className="w-full text-left border-collapse text-xs min-w-[1400px]">
+                        <table className="w-full text-left border-collapse text-xs min-w-[1430px]">
                           <thead>
                             <tr className="bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-border text-slate-500 font-extrabold uppercase tracking-wider text-[10px] sticky top-0 z-10">
+                              <th className="p-3 w-10 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    filteredPortalEmployees.length > 0 &&
+                                    filteredPortalEmployees.every((account) =>
+                                      selectedPortalEmployeeIds.includes(account.employee_id)
+                                    )
+                                  }
+                                  onChange={handleToggleAllPortalEmployees}
+                                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                  aria-label="Select all employees in portal table"
+                                />
+                              </th>
                               <th className="p-3 w-10"></th>
                               <th className="p-3">Employee Name</th>
                               <th className="p-3">Employee ID</th>
@@ -3772,8 +3893,21 @@ export default function AdminDashboard() {
                                 return (
                                   <React.Fragment key={account.employee_id}>
                                     <tr
-                                      className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150"
+                                      className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150 ${
+                                        selectedPortalEmployeeIds.includes(account.employee_id)
+                                          ? "bg-indigo-50/20 dark:bg-indigo-950/20"
+                                          : ""
+                                      }`}
                                     >
+                                      <td className="p-3 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedPortalEmployeeIds.includes(account.employee_id)}
+                                          onChange={() => handleTogglePortalEmployeeSelect(account.employee_id)}
+                                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                          aria-label={`Select ${portalEmployeeName(account)}`}
+                                        />
+                                      </td>
                                       <td className="p-3 text-center">
                                         <button
                                           className="text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors duration-150"
@@ -3968,7 +4102,7 @@ export default function AdminDashboard() {
                                     </tr>
                                     {isExpanded && (
                                       <tr className="bg-slate-50/40 dark:bg-slate-900/10">
-                                        <td colSpan={14} className="p-4 border-t border-b border-border/50">
+                                        <td colSpan={15} className="p-4 border-t border-b border-border/50">
                                           <div className="pl-6 space-y-4">
                                             {account.remarks && (
                                               <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
@@ -4231,7 +4365,7 @@ export default function AdminDashboard() {
                               })}
                             {filteredPortalEmployees.length === 0 && (
                               <tr>
-                                <td colSpan={14} className="text-center py-12 text-slate-400 italic">
+                                <td colSpan={15} className="text-center py-12 text-slate-400 italic">
                                   {resourcePortalEmployees.length === 0
                                     ? "No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root."
                                     : "No employees match the current search or test status filter."}
@@ -5340,6 +5474,7 @@ export default function AdminDashboard() {
                   {deleteTargetId === "bulk" ? "Delete Selected Records" : 
                    deleteTargetId === "bulk-emails" ? "Delete Selected Email Logs" :
                    deleteTargetId === "bulk-employees-pool" ? "Delete Selected Employees" :
+                   deleteTargetId === "bulk-portal-videos" ? "Delete Selected Proctoring Videos" :
                    deleteTargetId === "clear-outbox" ? "Clear Email Outbox" :
                    deleteTargetId.startsWith("email-") ? "Delete Email Log" : 
                    deleteTargetId.startsWith("emp-") ? "Delete Employee Record" : "Delete Candidate Record"}
@@ -5362,6 +5497,8 @@ export default function AdminDashboard() {
                   ? `This action is permanent and will delete the ${selectedEmailIds.length} selected simulated invitation email outbox logs.`
                   : deleteTargetId === "bulk-employees-pool"
                   ? `This action is permanent and will delete the ${selectedEmployeeIds.length} selected corporate pool employee records.`
+                  : deleteTargetId === "bulk-portal-videos"
+                  ? `This will permanently delete proctoring videos for ${selectedPortalVideoTargets.length} selected employee(s). Test scores, answers, and status will NOT be changed.`
                   : deleteTargetId === "clear-outbox"
                   ? "This action is permanent and will clear all simulated invitation email logs from the outbox."
                   : deleteTargetId.startsWith("email-")
