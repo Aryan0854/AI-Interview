@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import "plyr/dist/plyr.css";
 
 export type PlyrCaptionTrack = {
   src: string;
@@ -102,7 +101,7 @@ export default function PlyrVideoPlayer({
         resetOnEnd: false,
         autoplay: autoPlay,
         clickToPlay: true,
-        loadSprite: false,
+        iconUrl: "/plyr.svg",
         invertTime: false,
         toggleInvert: false,
         i18n: {

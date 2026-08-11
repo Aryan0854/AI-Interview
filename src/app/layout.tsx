@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import "plyr/dist/plyr.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import Script from "next/script";
 

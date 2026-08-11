@@ -57,8 +57,10 @@ import {
   type PortalTestStatusFilter,
   formatPortalScore,
   portalScorePercent,
+  portalScoreColorClass,
 } from "@/lib/portal-test-status";
 import { formatProductDisplayName } from "@/lib/product-display-name";
+import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
 
 function formatSyncAge(date: Date): string {
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -401,6 +403,7 @@ export default function AdminDashboard() {
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [testStatusFilter, setTestStatusFilter] = useState<PortalTestStatusFilter>("all");
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
+  const [expandedProctorFlags, setExpandedProctorFlags] = useState<Record<string, boolean>>({});
   const [testAttemptDetails, setTestAttemptDetails] = useState<
     Record<
       string,
@@ -3740,7 +3743,7 @@ export default function AdminDashboard() {
 
                     <div className="border border-border rounded-2xl overflow-hidden">
                       <div className="overflow-auto max-h-[600px]">
-                        <table className="w-full text-left border-collapse text-xs min-w-[1320px]">
+                        <table className="w-full text-left border-collapse text-xs min-w-[1400px]">
                           <thead>
                             <tr className="bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-border text-slate-500 font-extrabold uppercase tracking-wider text-[10px] sticky top-0 z-10">
                               <th className="p-3 w-10"></th>
@@ -3755,6 +3758,7 @@ export default function AdminDashboard() {
                               <th className="p-3">Test Status</th>
                               <th className="p-3">Completed On</th>
                               <th className="p-3">Score</th>
+                              <th className="p-3">Proctor Flags</th>
                               <th className="p-3">Actions</th>
                             </tr>
                           </thead>
@@ -3813,15 +3817,50 @@ export default function AdminDashboard() {
                                       <td className="p-3">
                                         <span className={`font-black text-sm ${
                                           account.score !== null
-                                            ? (portalScorePercent(account.score, account.score_max ?? 25) >= 70
-                                              ? "text-emerald-600 dark:text-emerald-400"
-                                              : (portalScorePercent(account.score, account.score_max ?? 25) >= 40
-                                                ? "text-amber-500"
-                                                : "text-rose-500"))
+                                            ? portalScoreColorClass(
+                                                portalScorePercent(account.score, account.score_max ?? 25)
+                                              )
                                             : "text-slate-400"
                                         }`}>
                                           {formatPortalScore(account.score, account.score_max ?? 25)}
                                         </span>
+                                      </td>
+                                      <td className="p-3">
+                                        {(() => {
+                                          const proctorInfo = getPortalPrimaryProctoring(account);
+                                          if (!proctorInfo) return <span className="text-slate-400">—</span>;
+                                          const showDetails = !!expandedProctorFlags[account.employee_id];
+                                          return (
+                                            <div className="flex flex-col gap-0.5">
+                                              <div className="flex items-center gap-1.5">
+                                                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                                  {proctorInfo.flagCount} flag{proctorInfo.flagCount !== 1 ? "s" : ""}
+                                                </span>
+                                                {proctorInfo.violations.length > 0 ? (
+                                                  <button
+                                                    type="button"
+                                                    className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 underline"
+                                                    onClick={() =>
+                                                      setExpandedProctorFlags((prev) => ({
+                                                        ...prev,
+                                                        [account.employee_id]: !prev[account.employee_id],
+                                                      }))
+                                                    }
+                                                  >
+                                                    {showDetails ? "Hide" : "View"}
+                                                  </button>
+                                                ) : null}
+                                              </div>
+                                              {showDetails && proctorInfo.violations.length > 0 ? (
+                                                <ul className="text-[9px] text-slate-500 dark:text-slate-400 max-w-[220px] list-disc list-inside leading-relaxed">
+                                                  {proctorInfo.violations.map((v, idx) => (
+                                                    <li key={`${v.type}-${v.timestamp ?? idx}`}>{v.type}</li>
+                                                  ))}
+                                                </ul>
+                                              ) : null}
+                                            </div>
+                                          );
+                                        })()}
                                       </td>
                                       <td className="p-3">
                                         <div className="flex flex-wrap items-center gap-1.5">
@@ -3929,7 +3968,7 @@ export default function AdminDashboard() {
                                     </tr>
                                     {isExpanded && (
                                       <tr className="bg-slate-50/40 dark:bg-slate-900/10">
-                                        <td colSpan={13} className="p-4 border-t border-b border-border/50">
+                                        <td colSpan={14} className="p-4 border-t border-b border-border/50">
                                           <div className="pl-6 space-y-4">
                                             {account.remarks && (
                                               <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
@@ -4059,7 +4098,7 @@ export default function AdminDashboard() {
                                                         <td className="p-2.5 capitalize text-slate-600 dark:text-slate-400 font-medium">{test.difficulty}</td>
                                                         <td className="p-2.5 text-slate-500 font-medium">{test.totalQuestions} Qs</td>
                                                         <td className="p-2.5">
-                                                          <span className={`font-black ${portalScorePercent(test.score, test.scoreMax ?? 25) >= 70 ? "text-emerald-600" : (portalScorePercent(test.score, test.scoreMax ?? 25) >= 40 ? "text-amber-500" : "text-rose-500")}`}>
+                                                          <span className={`font-black ${portalScoreColorClass(portalScorePercent(test.score, test.scoreMax ?? 25))}`}>
                                                             {test.status === "completed"
                                                               ? formatPortalScore(test.score, test.scoreMax ?? 25)
                                                               : "—"}
@@ -4192,7 +4231,7 @@ export default function AdminDashboard() {
                               })}
                             {filteredPortalEmployees.length === 0 && (
                               <tr>
-                                <td colSpan={13} className="text-center py-12 text-slate-400 italic">
+                                <td colSpan={14} className="text-center py-12 text-slate-400 italic">
                                   {resourcePortalEmployees.length === 0
                                     ? "No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root."
                                     : "No employees match the current search or test status filter."}
