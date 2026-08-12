@@ -25,11 +25,19 @@ const validUrl = supabaseUrl.startsWith('http') ? supabaseUrl : 'https://placeho
 
 // Portal roster + test-results loads can exceed 15s on Vercel cold starts.
 // Aborting early left allTestResults empty and every employee looked "Not Started".
-const SUPABASE_FETCH_TIMEOUT_MS = 45_000;
+const SUPABASE_FETCH_TIMEOUT_MS = process.env.VERCEL === "1" ? 55_000 : 45_000;
 
 const timeoutFetch = (url: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SUPABASE_FETCH_TIMEOUT_MS);
+  const parentSignal = options?.signal;
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      controller.abort();
+    } else {
+      parentSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
   return fetch(url, {
     ...options,
     signal: controller.signal,

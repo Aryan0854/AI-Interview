@@ -103,6 +103,28 @@ function formatPortalCompletedAt(value: string | null | undefined): string {
   return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** Local calendar day key (YYYY-MM-DD) for Completed On filtering. */
+function portalCompletedDayKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** Display like "Aug 12, 2026" from a YYYY-MM-DD key. */
+function formatPortalCompletedDayLabel(dayKey: string): string {
+  const date = new Date(`${dayKey}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return dayKey;
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function portalVideoTest(account: {
   test_id?: string | null;
   test_status?: string | null;
@@ -403,6 +425,7 @@ export default function AdminDashboard() {
   } | null>(null);
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [testStatusFilter, setTestStatusFilter] = useState<PortalTestStatusFilter>("all");
+  const [portalCompletedDateFilter, setPortalCompletedDateFilter] = useState<string>("all");
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
   const [expandedProctorFlags, setExpandedProctorFlags] = useState<Record<string, boolean>>({});
   const [testAttemptDetails, setTestAttemptDetails] = useState<
@@ -887,11 +910,24 @@ export default function AdminDashboard() {
   const isEmployeeDataPending =
     loading || isEmployeesLoading || refreshingType === "employees";
 
+  const portalCompletedDateOptions = useMemo(() => {
+    const keys = new Set<string>();
+    for (const account of resourcePortalEmployees) {
+      const day = portalCompletedDayKey(portalPrimaryCompletedAt(account));
+      if (day) keys.add(day);
+    }
+    return Array.from(keys).sort((a, b) => b.localeCompare(a));
+  }, [resourcePortalEmployees]);
+
   const filteredPortalEmployees = useMemo(() => {
     const term = testResultsSearch.trim().toLowerCase();
-    return resourcePortalEmployees.filter((account) => {
+    const filtered = resourcePortalEmployees.filter((account) => {
       if (!matchesPortalTestStatusFilter(account.test_status, testStatusFilter)) {
         return false;
+      }
+      if (portalCompletedDateFilter !== "all") {
+        const day = portalCompletedDayKey(portalPrimaryCompletedAt(account));
+        if (day !== portalCompletedDateFilter) return false;
       }
       if (!term) return true;
       return (
@@ -905,7 +941,16 @@ export default function AdminDashboard() {
         account.ddh?.toLowerCase().includes(term)
       );
     });
-  }, [resourcePortalEmployees, testResultsSearch, testStatusFilter]);
+
+    return filtered.sort((a, b) => {
+      const aAt = portalPrimaryCompletedAt(a);
+      const bAt = portalPrimaryCompletedAt(b);
+      const aTime = aAt ? new Date(aAt).getTime() : 0;
+      const bTime = bAt ? new Date(bAt).getTime() : 0;
+      if (bTime !== aTime) return bTime - aTime;
+      return String(a.employee_id || "").localeCompare(String(b.employee_id || ""));
+    });
+  }, [resourcePortalEmployees, testResultsSearch, testStatusFilter, portalCompletedDateFilter]);
 
   const selectedPortalVideoTargets = useMemo(() => {
     return selectedPortalEmployeeIds
@@ -3744,6 +3789,21 @@ export default function AdminDashboard() {
                             onChange={(e) => setTestResultsSearch(e.target.value)}
                             className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
                           />
+                        </div>
+                        <div className="w-full sm:w-44 shrink-0">
+                          <select
+                            value={portalCompletedDateFilter}
+                            onChange={(e) => setPortalCompletedDateFilter(e.target.value)}
+                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                            aria-label="Completed On date filter"
+                          >
+                            <option value="all">Completed On: All</option>
+                            {portalCompletedDateOptions.map((dayKey) => (
+                              <option key={dayKey} value={dayKey}>
+                                {formatPortalCompletedDayLabel(dayKey)}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <div className="w-full sm:w-44 shrink-0">
                           <select
