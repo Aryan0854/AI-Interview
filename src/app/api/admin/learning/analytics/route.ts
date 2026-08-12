@@ -56,25 +56,57 @@ export async function GET(_req: NextRequest) {
       return true;
     });
 
-    const subjectHeatmap = await Promise.all(
-      (subjects ?? []).map(async (subj) => {
-        const { data: topicRows } = await supabase
-          .from("learning_topics")
-          .select("id, title, difficulty")
-          .eq("module_id", (await supabase.from("learning_modules").select("id").eq("subject_id", subj.id).limit(1)).data?.[0]?.id);
+    const subjectIds = subjects.map((s) => s.id);
+    const { data: modules } = await supabase.from("learning_modules").select("id, subject_id").in("subject_id", subjectIds);
+    const moduleIds = (modules ?? []).map((m) => m.id);
+    const { data: topics } = await supabase.from("learning_topics").select("id, module_id, title, difficulty").in("module_id", moduleIds);
+    const topicIds = (topics ?? []).map((t) => t.id);
 
-        const topics = (topicRows ?? []).map((t: any) => ({
-          topic_id:           t.id,
-          topic_title:        t.title,
-          difficulty:         t.difficulty,
-          avg_score:          0,   // requires join — kept lightweight
-          attempt_count:      0,
-          mastery_pct:        0,
-        }));
+    const { data: topicTests } = await supabase.from("tests").select("id, topic_id, status").in("topic_id", topicIds);
+    const testIds = (topicTests ?? []).map((t) => t.id);
+    const { data: topicAttempts } = await supabase.from("test_attempts").select("test_id, is_correct").in("test_id", testIds);
 
-        return { subject_id: subj.id, subject_title: subj.title, topics } as any;
-      })
-    );
+    const attemptsByTest = new Map<string, { correct: number; total: number }>();
+    (topicAttempts ?? []).forEach((a) => {
+      const e = attemptsByTest.get(a.test_id) || { correct: 0, total: 0 };
+      e.total += 1;
+      if (a.is_correct) e.correct += 1;
+      attemptsByTest.set(a.test_id, e);
+    });
+
+    const statsByTopic = new Map<string, { scores: number[]; attempts: number }>();
+    (topicTests ?? []).filter((t) => t.status === "completed").forEach((t) => {
+      const a = attemptsByTest.get(t.id);
+      const e = statsByTopic.get(t.topic_id) || { scores: [], attempts: 0 };
+      e.attempts += 1;
+      if (a && a.total > 0) e.scores.push(Math.round((a.correct / a.total) * 100));
+      statsByTopic.set(t.topic_id, e);
+    });
+
+    const moduleToSubject = new Map((modules ?? []).map((m) => [m.id, m.subject_id]));
+    const topicsBySubject = new Map<string, any[]>();
+    (topics ?? []).forEach((t) => {
+      const subjId = moduleToSubject.get(t.module_id);
+      if (!subjId) return;
+      const stats = statsByTopic.get(t.id);
+      const avgScore = stats && stats.scores.length > 0 ? Math.round(stats.scores.reduce((a, b) => a + b, 0) / stats.scores.length) : 0;
+      const list = topicsBySubject.get(subjId) || [];
+      list.push({
+        topic_id: t.id,
+        topic_title: t.title,
+        difficulty: t.difficulty,
+        avg_score: avgScore,
+        attempt_count: stats?.attempts ?? 0,
+        mastery_pct: avgScore >= 80 ? 100 : 0,
+      });
+      topicsBySubject.set(subjId, list);
+    });
+
+    const subjectHeatmap = subjects.map((subj) => ({
+      subject_id: subj.id,
+      subject_title: subj.title,
+      topics: topicsBySubject.get(subj.id) ?? [],
+    }));
 
     return NextResponse.json({
       total_employees:          totalEmp ?? 0,

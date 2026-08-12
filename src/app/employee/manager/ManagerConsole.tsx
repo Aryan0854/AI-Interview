@@ -165,10 +165,10 @@ export function ManagerConsole() {
     setConsoleError("");
     setConsoleSuccess("");
     setSelectedEval(record);
-    setApplyScore(record.bloom_graded?.apply_score || 80);
-    setAnalyzeScore(record.bloom_graded?.analyze_score || 80);
-    setEvaluateScore(record.bloom_graded?.evaluate_score || 80);
-    setCreateScore(record.bloom_graded?.create_score || 80);
+    setApplyScore(record.bloom_graded?.apply_score ?? 0);
+    setAnalyzeScore(record.bloom_graded?.analyze_score ?? 0);
+    setEvaluateScore(record.bloom_graded?.evaluate_score ?? 0);
+    setCreateScore(record.bloom_graded?.create_score ?? 0);
     setSelectedEval(record);
   };
 

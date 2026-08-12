@@ -196,6 +196,7 @@ export async function GET(request: NextRequest) {
     if (employeeEvals.length === 0) {
       return NextResponse.json({
         success: true,
+        total_evaluations: 0,
         reaction_score: 0,
         learning_score: 0,
         behavior_score: 0,
@@ -319,6 +320,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      total_evaluations: employeeEvals.length,
       reaction_score: reactionScore,
       learning_score: learningScore,
       behavior_score: behaviorScore,
@@ -326,7 +328,7 @@ export async function GET(request: NextRequest) {
       training_effectiveness_score: tei,
       learning_maturity_score: learningMaturity,
       competency_development_score: competencyDevelopment,
-      knowledge_retention_score: knowledgeRetention || 75, // fallback if no behavior evals yet
+      knowledge_retention_score: knowledgeRetention,
       bloom_radar: bloomRadar,
       milestones,
     });

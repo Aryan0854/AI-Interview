@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState, useRef } from "react";
+import { titleCase } from "@/lib/utils";
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -285,6 +286,9 @@ export default function AdminResumeDashboard() {
   const [registeredAccounts, setRegisteredAccounts] = useState<any[]>([]);
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
+  const [expandedTestReviews, setExpandedTestReviews] = useState<Record<string, boolean>>({});
+  const [testReviewCache, setTestReviewCache] = useState<Record<string, any[]>>({});
+  const [loadingTestReview, setLoadingTestReview] = useState<Record<string, boolean>>({});
   const [emails, setEmails] = useState<any[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -428,6 +432,24 @@ export default function AdminResumeDashboard() {
     setDeleteTargetId("bulk-emails");
     setDeletePasswordInput("");
     setDeleteModalError(null);
+  };
+
+  const toggleTestReview = async (testId: string) => {
+    const willExpand = !expandedTestReviews[testId];
+    setExpandedTestReviews(prev => ({ ...prev, [testId]: willExpand }));
+    if (willExpand && !testReviewCache[testId]) {
+      setLoadingTestReview(prev => ({ ...prev, [testId]: true }));
+      try {
+        const res = await adminFetch(`/api/admin/employees/test-review?testId=${testId}`);
+        const data = await res.json();
+        setTestReviewCache(prev => ({ ...prev, [testId]: data.questions || [] }));
+      } catch (err) {
+        console.error("Failed to load test review", err);
+        setTestReviewCache(prev => ({ ...prev, [testId]: [] }));
+      } finally {
+        setLoadingTestReview(prev => ({ ...prev, [testId]: false }));
+      }
+    }
   };
 
   const handleToggleEmployeeSelect = (id: string) => {
@@ -615,13 +637,13 @@ export default function AdminResumeDashboard() {
       const name = registered?.full_name || matchingEmp?.full_name || empTests[0]?.employeeName || empId;
       const department = registered?.department || matchingEmp?.department || "Auto-Registered";
       const designation = registered?.role || matchingEmp?.designation || "External Candidate";
-      const registeredStatus = registered ? "Registered" : (matchingEmp?.status || "Registered");
+      const registeredStatus = registered ? "Registered" : (matchingEmp?.status || "Not in Employees Table");
       const skills = matchingEmp?.skills || "—";
 
       const completedTests = empTests.filter(t => t.status === "completed");
-      const avgScore = completedTests.length > 0
-        ? Math.round(completedTests.reduce((acc, curr) => acc + (curr.score || 0), 0) / completedTests.length)
-        : null;
+      const totalAttempted = completedTests.reduce((sum, t) => sum + (t.attemptedCount || 0), 0);
+      const totalCorrect = completedTests.reduce((sum, t) => sum + (t.correctCount || 0), 0);
+      const avgScore = totalAttempted > 0 ? Math.round((totalCorrect / totalAttempted) * 100) : null;
 
       return {
         empId,
@@ -630,7 +652,7 @@ export default function AdminResumeDashboard() {
         designation,
         registeredStatus,
         skills,
-        testsCount: empTests.length,
+        testsCount: completedTests.length,
         avgScore,
         tests: empTests,
       };
@@ -3493,7 +3515,12 @@ export default function AdminResumeDashboard() {
                                           Skills: {account.skills}
                                         </div>
                                       </td>
-                                      <td className="p-3 font-bold text-slate-500">{account.empId}</td>
+                                      <td className="p-3 font-bold text-slate-500">
+                                        {account.empId}
+                                        {/\s/.test(account.empId) && !/\d/.test(account.empId) && (
+                                          <span title="This ID looks like a name — likely swapped with Employee Name at the data source" className="ml-1.5 text-amber-500">⚠</span>
+                                        )}
+                                      </td>
                                       <td className="p-3 font-semibold text-slate-600 dark:text-slate-400">{account.department}</td>
                                       <td className="p-3 font-medium text-slate-500">{account.designation}</td>
                                       <td className="p-3">
@@ -3541,13 +3568,22 @@ export default function AdminResumeDashboard() {
                                                 </thead>
                                                 <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-850/50">
                                                   {account.tests.map(test => (
-                                                    <tr key={test.id} className="hover:bg-slate-50/30 dark:hover:bg-slate-900/20">
+                                                    <React.Fragment key={test.id}>
+                                                    <tr className="hover:bg-slate-50/30 dark:hover:bg-slate-900/20">
                                                       <td className="p-2.5">
                                                         <div className="font-semibold text-slate-800 dark:text-slate-200">{test.topicTitle}</div>
                                                         <div className="text-[9px] text-slate-400 font-medium">{test.subjectTitle}</div>
+                                                        {test.status === "completed" && (
+                                                          <button
+                                                            onClick={() => toggleTestReview(test.id)}
+                                                            className="text-[9px] font-bold text-indigo-600 dark:text-violet-400 hover:underline mt-0.5"
+                                                          >
+                                                            {expandedTestReviews[test.id] ? "Hide Details" : "View Details"}
+                                                          </button>
+                                                        )}
                                                       </td>
-                                                      <td className="p-2.5 capitalize text-slate-600 dark:text-slate-400 font-medium">
-                                                        {test.difficulty}
+                                                      <td className="p-2.5 text-slate-600 dark:text-slate-400 font-medium">
+                                                        {titleCase(test.difficulty)}
                                                       </td>
                                                       <td className="p-2.5 text-slate-500 font-medium">{test.totalQuestions} Qs</td>
                                                       <td className="p-2.5">
@@ -3576,6 +3612,56 @@ export default function AdminResumeDashboard() {
                                                             : "—")}
                                                       </td>
                                                     </tr>
+                                                    {expandedTestReviews[test.id] && (
+                                                      <tr>
+                                                        <td colSpan={6} className="p-3 bg-indigo-50/40 dark:bg-slate-900/40">
+                                                          {loadingTestReview[test.id] ? (
+                                                            <p className="text-[11px] text-slate-400 italic">Loading answers…</p>
+                                                          ) : (testReviewCache[test.id]?.length ?? 0) === 0 ? (
+                                                            <p className="text-[11px] text-slate-400 italic">No recorded answers for this attempt.</p>
+                                                          ) : (
+                                                            <div className="space-y-2.5">
+                                                              {testReviewCache[test.id].map((q: any, i: number) => (
+                                                                <div key={i} className="rounded-lg border border-indigo-100 dark:border-slate-800 bg-white dark:bg-slate-950 p-3">
+                                                                  <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 mb-1.5">
+                                                                    {i + 1}. {q.questionText}
+                                                                  </p>
+                                                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                                                    {q.options.map((opt: string, oi: number) => {
+                                                                      const isCorrectOpt = oi === q.correctOptionIndex;
+                                                                      const isSelectedOpt = oi === q.selectedOptionIndex;
+                                                                      return (
+                                                                        <div
+                                                                          key={oi}
+                                                                          className={`text-[11px] rounded px-2 py-1 border ${
+                                                                            isCorrectOpt
+                                                                              ? "bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300 font-semibold"
+                                                                              : isSelectedOpt
+                                                                                ? "bg-rose-50 border-rose-300 text-rose-800 dark:bg-rose-950/30 dark:border-rose-800 dark:text-rose-300"
+                                                                                : "border-slate-150 text-slate-500 dark:border-slate-800 dark:text-slate-400"
+                                                                          }`}
+                                                                        >
+                                                                          {opt}
+                                                                          {isCorrectOpt && " ✓"}
+                                                                          {isSelectedOpt && !isCorrectOpt && " (selected)"}
+                                                                        </div>
+                                                                      );
+                                                                    })}
+                                                                  </div>
+                                                                  {q.selectedOptionIndex === null && (
+                                                                    <p className="text-[10px] text-amber-600 mt-1">Not answered.</p>
+                                                                  )}
+                                                                  {q.explanation && (
+                                                                    <p className="text-[10px] text-slate-400 mt-1.5 italic">{q.explanation}</p>
+                                                                  )}
+                                                                </div>
+                                                              ))}
+                                                            </div>
+                                                          )}
+                                                        </td>
+                                                      </tr>
+                                                    )}
+                                                    </React.Fragment>
                                                   ))}
                                                 </tbody>
                                               </table>

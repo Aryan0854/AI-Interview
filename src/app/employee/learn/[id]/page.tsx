@@ -8,6 +8,7 @@ import { BookOpen, Sparkles, ChevronRight, Clock, Zap, Loader2, ArrowLeft, Alert
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { titleCase } from "@/lib/utils";
 
 type DifficultyLevel = "beginner" | "intermediate" | "advanced" | "expert";
 
@@ -226,7 +227,7 @@ export default function SubjectDetailPage() {
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 leading-snug">{topic.title}</h3>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         <Badge variant="outline" className={`text-[10px] border font-semibold ${diffColors[topic.difficulty]}`}>
-                          {topic.difficulty}
+                          {titleCase(topic.difficulty)}
                         </Badge>
                         <Badge variant="outline" className="text-[10px] gap-1 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800 font-medium">
                           <Clock className="w-2.5 h-2.5" /> {topic.estimated_minutes} min

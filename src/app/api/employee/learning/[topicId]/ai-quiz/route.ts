@@ -127,7 +127,7 @@ export async function POST(
           await localTestsDb.deleteQuestions(testId);
 
           // Generate questions and insert them into local questions store
-          const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff);
+          const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff, topicId);
           const mappedQuestions = generated.map((q: any, i: number) => ({
             test_id: testId,
             question_index: i,
@@ -160,7 +160,7 @@ export async function POST(
         testId = newTest.id;
 
         // Generate questions and insert them into local questions store
-        const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff);
+        const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff, topicId);
         const mappedQuestions = generated.map((q: any, i: number) => ({
           test_id: testId,
           question_index: i,
@@ -195,7 +195,7 @@ export async function POST(
             startedAt = existing.started_at || new Date().toISOString();
             const { error: updateError } = await supabase
                .from("tests")
-               .update({ difficulty: defDiff, ...(existing.started_at ? {} : { started_at: startedAt }) })
+               .update({ difficulty: defDiff, topic_title: topicTitle, subject_title: subjectTitle, ...(existing.started_at ? {} : { started_at: startedAt }) })
                .eq("id", testId);
             if (updateError) throw updateError;
           } else {
@@ -212,7 +212,9 @@ export async function POST(
                 started_at: startedAt,
                 completed_at: null,
                 difficulty: defDiff,
-                total_questions: 10
+                total_questions: 10,
+                topic_title: topicTitle,
+                subject_title: subjectTitle
               })
               .eq("id", testId);
             if (updateError) throw updateError;
@@ -222,7 +224,7 @@ export async function POST(
             await supabase.from("test_questions").delete().eq("test_id", testId);
 
             // Generate new questions and insert them into Supabase test_questions
-            const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff);
+            const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff, topicId);
             const mappedQuestions = generated.map((q: any, i: number) => ({
               test_id: testId,
               question_index: i,
@@ -244,6 +246,8 @@ export async function POST(
             employee_id: employeeUuid,
             topic_id: topicId,
             subject_id: subjId,
+            topic_title: topicTitle,
+            subject_title: subjectTitle,
             total_questions: totalQuestions,
             time_limit_seconds: timeLimitSeconds,
             difficulty: defDiff,
@@ -257,7 +261,7 @@ export async function POST(
           testId = insRow.id;
 
           // Generate questions and insert them into Supabase test_questions
-          const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff);
+          const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff, topicId);
           const mappedQuestions = generated.map((q: any, i: number) => ({
             test_id: testId,
             question_index: i,
@@ -305,7 +309,7 @@ export async function POST(
             await localTestsDb.deleteQuestions(testId);
 
             // Generate questions and insert them into local questions store
-            const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff);
+            const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff, topicId);
             const mappedQuestions = generated.map((q: any, i: number) => ({
               test_id: testId,
               question_index: i,
@@ -338,7 +342,7 @@ export async function POST(
           testId = newTest.id;
 
           // Generate questions and insert them into local questions store
-          const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff);
+          const generated = await fetchQuestionsFromAI(subjectTitle, topicTitle, defDiff, topicId);
           const mappedQuestions = generated.map((q: any, i: number) => ({
             test_id: testId,
             question_index: i,

@@ -40,3 +40,14 @@ export function slugify(text: string): string {
     .replace(/[\s_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
+/** Displays enum-style values ("beginner", "in_progress") as "Beginner", "In Progress". */
+export function titleCase(value: string | null | undefined): string {
+  if (!value) return "";
+  return value
+    .replace(/[_-]/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}

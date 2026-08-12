@@ -143,10 +143,10 @@ export async function POST(request: NextRequest) {
         },
         analysis: {
           executiveSummary: `Employee profile matched for internal screening. Grade: ${emp.grade || 'N/A'}, Designation: ${emp.designation || 'N/A'}.`,
-          overallScore: emp.score || 50,
-          atsScore: emp.score || 50,
-          technicalScore: emp.score || 50,
-          jdMatchScore: emp.score || 50
+          overallScore: emp.score ?? 0,
+          atsScore: emp.score ?? 0,
+          technicalScore: emp.score ?? 0,
+          jdMatchScore: emp.score ?? 0
         },
         enhanced: null,
         report: {

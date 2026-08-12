@@ -165,34 +165,6 @@
       "streak_days": 0,
       "skill_level": "beginner",
       "ai_readiness_score": 0
-    },
-    {
-      "employee_id": "1807273",
-      "full_name": "1807273",
-      "email": "",
-      "department": "",
-      "role": "employee",
-      "is_first_login": true,
-      "password_hash": "",
-      "password_salt": "",
-      "xp_points": 0,
-      "streak_days": 0,
-      "skill_level": "beginner",
-      "ai_readiness_score": 0
-    },
-    {
-      "employee_id": "1807076",
-      "full_name": "1807076",
-      "email": "",
-      "department": "",
-      "role": "employee",
-      "is_first_login": false,
-      "password_hash": "R+3y3O/f9dOpHDSuBaRK/joGdq19M3LOjM5QPKgg0se4PNnDJ/GDvUihgi4/lu9iosASUiI640XIG7T2Kux9uA==",
-      "password_salt": "vMua4KHuGV9984zu/1AEsA==",
-      "xp_points": 0,
-      "streak_days": 0,
-      "skill_level": "beginner",
-      "ai_readiness_score": 0
     }
   ]
 }

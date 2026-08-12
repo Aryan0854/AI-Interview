@@ -230,7 +230,7 @@ export async function syncEmployeeToSupabase(account: EmployeeAccount): Promise<
         employee_id: account.employee_id,
         email: account.email || "",
         full_name: account.full_name || account.employee_id,
-        department: account.department || "",
+        department: account.department || "general",
         role: account.role || "employee",
         xp_points: account.xp_points || 0,
         streak_days: account.streak_days || 0,

@@ -825,11 +825,31 @@ function pickBalanced(pool: any[]): any[] {
 }
 
 /** Generates exactly 10 MCQs (5 easy, 3 medium, 2 hard) for the given topic via the configured LLM. */
-export async function fetchQuestionsFromAI(subjectTitle: string, topicTitle: string, defDiff: string): Promise<any[]> {
+/** Fetches extracted text from any PDF(s) an admin uploaded for this topic, truncated to keep the prompt reasonable. */
+async function getTopicSourceText(topicId?: string): Promise<string | null> {
+  if (!topicId) return null;
+  try {
+    const { supabase } = await import("@/lib/db");
+    const { data } = await supabase
+      .from("topic_source_documents")
+      .select("extracted_text")
+      .eq("topic_id", topicId)
+      .order("uploaded_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data?.extracted_text || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchQuestionsFromAI(subjectTitle: string, topicTitle: string, defDiff: string, topicId?: string): Promise<any[]> {
   try {
     const { generateAIText } = await import("@/lib/ai-providers");
-    const prompt = `Generate exactly 10 multiple-choice quiz questions on the topic "${topicTitle}" (subject: ${subjectTitle}). Every question must be factually accurate and specific to this exact topic — no generic or unrelated questions.
+    const sourceText = await getTopicSourceText(topicId);
 
+    const prompt = `Generate exactly 10 multiple-choice quiz questions on the topic "${topicTitle}" (subject: ${subjectTitle}). Every question must be factually accurate and specific to this exact topic — no generic or unrelated questions.
+${sourceText ? `\nReference material uploaded for this topic (draw questions from this where possible; you may also generate additional questions using your own knowledge, but every question must stay strictly within this material's topic scope — never introduce unrelated subject matter):\n"""\n${sourceText.slice(0, 6000)}\n"""\n` : ""}
 Distribution: 5 easy, 3 medium, 2 hard.
 Each question needs exactly 4 options: 1 correct, 3 plausible-but-wrong distractors (not absurd/unrelated ones).
 

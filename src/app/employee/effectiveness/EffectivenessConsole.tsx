@@ -218,6 +218,19 @@ export function EffectivenessConsole() {
     );
   }
 
+  if (analytics && analytics.total_evaluations === 0) {
+    return (
+      <div className="min-h-screen bg-[#f0f4ff] dark:bg-slate-950 flex items-center justify-center p-6">
+        <Card className="max-w-md p-8 text-center space-y-3">
+          <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">No post-training evaluations yet</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            These metrics populate once a reaction survey, knowledge assessment, and manager evaluation have been completed for a training subject. Nothing has been submitted yet.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#f0f4ff] dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 pb-12">
       {/* Page Header */}

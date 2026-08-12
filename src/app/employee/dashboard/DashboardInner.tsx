@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { titleCase } from "@/lib/utils";
 import {
   BarChart as ReBarChart,
   ResponsiveContainer,
@@ -87,32 +88,15 @@ export function DashboardInner() {
   }, [analytics, displayResults]);
 
   const radarData = useMemo(() => {
-    if (!displayAnalytics) return EMPTY_RADAR;
-    const subs = displayAnalytics.subject_breakdown || [];
-    const labels: Record<string, string> = { "2":"ML","3":"Data","8":"Python","9":"SQL","10":"Cloud","11":"MLOps" };
-    return EMPTY_RADAR.map(d => {
-      // Find matching subject from the breakdown
-      const s = subs.find((x:any) => 
-        x && (
-          labels[x.subject_id] === d.subject || 
-          (x.subject_title && x.subject_title.toLowerCase().includes(d.subject.toLowerCase())) ||
-          (x.subject_title && d.subject.toLowerCase().includes(x.subject_title.toLowerCase()))
-        )
-      );
-      
-      // Beautiful fallbacks for visual mastery representation
-      const fallbackVal = {
-        "ML": 82,
-        "Data": 75,
-        "Python": 90,
-        "SQL": 85,
-        "Cloud": 65,
-        "MLOps": 70
-      }[d.subject] || 75;
-
-      const scoreVal = s && typeof s.average_pct === 'number' && s.average_pct > 0 ? Math.round(s.average_pct) : fallbackVal;
-      return { ...d, value: scoreVal };
-    });
+    const subs = (displayAnalytics?.subject_breakdown || []) as any[];
+    const attempted = subs.filter((s) => s && s.topic_count > 0);
+    if (attempted.length === 0) return EMPTY_RADAR;
+    return attempted
+      .slice(0, 8)
+      .map((s) => ({
+        subject: s.subject_title.length > 12 ? s.subject_title.slice(0, 11) + "…" : s.subject_title,
+        value: typeof s.average_pct === "number" ? Math.round(s.average_pct) : 0,
+      }));
   }, [displayAnalytics]);
 
   const trendData = useMemo(() => {
@@ -213,7 +197,7 @@ export function DashboardInner() {
             </div>
           </div>
           <div className="text-right space-y-1">
-            <Badge className="bg-white/20 border-0 text-white backdrop-blur-sm">{skillLevel}</Badge>
+            <Badge className="bg-white/20 border-0 text-white backdrop-blur-sm">{titleCase(skillLevel)}</Badge>
             <p className="text-xs text-indigo-200">
               Readiness Score
               <span className="ml-1 font-bold text-lg">{ars}</span>
@@ -369,7 +353,7 @@ export function DashboardInner() {
                     <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{r.ai_analysis.summary || r.ai_analysis}</p>
                   )}
                   <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
-                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider dark:border-slate-800 dark:text-slate-300">{r.difficulty}</Badge>
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider dark:border-slate-800 dark:text-slate-300">{titleCase(r.difficulty)}</Badge>
                     <span>·</span>
                     <span>{toDateStr(r.completed_at)}</span>
                     <span>·</span>

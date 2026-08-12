@@ -161,11 +161,12 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const sorted = [...subjectBreakdown].sort((a, b) => b.average_pct - a.average_pct);
-    const strongest_subject = sorted[0]?.topic_count > 0
+    const attemptedSubjects = subjectBreakdown.filter((s) => s.topic_count > 0);
+    const sorted = [...attemptedSubjects].sort((a, b) => b.average_pct - a.average_pct);
+    const strongest_subject = sorted[0]
       ? { subject_id: sorted[0].subject_id, subject_title: sorted[0].subject_title, average_pct: sorted[0].average_pct }
       : undefined;
-    const weakest_subject = sorted[sorted.length - 1]?.topic_count > 0
+    const weakest_subject = sorted.length > 1
       ? { subject_id: sorted[sorted.length - 1].subject_id, subject_title: sorted[sorted.length - 1].subject_title, average_pct: sorted[sorted.length - 1].average_pct }
       : undefined;
 
@@ -286,11 +287,12 @@ export async function GET(request: NextRequest) {
         };
       });
 
-      const sorted = [...subjectBreakdown].sort((a, b) => b.average_pct - a.average_pct);
-      const strongest_subject = sorted[0]?.topic_count > 0
+      const attemptedSubjects = subjectBreakdown.filter((s) => s.topic_count > 0);
+      const sorted = [...attemptedSubjects].sort((a, b) => b.average_pct - a.average_pct);
+      const strongest_subject = sorted[0]
         ? { subject_id: sorted[0].subject_id, subject_title: sorted[0].subject_title, average_pct: sorted[0].average_pct }
         : undefined;
-      const weakest_subject = sorted[sorted.length - 1]?.topic_count > 0
+      const weakest_subject = sorted.length > 1
         ? { subject_id: sorted[sorted.length - 1].subject_id, subject_title: sorted[sorted.length - 1].subject_title, average_pct: sorted[sorted.length - 1].average_pct }
         : undefined;
 

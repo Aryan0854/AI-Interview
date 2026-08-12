@@ -84,6 +84,7 @@ export async function GET(request: NextRequest) {
   // This is independent of test activity — a newly signed-up employee with
   // zero test attempts must still show up in the admin Employee Portal tab.
   let registeredAccounts: {
+    id: string;
     employee_id: string;
     full_name: string;
     email: string | null;
@@ -93,12 +94,17 @@ export async function GET(request: NextRequest) {
   }[] = [];
 
   try {
-    const { data: dbEmployees, error: employeesErr } = await supabase
-      .from("employees")
-      .select("employee_id, full_name, email, department, role, created_at");
-
-    if (employeesErr) throw employeesErr;
-    registeredAccounts = dbEmployees || [];
+    const dbEmployees: any[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data: page, error: employeesErr } = await supabase
+        .from("employees")
+        .select("id, employee_id, full_name, email, department, role, created_at")
+        .range(offset, offset + 999);
+      if (employeesErr) throw employeesErr;
+      dbEmployees.push(...(page ?? []));
+      if (!page || page.length < 1000) break;
+    }
+    registeredAccounts = dbEmployees;
   } catch (err) {
     console.warn("Failed to fetch registered employee accounts from Supabase:", err);
   }
@@ -108,33 +114,70 @@ export async function GET(request: NextRequest) {
   const allTestResults: any[] = [];
 
   try {
-    const { data: dbTests } = await supabase
-      .from("tests")
-      .select(`
-        id,
-        employee_id,
-        topic_id,
-        subject_id,
-        difficulty,
-        total_questions,
-        status,
-        started_at,
-        completed_at,
-        employees (
-          employee_id,
-          full_name
-        ),
-        learning_topics (
-          title
-        ),
-        learning_subjects (
-          title
-        )
-      `);
+    const dbTests: any[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data: page, error } = await supabase
+        .from("tests")
+        .select("id, employee_id, topic_id, subject_id, topic_title, subject_title, difficulty, total_questions, status, started_at, completed_at")
+        .range(offset, offset + 999);
+      if (error) throw error;
+      dbTests.push(...(page ?? []));
+      if (!page || page.length < 1000) break;
+    }
 
-    const { data: dbAttempts } = await supabase
-      .from("test_attempts")
-      .select("test_id, is_correct");
+    const dbAttempts: any[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data: page, error } = await supabase
+        .from("test_attempts")
+        .select("test_id, is_correct")
+        .range(offset, offset + 999);
+      if (error) throw error;
+      dbAttempts.push(...(page ?? []));
+      if (!page || page.length < 1000) break;
+    }
+
+    // Plain (non-embedded) lookups for employee/topic/subject titles, keyed by their own
+    // primary keys — avoids depending on PostgREST's FK-relationship schema cache, which
+    // can silently fail right after a migration until it's reloaded.
+    const employeesByUuid = new Map(registeredAccounts.map((e: any) => [e.id, e]));
+
+    const topicIds = Array.from(new Set(dbTests.filter((t) => !t.topic_title).map((t) => t.topic_id).filter(Boolean)));
+    const topicsById = new Map<string, any>();
+    for (let i = 0; i < topicIds.length; i += 1000) {
+      const { data, error: topicErr } = await supabase.from("learning_topics").select("id, title").in("id", topicIds.slice(i, i + 1000));
+      if (topicErr) console.warn("Failed to fetch learning_topics batch:", topicErr.message);
+      (data ?? []).forEach((t) => topicsById.set(t.id, t));
+    }
+    const unresolvedTopicIds = topicIds.filter((id) => !topicsById.has(id));
+    if (unresolvedTopicIds.length > 0) {
+      console.warn(`${unresolvedTopicIds.length} test(s) reference topic_id(s) with no matching learning_topics row (likely orphaned by a prior manual cleanup that didn't re-point foreign keys):`, unresolvedTopicIds);
+    }
+
+    const subjectIds = Array.from(new Set(dbTests.filter((t) => !t.subject_title).map((t) => t.subject_id).filter(Boolean)));
+    const subjectsById = new Map<string, any>();
+    for (let i = 0; i < subjectIds.length; i += 1000) {
+      const { data, error: subjErr } = await supabase.from("learning_subjects").select("id, title").in("id", subjectIds.slice(i, i + 1000));
+      if (subjErr) console.warn("Failed to fetch learning_subjects batch:", subjErr.message);
+      (data ?? []).forEach((s) => subjectsById.set(s.id, s));
+    }
+    const unresolvedSubjectIds = subjectIds.filter((id) => !subjectsById.has(id));
+    if (unresolvedSubjectIds.length > 0) {
+      console.warn(`${unresolvedSubjectIds.length} test(s) reference subject_id(s) with no matching learning_subjects row:`, unresolvedSubjectIds);
+    }
+
+    // For tests whose topic_id is orphaned, test_questions.topic_title (denormalized at
+    // question-creation time) usually still has the real name — recover it from there
+    // rather than showing a dead-end "unresolved" label.
+    const unresolvedTestIds = dbTests.filter((t) => !t.topic_title && t.topic_id && !topicsById.has(t.topic_id)).map((t) => t.id);
+    const topicTitleByTestId = new Map<string, string>();
+    for (let i = 0; i < unresolvedTestIds.length; i += 1000) {
+      const { data } = await supabase
+        .from("test_questions")
+        .select("test_id, topic_title")
+        .in("test_id", unresolvedTestIds.slice(i, i + 1000))
+        .eq("question_index", 0);
+      (data ?? []).forEach((q: any) => { if (q.topic_title) topicTitleByTestId.set(q.test_id, q.topic_title); });
+    }
 
     const attemptsMap = new Map<string, { correct: number; total: number }>();
     if (dbAttempts) {
@@ -148,12 +191,14 @@ export async function GET(request: NextRequest) {
 
     if (dbTests) {
       dbTests.forEach(test => {
-        const empInfo = test.employees as any;
+        const empInfo = employeesByUuid.get(test.employee_id);
         const empId = empInfo?.employee_id;
         if (!empId) return;
 
         const attInfo = attemptsMap.get(test.id);
         const score = attInfo && attInfo.total > 0 ? Math.round((attInfo.correct / attInfo.total) * 100) : 0;
+        const correctCount = attInfo?.correct ?? 0;
+        const attemptedCount = attInfo?.total ?? 0;
 
         const list = testResultsMap.get(empId) || [];
         list.push({
@@ -163,8 +208,8 @@ export async function GET(request: NextRequest) {
         });
         testResultsMap.set(empId, list);
 
-        const topicInfo = test.learning_topics as any;
-        const subjectInfo = test.learning_subjects as any;
+        const topicInfo = topicsById.get(test.topic_id);
+        const subjectInfo = subjectsById.get(test.subject_id);
 
         allTestResults.push({
           id: test.id,
@@ -172,13 +217,15 @@ export async function GET(request: NextRequest) {
           employeeId: empId,
           employeeName: empInfo?.full_name || empId,
           topicId: test.topic_id,
-          topicTitle: topicInfo?.title || "Unknown Topic",
+          topicTitle: test.topic_title || topicInfo?.title || topicTitleByTestId.get(test.id) || `Unresolved topic (${test.topic_id?.slice(0, 8)}…)`,
           subjectId: test.subject_id,
-          subjectTitle: subjectInfo?.title || "Unknown Subject",
+          subjectTitle: test.subject_title || subjectInfo?.title || `Unresolved subject (${test.subject_id?.slice(0, 8)}…)`,
           difficulty: test.difficulty,
           totalQuestions: test.total_questions,
           status: test.status,
           score,
+          correctCount,
+          attemptedCount,
           startedAt: test.started_at,
           completedAt: test.completed_at
         });
@@ -232,6 +279,8 @@ export async function GET(request: NextRequest) {
             totalQuestions: test.total_questions,
             status: test.status,
             score,
+            correctCount: attInfo?.correct ?? 0,
+            attemptedCount: attInfo?.total ?? 0,
             startedAt: test.started_at,
             completedAt: test.completed_at
           });
