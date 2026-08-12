@@ -6,7 +6,7 @@ import { refreshEmployees, EmployeeRecord, calculateSkillMatch } from '@/service
 import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
-import { allowLocalTestsFallback } from '@/lib/db-mode';
+import { allowLocalTestsFallback, allowLocalDataFallback } from '@/lib/db-mode';
 import { formatTopicTitleForDisplay } from '@/lib/product-display-name';
 
 const getUploadsRoot = () => {
@@ -140,11 +140,24 @@ export async function GET(request: NextRequest) {
   };
 
   const [employeesFromFile, employeesFromDb, manifest] = await Promise.all([
-    loadEmployeesFromFile(),
+    allowLocalDataFallback() ? loadEmployeesFromFile() : Promise.resolve([] as EmployeeRecord[]),
     loadEmployeesFromSupabase(),
     loadEmployeeTestManifest(),
   ]);
-  let employees = mergeEmployeeRosters(employeesFromFile, employeesFromDb);
+
+  // Supabase roster is source of truth; local JSON only fills gaps when fallback is allowed.
+  let employees =
+    employeesFromDb.length > 0
+      ? mergeEmployeeRosters(employeesFromDb, employeesFromFile)
+      : employeesFromFile;
+
+  if (employeesFromDb.length === 0 && employeesFromFile.length > 0 && !allowLocalDataFallback()) {
+    console.warn(
+      "[employees] Supabase returned 0 rows and local JSON fallback is disabled (ALLOW_LOCAL_DATA_FALLBACK)."
+    );
+  } else if (employeesFromDb.length === 0 && employeesFromFile.length === 0) {
+    console.warn("[employees] No employees from Supabase or local sources.");
+  }
 
   // Query MCQ test results from Supabase (production source of truth),
   // with a hard timeout so a slow DB cannot block the portal indefinitely.

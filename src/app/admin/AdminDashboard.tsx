@@ -276,13 +276,14 @@ interface ResetLog {
 }
 
 function resolveJdId(jdId: string): string {
-  if (jdId === "42494d90-ab41-4f39-87a1-c01be666e9f7") {
-    return "5ca7d4fe-c80a-4b9a-a360-c787dbdc5f8b"; // Maps to 49238BR
-  }
-  if (jdId === "a5b156cf-c501-4410-a3f9-2a50b766347a") {
-    return "5bf4e5d4-6578-4cb0-a8c5-16c8b29ecbba"; // Maps to 47652BR
-  }
-  return jdId;
+  // Identity — JD UUIDs come from Supabase; no hardcoded remaps.
+  return jdId || "";
+}
+
+function pickDefaultJd(jdsList: any[]): any | undefined {
+  if (!jdsList?.length) return undefined;
+  // Prefer most recently created from Supabase ordering (already newest-first when loaded).
+  return jdsList[0];
 }
 
 export default function AdminDashboard() {
@@ -663,15 +664,8 @@ export default function AdminDashboard() {
               return prevId;
             }
 
-            // Default to 47652BR if it exists, otherwise fallback to 46401BR / 46394BR
-            const defaultJd = data.jds.find((j: any) => 
-              (j.fileName && j.fileName.includes("47652")) || 
-              (j.brId && j.brId.includes("47652")) ||
-              (j.id && j.id.includes("47652"))
-            ) || data.jds.find((j: any) => 
-              (j.fileName && (j.fileName.includes("46401") || j.fileName.includes("46394"))) || 
-              (j.brId && (j.brId.includes("46401") || j.brId.includes("46394")))
-            ) || data.jds[0];
+            // Default to most recent JD from Supabase (list is newest-first)
+            const defaultJd = pickDefaultJd(data.jds);
 
             if (defaultJd) {
               setJdSavedText(defaultJd.jdText);
@@ -1284,14 +1278,7 @@ export default function AdminDashboard() {
       let initialJdId = "all";
       let initialJdText = "";
       if (fetchedJds.length > 0) {
-        const defaultJd = fetchedJds.find((j: any) => 
-          (j.fileName && j.fileName.includes("47652")) || 
-          (j.brId && j.brId.includes("47652")) ||
-          (j.id && j.id.includes("47652"))
-        ) || fetchedJds.find((j: any) => 
-          (j.fileName && (j.fileName.includes("46401") || j.fileName.includes("46394"))) || 
-          (j.brId && (j.brId.includes("46401") || j.brId.includes("46394")))
-        ) || fetchedJds[0];
+        const defaultJd = pickDefaultJd(fetchedJds);
         
         if (defaultJd) {
           initialJdId = defaultJd.id;
@@ -1313,7 +1300,7 @@ export default function AdminDashboard() {
         ]);
 
       const [resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] = await Promise.all([
-        withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 20000, "resumes"),
+        withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 60000, "resumes"),
         withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
         withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1`), 60000, "employees"),
         withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
@@ -1330,9 +1317,15 @@ export default function AdminDashboard() {
         settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
       ]);
 
-      // 3. Batch state updates together
+      // 3. Batch state updates together — never wipe resumes on timeout/empty error payload
       setJds(fetchedJds);
-      setResumes(resumesData.resumes || []);
+      if (Array.isArray(resumesData.resumes)) {
+        setResumes(resumesData.resumes);
+      } else if (resumesRes) {
+        console.warn("[admin] resumes payload missing resumes[]; keeping prior state");
+      } else {
+        console.warn("[admin] resumes timed out; keeping prior state");
+      }
       setEmails(emailsData.emails || []);
       setEmployees(employeesData.employees || []);
       setAllTestResults(employeesData.allTestResults || []);
@@ -2813,14 +2806,7 @@ export default function AdminDashboard() {
     return true;
   });
 
-  const defaultJd = jds.find(j => 
-    (j.fileName && j.fileName.includes("47652")) || 
-    (j.brId && j.brId.includes("47652")) ||
-    (j.id && j.id.includes("47652"))
-  ) || jds.find(j => 
-    (j.fileName && (j.fileName.includes("46401") || j.fileName.includes("46394"))) || 
-    (j.brId && (j.brId.includes("46401") || j.brId.includes("46394")))
-  ) || jds[0];
+  const defaultJd = pickDefaultJd(jds);
   const activeJdIdForHighlight = (selectedJdId && selectedJdId !== "all" && !selectedJdId.includes("@")) ? selectedJdId : (defaultJd?.id || "");
 
   const getScore = (r: any) => {
@@ -3158,21 +3144,11 @@ export default function AdminDashboard() {
                                 }
                               });
 
-                              // Sort OG JDs: keep 46401BR at the very top, followed by 49238BR, then by skills
+                              // Sort OG JDs: newest first, then by extracted skill count
                               ogJds.sort((a, b) => {
-                                const isA46401 = (a.fileName && (a.fileName.includes("46401") || a.fileName.includes("46394"))) || (a.brId && (a.brId.includes("46401") || a.brId.includes("46394")));
-                                const isB46401 = (b.fileName && (b.fileName.includes("46401") || b.fileName.includes("46394"))) || (b.brId && (b.brId.includes("46401") || b.brId.includes("46394")));
-                                
-                                const isA49238 = (a.fileName && a.fileName.includes("49238")) || (a.brId && a.brId.includes("49238"));
-                                const isB49238 = (b.fileName && b.fileName.includes("49238")) || (b.brId && b.brId.includes("49238"));
-
-                                // 46401BR is always first
-                                if (isA46401 && !isB46401) return -1;
-                                if (!isA46401 && isB46401) return 1;
-
-                                // 49238BR is second
-                                if (isA49238 && !isB49238) return -1;
-                                if (!isA49238 && isB49238) return 1;
+                                const aTime = new Date(a.createdAt || 0).getTime();
+                                const bTime = new Date(b.createdAt || 0).getTime();
+                                if (bTime !== aTime) return bTime - aTime;
 
                                 const aSkills = extractSkillsFromText(a.jdText).length;
                                 const bSkills = extractSkillsFromText(b.jdText).length;

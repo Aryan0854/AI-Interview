@@ -1,15 +1,16 @@
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
-import { NextRequest, NextResponse } from 'next/server';
-import { resumeService } from '@/services/resume-service';
-import { sessionService } from '@/services/session-service';
-import { supabase } from '@/lib/db';
-import { authenticateAdminRequest } from '@/lib/employee-auth';
-import { checkCsrf, getClientIp } from '@/lib/security';
-import { auditLogService } from '@/services/audit-log-service';
-import { writeLog } from '@/lib/structured-logger';
+import { NextRequest, NextResponse } from "next/server";
+import { resumeService } from "@/services/resume-service";
+import { sessionService } from "@/services/session-service";
+import { supabase } from "@/lib/db";
+import { authenticateAdminRequest } from "@/lib/employee-auth";
+import { checkCsrf, getClientIp } from "@/lib/security";
+import { auditLogService } from "@/services/audit-log-service";
+import { writeLog } from "@/lib/structured-logger";
 
-import { cacheStore } from '@/lib/cache-store';
+import { cacheStore } from "@/lib/cache-store";
 
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -22,46 +23,50 @@ export async function GET(request: NextRequest) {
 
     const cached = cacheStore.get("resumes", 5000, email);
     if (cached) {
-      return NextResponse.json({ resumes: cached });
+      return NextResponse.json({ resumes: cached, source: "cache" });
     }
 
     const resumes = await resumeService.getAllResumes();
-    
-    // Filter resumes based on logged in email
+
+    // Filter resumes based on logged in email (super-admin sees all)
     let filteredResumes = resumes;
     if (email && email !== "admin@infinite.com") {
-      filteredResumes = resumes.filter(resume => resume.report?.rmEmail?.toLowerCase().trim() === email);
+      filteredResumes = resumes.filter(
+        (resume) => resume.report?.rmEmail?.toLowerCase().trim() === email
+      );
     }
-    
-    // Fetch all interview attempts
-    const { data: attempts, error } = await supabase
-      .from('interview_attempts')
-      .select('*')
-      .order('id', { ascending: false });
-      
-    if (error) {
-      console.error('Failed to fetch attempts:', error);
-    }
-    
-    // Group attempts by resume_id
-    const attemptsByResume: Record<string, any[]> = {};
-    if (attempts) {
-      for (const attempt of attempts) {
-        if (attempt.resume_id) {
+
+    // Soft-fail enrichment — never wipe the Supabase resume list if attempts/sessions hang.
+    let attemptsByResume: Record<string, any[]> = {};
+    try {
+      const { data: attempts, error } = await supabase
+        .from("interview_attempts")
+        .select("*")
+        .order("id", { ascending: false });
+
+      if (error) {
+        console.warn("Admin resumes: interview_attempts unavailable:", error.message);
+      } else if (attempts) {
+        for (const attempt of attempts) {
+          if (!attempt.resume_id) continue;
           if (!attemptsByResume[attempt.resume_id]) {
             attemptsByResume[attempt.resume_id] = [];
           }
           attemptsByResume[attempt.resume_id].push(attempt);
         }
       }
+    } catch (attemptsErr) {
+      console.warn("Admin resumes: interview_attempts failed:", attemptsErr);
     }
-    
-    // Fetch all sessions to check if they are concluded (used)
+
     let sessions: Awaited<ReturnType<typeof sessionService.getAllSessions>> = [];
     try {
       sessions = await sessionService.getAllSessions();
     } catch (sessionErr) {
-      console.warn("Admin resumes: sessions unavailable, continuing without conclude flags:", sessionErr);
+      console.warn(
+        "Admin resumes: sessions unavailable, continuing without conclude flags:",
+        sessionErr
+      );
     }
     const sessionsMap = new Map<string, boolean>();
     sessions.forEach((s) => {
@@ -69,33 +74,45 @@ export async function GET(request: NextRequest) {
         sessionsMap.set(s.resumeId, s.used);
       }
     });
-    
-    const resumesWithAttempts = filteredResumes.map(resume => ({
+
+    const resumesWithAttempts = filteredResumes.map((resume) => ({
       ...resume,
       isConcluded: sessionsMap.get(resume.id) || false,
       interview_attempts: (attemptsByResume[resume.id] || []).map((attempt: any) => ({
         ...attempt,
         candidate_id: attempt.resume_id,
-        question_number: attempt.question_index === -1
-          ? 'Intro'
-          : attempt.question_index === -2
-            ? 'Q to HR'
-            : typeof attempt.question_index === 'number'
-              ? attempt.question_index + 1
-              : null,
+        question_number:
+          attempt.question_index === -1
+            ? "Intro"
+            : attempt.question_index === -2
+              ? "Q to HR"
+              : typeof attempt.question_index === "number"
+                ? attempt.question_index + 1
+                : null,
         question: attempt.question_text,
         ai_score: attempt.mock_score,
         ai_feedback: attempt.mock_feedback,
         timestamp: attempt.timestamp || attempt.created_at || attempt.createdAt || null,
-      }))
+      })),
     }));
 
     cacheStore.set("resumes", resumesWithAttempts, email);
 
-    return NextResponse.json({ resumes: resumesWithAttempts });
+    return NextResponse.json({
+      resumes: resumesWithAttempts,
+      source: "supabase",
+      count: resumesWithAttempts.length,
+    });
   } catch (error) {
-    console.error('Admin resumes fetch failed:', error);
-    return NextResponse.json({ resumes: [] }, { status: 500 });
+    console.error("Admin resumes fetch failed:", error);
+    return NextResponse.json(
+      {
+        resumes: [],
+        source: "error",
+        error: error instanceof Error ? error.message : "Failed to load resumes",
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -114,7 +131,7 @@ export async function DELETE(request: NextRequest) {
     const ids = body.ids;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return NextResponse.json({ error: 'Candidate IDs are required' }, { status: 400 });
+      return NextResponse.json({ error: "Candidate IDs are required" }, { status: 400 });
     }
 
     for (const id of ids) {
@@ -127,15 +144,28 @@ export async function DELETE(request: NextRequest) {
       action: "ADMIN_BATCH_DELETE_RESUMES",
       target: ids.join(", "),
       details: `Successfully batch deleted candidate CV IDs: ${ids.join(", ")}`,
-      ipAddress: ip
+      ipAddress: ip,
     });
 
-    await writeLog('candidate-processing', 'BATCH_DELETE_CANDIDATES', 'success', `Batch deleted candidate CV IDs: ${ids.join(", ")}`);
+    await writeLog(
+      "candidate-processing",
+      "BATCH_DELETE_CANDIDATES",
+      "success",
+      `Batch deleted candidate CV IDs: ${ids.join(", ")}`
+    );
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error('Failed to batch delete candidate records:', error);
-    await writeLog('candidate-processing', 'BATCH_DELETE_CANDIDATES_FAILED', 'failed', `Failed to batch delete candidate records: ${error.message}`);
-    return NextResponse.json({ error: error.message || 'Failed to delete candidate records' }, { status: 500 });
+    console.error("Failed to batch delete candidate records:", error);
+    await writeLog(
+      "candidate-processing",
+      "BATCH_DELETE_CANDIDATES_FAILED",
+      "failed",
+      `Failed to batch delete candidate records: ${error.message}`
+    );
+    return NextResponse.json(
+      { error: error.message || "Failed to delete candidate records" },
+      { status: 500 }
+    );
   }
 }

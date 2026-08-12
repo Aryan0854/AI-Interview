@@ -10,6 +10,7 @@ import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { checkCsrf, getClientIp } from '@/lib/security';
 import { auditLogService } from '@/services/audit-log-service';
 import { writeLog } from '@/lib/structured-logger';
+import { allowLocalDataFallback } from '@/lib/db-mode';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -86,8 +87,8 @@ export async function GET(request: NextRequest) {
       console.warn("Supabase JD fetch failed, falling back to file storage:", dbError.message);
     }
     
-    // 2. If database is empty or fails, check and load/migrate local backup
-    if (jds.length === 0) {
+    // 2. Local JSON only when explicitly allowed (offline) — Supabase is source of truth
+    if (jds.length === 0 && allowLocalDataFallback()) {
       await mkdir(getUploadsRoot(), { recursive: true });
       const localJds = await ensureJdsJson();
       jds = localJds;
@@ -108,6 +109,8 @@ export async function GET(request: NextRequest) {
           }
         }
       }
+    } else if (jds.length === 0 && dbError) {
+      console.warn("No job descriptions from Supabase and local fallback disabled.");
     }
 
     // Group and automatically de-duplicate duplicate JDs (keeping the latest one)

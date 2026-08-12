@@ -6,6 +6,7 @@ import { join } from 'path';
 import { readFile, writeFile } from 'fs/promises';
 import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { writeLog } from '@/lib/structured-logger';
+import { allowLocalDataFallback } from '@/lib/db-mode';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -73,21 +74,23 @@ export async function GET(request: NextRequest) {
       rmEmail: row.rm_email,
     }));
 
-    // 2. Fetch from local JSON backup
-    const localEmails = await readLocalEmails();
+    // 2. Local JSON only when offline fallback is allowed
+    const localEmails = allowLocalDataFallback() ? await readLocalEmails() : [];
 
-    // 3. Merge both lists (deduplicating by id, preferring local)
+    // 3. Merge (Supabase preferred; local only fills gaps when fallback enabled)
     const emailMap = new Map<string, any>();
-    dbMapped.forEach((item) => emailMap.set(item.id, item));
     localEmails.forEach((item) => emailMap.set(item.id, item));
+    dbMapped.forEach((item) => emailMap.set(item.id, item));
 
     let combined = Array.from(emailMap.values());
 
-    // 4. Two-way sync: Save combined list back to local backup
-    await writeLocalEmails(combined);
+    // 4. Persist local backup only when fallback mode is on
+    if (allowLocalDataFallback()) {
+      await writeLocalEmails(combined);
+    }
 
     // 5. Two-way sync: Upload local-only emails to Supabase if database is online
-    if (!dbErrorOccurred) {
+    if (!dbErrorOccurred && allowLocalDataFallback()) {
       const dbIds = new Set(dbMapped.map(item => item.id));
       const missingInDb = localEmails.filter(item => !dbIds.has(item.id));
       
