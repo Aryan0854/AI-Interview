@@ -1,5 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Corporate SSL inspection (Infinite / Zscaler etc.) often breaks Node→Supabase TLS locally.
+// Set ALLOW_INSECURE_TLS=1 in .env.local for local dev ONLY — never enable on Vercel/prod.
+if (
+  process.env.ALLOW_INSECURE_TLS === "1" &&
+  process.env.NODE_ENV !== "production" &&
+  process.env.VERCEL !== "1"
+) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  console.warn(
+    "[db] ALLOW_INSECURE_TLS=1 — TLS certificate verification disabled for local Supabase calls."
+  );
+}
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';

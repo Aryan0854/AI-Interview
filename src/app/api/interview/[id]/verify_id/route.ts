@@ -78,7 +78,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { idImage, selfieImage, idType } = body || {};
+    const { idImage, selfieImage, idType, idDescriptor, selfieDescriptor } = body || {};
 
     if (!idImage || !selfieImage) {
       return NextResponse.json(
@@ -136,6 +136,8 @@ export async function POST(
       idImageBase64: idImage,
       selfieImageBase64: selfieImage,
       selectedIdType: idType,
+      idDescriptor: Array.isArray(idDescriptor) ? idDescriptor : null,
+      selfieDescriptor: Array.isArray(selfieDescriptor) ? selfieDescriptor : null,
     });
 
     const isSystemError = Boolean(matchResult.isSystemError);

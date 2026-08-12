@@ -57,7 +57,12 @@ export async function GET(request: NextRequest) {
     }
     
     // Fetch all sessions to check if they are concluded (used)
-    const sessions = await sessionService.getAllSessions();
+    let sessions: Awaited<ReturnType<typeof sessionService.getAllSessions>> = [];
+    try {
+      sessions = await sessionService.getAllSessions();
+    } catch (sessionErr) {
+      console.warn("Admin resumes: sessions unavailable, continuing without conclude flags:", sessionErr);
+    }
     const sessionsMap = new Map<string, boolean>();
     sessions.forEach((s) => {
       if (s.resumeId) {

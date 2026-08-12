@@ -264,8 +264,9 @@ export class SessionService {
       .order("created_at", { ascending: false });
 
     if (error) {
+      // Soft-fail so admin resumes still load when corporate TLS / network blocks Supabase.
       console.error("Failed to fetch all sessions from Supabase:", error.message);
-      throw new Error(`Failed to fetch all sessions: ${error.message}`);
+      return [];
     }
 
     return (data || []).map((row: any) => ({

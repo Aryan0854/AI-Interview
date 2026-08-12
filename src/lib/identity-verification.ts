@@ -12,6 +12,10 @@ import {
   type GovernmentIdType,
   type VerificationFailureCode,
 } from "@/lib/identity-verification-shared";
+import {
+  isFaceDescriptor,
+  matchFaceDescriptors,
+} from "@/lib/face-descriptor-match";
 
 export type {
   GovernmentIdType,
@@ -33,7 +37,7 @@ export interface IdentityVerificationResult {
   idTypeMatched: boolean;
   faceMatched: boolean;
   failureCode?: VerificationFailureCode;
-  engine: "gemini" | "facenet" | "hybrid" | "none";
+  engine: "gemini" | "facenet" | "hybrid" | "faceapi" | "none";
   isSystemError?: boolean;
 }
 
@@ -58,16 +62,89 @@ function parseJsonFromModel(text: string): any {
 function canUseLocalFaceNet(): boolean {
   if (process.env.FACE_MATCH_FORCE_CLOUD === "1") return false;
   if (process.env.FACE_MATCH_FORCE_LOCAL === "1") return true;
+  // Prefer remote FaceNet service on hosted (Render) over spawning Python locally.
+  if (process.env.FACE_MATCH_SERVICE_URL) return false;
   // Serverless / container hosts usually have no Python+torch stack
   if (process.env.VERCEL === "1") return false;
   if (process.env.AWS_LAMBDA_FUNCTION_NAME) return false;
   return true;
 }
 
+/**
+ * Production FaceNet on Render (or any always-on Docker host).
+ * Set FACE_MATCH_SERVICE_URL=https://your-service.onrender.com
+ * Optional FACE_MATCH_API_KEY must match the service env.
+ */
+async function runRemoteFaceNetService(
+  idImageBase64: string,
+  selfieImageBase64: string
+): Promise<{
+  matched: boolean;
+  confidence: number;
+  reason: string;
+  failureCode?: VerificationFailureCode;
+} | null> {
+  const baseUrl = (process.env.FACE_MATCH_SERVICE_URL || "").trim().replace(/\/$/, "");
+  if (!baseUrl) return null;
+
+  const apiKey = (process.env.FACE_MATCH_API_KEY || "").trim();
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.FACE_MATCH_TIMEOUT_MS || 90_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${baseUrl}/compare`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { "X-Face-Match-Key": apiKey } : {}),
+      },
+      body: JSON.stringify({
+        idImage: idImageBase64,
+        selfieImage: selfieImageBase64,
+        ...(apiKey ? { apiKey } : {}),
+      }),
+      signal: controller.signal,
+    });
+
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      console.error("Remote FaceNet service error:", res.status, payload);
+      return null;
+    }
+
+    const failureRaw = String(payload.failureCode || "");
+    const failureCode: VerificationFailureCode | undefined =
+      failureRaw === "no_face_on_id" || failureRaw === "no_face_on_selfie"
+        ? failureRaw
+        : undefined;
+
+    return {
+      matched: Boolean(payload.matched),
+      confidence:
+        typeof payload.confidence === "number"
+          ? payload.confidence
+          : parseInt(String(payload.confidence), 10) || 0,
+      reason: String(payload.reason || "Remote FaceNet comparison complete."),
+      failureCode,
+    };
+  } catch (err) {
+    console.error("Remote FaceNet service call failed:", err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function runLocalFaceNet(
   idImageBase64: string,
   selfieImageBase64: string
-): Promise<{ matched: boolean; confidence: number; reason: string } | null> {
+): Promise<{
+  matched: boolean;
+  confidence: number;
+  reason: string;
+  failureCode?: VerificationFailureCode;
+} | null> {
   if (!canUseLocalFaceNet()) return null;
 
   try {
@@ -264,13 +341,18 @@ export async function verifyFaceBiometricsOnly(
 }
 
 /**
- * Full production verification: selected ID type must match the card,
+ * Full production verification: selected ID type must match the card (when Gemini available),
  * and the face on the card must match the selfie.
+ *
+ * Hosted path without GEMINI_API_KEY: pass browser face-api descriptors
+ * (`idDescriptor` + `selfieDescriptor`) for embedding match.
  */
 export async function verifyCandidateIdentity(input: {
   idImageBase64: string;
   selfieImageBase64: string;
   selectedIdType?: string | null;
+  idDescriptor?: number[] | null;
+  selfieDescriptor?: number[] | null;
 }): Promise<IdentityVerificationResult> {
   if (!isGovernmentIdType(input.selectedIdType)) {
     return {
@@ -287,43 +369,191 @@ export async function verifyCandidateIdentity(input: {
   }
 
   const selectedIdType = input.selectedIdType;
+  const hasFaceApiDescriptors =
+    isFaceDescriptor(input.idDescriptor) && isFaceDescriptor(input.selfieDescriptor);
+  const faceApiMatch = hasFaceApiDescriptors
+    ? matchFaceDescriptors(input.idDescriptor!, input.selfieDescriptor!)
+    : null;
+
+  // Production primary: always-on FaceNet service (Render). Runs every verification.
+  const remoteFace = await runRemoteFaceNetService(
+    input.idImageBase64,
+    input.selfieImageBase64
+  );
 
   let geminiResult: Awaited<ReturnType<typeof runGeminiIdentityCheck>> | null = null;
   let geminiError: string | null = null;
 
-  try {
-    geminiResult = await runGeminiIdentityCheck({
-      idImageBase64: input.idImageBase64,
-      selfieImageBase64: input.selfieImageBase64,
-      selectedIdType,
-    });
-  } catch (err: any) {
-    geminiError = err?.message || String(err);
-    console.error("Gemini identity verification failed:", geminiError);
+  // Gemini is optional — ID type / spoof assist when quota allows.
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      geminiResult = await runGeminiIdentityCheck({
+        idImageBase64: input.idImageBase64,
+        selfieImageBase64: input.selfieImageBase64,
+        selectedIdType,
+      });
+    } catch (err: any) {
+      geminiError = err?.message || String(err);
+      console.error("Gemini identity verification failed:", geminiError);
+    }
   }
 
-  const localFace = await runLocalFaceNet(input.idImageBase64, input.selfieImageBase64);
+  const localFace =
+    remoteFace == null
+      ? await runLocalFaceNet(input.idImageBase64, input.selfieImageBase64)
+      : null;
 
-  // If cloud vision failed entirely and local face exists, we still cannot validate ID type → system/manual path
-  if (!geminiResult) {
-    if (localFace) {
+  const facenetFace = remoteFace || localFace;
+  const facenetEngine: IdentityVerificationResult["engine"] = remoteFace
+    ? "facenet"
+    : localFace
+      ? "facenet"
+      : "none";
+
+  // --- Path A: FaceNet service (or local) available — production biometric gate ---
+  if (facenetFace) {
+    if (facenetFace.failureCode === "no_face_on_id" || facenetFace.failureCode === "no_face_on_selfie") {
       return {
         matched: false,
-        confidence: localFace.confidence,
-        reason: `ID type could not be validated automatically (${geminiError || "vision unavailable"}). Face embedding check: ${localFace.reason}`,
+        confidence: facenetFace.confidence,
+        reason: facenetFace.reason,
         selectedIdType,
-        detectedIdType: null,
-        idTypeMatched: false,
-        faceMatched: localFace.matched,
-        failureCode: "engine_error",
-        engine: "facenet",
-        isSystemError: true,
+        detectedIdType: geminiResult?.detectedIdTypeRaw || selectedIdType,
+        idTypeMatched: true,
+        faceMatched: false,
+        failureCode: facenetFace.failureCode,
+        engine: facenetEngine,
       };
     }
+
+    // Optional Gemini document checks when available
+    if (geminiResult) {
+      if (!geminiResult.qualityOk) {
+        return {
+          matched: false,
+          confidence: facenetFace.confidence,
+          reason:
+            geminiResult.reason ||
+            "ID image quality is too low. Recapture a clearer, well-lit photo of the full card.",
+          selectedIdType,
+          detectedIdType: geminiResult.detectedIdTypeRaw,
+          idTypeMatched: false,
+          faceMatched: facenetFace.matched,
+          failureCode: "low_quality",
+          engine: "hybrid",
+        };
+      }
+      if (geminiResult.spoofSuspected) {
+        return {
+          matched: false,
+          confidence: Math.min(facenetFace.confidence, 40),
+          reason:
+            geminiResult.reason ||
+            "Possible spoof detected (screen/print). Use the original physical ID and a live selfie.",
+          selectedIdType,
+          detectedIdType: geminiResult.detectedIdTypeRaw,
+          idTypeMatched: false,
+          faceMatched: false,
+          failureCode: "spoof_suspected",
+          engine: "hybrid",
+        };
+      }
+      const detectedNormalized = normalizeDetectedIdType(geminiResult.detectedIdTypeRaw);
+      const idTypeMatched =
+        detectedNormalized === selectedIdType ||
+        (detectedNormalized === null && Boolean(geminiResult.idTypeMatched));
+      if (!idTypeMatched) {
+        return {
+          matched: false,
+          confidence: 0,
+          reason: `Selected ${getIdTypeLabel(selectedIdType)}, but the uploaded document appears to be ${getIdTypeLabel(detectedNormalized) || geminiResult.detectedIdTypeRaw}. Please select the correct type or upload the matching card.`,
+          selectedIdType,
+          detectedIdType: geminiResult.detectedIdTypeRaw,
+          idTypeMatched: false,
+          faceMatched: facenetFace.matched,
+          failureCode: "id_type_mismatch",
+          engine: "hybrid",
+        };
+      }
+    }
+
+    const MIN_CONFIDENCE = Number(process.env.IDENTITY_MIN_CONFIDENCE || 70);
+    let faceMatched = facenetFace.matched;
+    let confidence = facenetFace.confidence;
+    // Optional soft boost/check from browser face-api (never overrides a clear FaceNet fail)
+    if (faceApiMatch && faceMatched && faceApiMatch.matched) {
+      confidence = Math.round(confidence * 0.85 + faceApiMatch.confidence * 0.15);
+    }
+    if (faceMatched && confidence < MIN_CONFIDENCE) {
+      faceMatched = false;
+    }
+
+    if (!faceMatched) {
+      return {
+        matched: false,
+        confidence,
+        reason: facenetFace.reason,
+        selectedIdType,
+        detectedIdType: geminiResult?.detectedIdTypeRaw || selectedIdType,
+        idTypeMatched: true,
+        faceMatched: false,
+        failureCode: "face_mismatch",
+        engine: geminiResult ? "hybrid" : facenetEngine,
+      };
+    }
+
+    return {
+      matched: true,
+      confidence,
+      reason: geminiResult
+        ? `Identity verified via FaceNet. ${getIdTypeLabel(selectedIdType)} confirmed. ${facenetFace.reason}`
+        : `${getIdTypeLabel(selectedIdType)} accepted. ${facenetFace.reason}`,
+      selectedIdType,
+      detectedIdType: geminiResult?.detectedIdTypeRaw || selectedIdType,
+      idTypeMatched: true,
+      faceMatched: true,
+      engine: geminiResult ? "hybrid" : facenetEngine,
+    };
+  }
+
+  // --- Path B: No FaceNet — face-api / Gemini fallbacks ---
+  if (!geminiResult) {
+    if (faceApiMatch) {
+      const MIN_CONFIDENCE = Number(process.env.IDENTITY_MIN_CONFIDENCE || 70);
+      let faceMatched = faceApiMatch.matched;
+      let confidence = faceApiMatch.confidence;
+      if (faceMatched && confidence < MIN_CONFIDENCE) {
+        faceMatched = false;
+      }
+      if (!faceMatched) {
+        return {
+          matched: false,
+          confidence,
+          reason: faceApiMatch.reason,
+          selectedIdType,
+          detectedIdType: selectedIdType,
+          idTypeMatched: true,
+          faceMatched: false,
+          failureCode: "face_mismatch",
+          engine: "faceapi",
+        };
+      }
+      return {
+        matched: true,
+        confidence,
+        reason: `${getIdTypeLabel(selectedIdType)} accepted (selected by candidate). ${faceApiMatch.reason}`,
+        selectedIdType,
+        detectedIdType: selectedIdType,
+        idTypeMatched: true,
+        faceMatched: true,
+        engine: "faceapi",
+      };
+    }
+
     return {
       matched: false,
       confidence: 0,
-      reason: `Identity verification engine unavailable. Images saved for manual audit. ${geminiError || ""}`.trim(),
+      reason: `Identity verification engine unavailable. Configure FACE_MATCH_SERVICE_URL (Render FaceNet) for production. Images saved for manual audit. ${geminiError || ""}`.trim(),
       selectedIdType,
       detectedIdType: null,
       idTypeMatched: false,
@@ -352,7 +582,7 @@ export async function verifyCandidateIdentity(input: {
       idTypeMatched,
       faceMatched: false,
       failureCode: "low_quality",
-      engine: localFace ? "hybrid" : "gemini",
+      engine: faceApiMatch ? "hybrid" : "gemini",
     };
   }
 
@@ -368,7 +598,7 @@ export async function verifyCandidateIdentity(input: {
       idTypeMatched,
       faceMatched: false,
       failureCode: "spoof_suspected",
-      engine: localFace ? "hybrid" : "gemini",
+      engine: faceApiMatch ? "hybrid" : "gemini",
     };
   }
 
@@ -382,11 +612,11 @@ export async function verifyCandidateIdentity(input: {
       idTypeMatched: false,
       faceMatched: false,
       failureCode: "id_type_mismatch",
-      engine: localFace ? "hybrid" : "gemini",
+      engine: faceApiMatch ? "hybrid" : "gemini",
     };
   }
 
-  if (!geminiResult.faceVisibleOnId) {
+  if (!geminiResult.faceVisibleOnId && !faceApiMatch?.matched) {
     return {
       matched: false,
       confidence: 0,
@@ -396,11 +626,11 @@ export async function verifyCandidateIdentity(input: {
       idTypeMatched: true,
       faceMatched: false,
       failureCode: "no_face_on_id",
-      engine: localFace ? "hybrid" : "gemini",
+      engine: "gemini",
     };
   }
 
-  if (!geminiResult.faceVisibleOnSelfie) {
+  if (!geminiResult.faceVisibleOnSelfie && !faceApiMatch?.matched) {
     return {
       matched: false,
       confidence: 0,
@@ -410,48 +640,38 @@ export async function verifyCandidateIdentity(input: {
       idTypeMatched: true,
       faceMatched: false,
       failureCode: "no_face_on_selfie",
-      engine: localFace ? "hybrid" : "gemini",
+      engine: "gemini",
     };
   }
 
-  // Combine face signals when both engines available
+  // FaceNet unavailable — Gemini ± browser face-api only
   let faceMatched = geminiResult.faceMatched;
   let confidence = geminiResult.confidence;
   let engine: IdentityVerificationResult["engine"] = "gemini";
   let reason = geminiResult.reason;
 
-  if (localFace) {
+  if (faceApiMatch) {
     engine = "hybrid";
-    // Require agreement for high assurance; if they disagree, fail closed
-    if (geminiResult.faceMatched && localFace.matched) {
+    if (geminiResult.faceMatched && faceApiMatch.matched) {
       faceMatched = true;
-      confidence = Math.round((geminiResult.confidence + localFace.confidence) / 2);
-      reason = `ID type confirmed as ${getIdTypeLabel(selectedIdType)}. Biometric match confirmed by cloud vision and local FaceNet.`;
-    } else if (geminiResult.faceMatched && !localFace.matched) {
-      // Prefer cloud on hosted-quality images but fail closed if local strongly disagrees (<50)
-      if (localFace.confidence < 50) {
-        faceMatched = false;
-        confidence = Math.min(geminiResult.confidence, localFace.confidence);
-        reason = `ID type OK, but face match engines disagreed (cloud ${geminiResult.confidence}% vs local ${localFace.confidence}%). Please retake selfie in better light.`;
-      } else {
-        faceMatched = true;
-        confidence = Math.round(geminiResult.confidence * 0.7 + localFace.confidence * 0.3);
-        reason = `ID type confirmed. Face match accepted with hybrid scoring.`;
-      }
-    } else if (!geminiResult.faceMatched && localFace.matched && localFace.confidence >= 80) {
+      confidence = Math.round((geminiResult.confidence + faceApiMatch.confidence) / 2);
+      reason = `ID type confirmed as ${getIdTypeLabel(selectedIdType)}. Biometric match confirmed by cloud vision and face embeddings.`;
+    } else if (!geminiResult.faceMatched && faceApiMatch.matched && faceApiMatch.confidence >= 75) {
       faceMatched = true;
-      confidence = Math.round(localFace.confidence * 0.6 + geminiResult.confidence * 0.4);
-      reason = `ID type confirmed. Face match accepted via local FaceNet with supporting cloud score.`;
+      confidence = faceApiMatch.confidence;
+      reason = `ID type confirmed. Face match accepted via embeddings (${faceApiMatch.reason})`;
+      engine = "faceapi";
+    } else if (geminiResult.faceMatched && !faceApiMatch.matched) {
+      faceMatched = false;
+      confidence = Math.min(geminiResult.confidence, faceApiMatch.confidence);
+      reason = `ID type OK, but face embeddings disagreed with cloud score. ${faceApiMatch.reason}`;
     } else {
       faceMatched = false;
-      confidence = Math.max(geminiResult.confidence, localFace.confidence);
-      reason =
-        geminiResult.reason ||
-        "Face on the ID does not match the live selfie closely enough.";
+      confidence = Math.max(geminiResult.confidence, faceApiMatch.confidence);
+      reason = geminiResult.reason || faceApiMatch.reason;
     }
   }
 
-  // Production threshold — require solid confidence
   const MIN_CONFIDENCE = Number(process.env.IDENTITY_MIN_CONFIDENCE || 70);
   if (faceMatched && confidence < MIN_CONFIDENCE) {
     faceMatched = false;

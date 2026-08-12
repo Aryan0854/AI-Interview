@@ -15,6 +15,13 @@ import {
   getIdTypeLabel,
   type GovernmentIdType,
 } from '@/lib/identity-verification-shared';
+import {
+  FACE_MISSING_SECONDS,
+  isInterviewAdminOnlyProctorType,
+  LOOK_AWAY_SECONDS,
+  LOOKING_DOWN_SECONDS,
+  SILENT_PROCTOR_COOLDOWN_MS,
+} from '@/lib/interview-silent-proctor';
 
 const CODING_LANGUAGES = [
   { value: 'javascript', label: 'JavaScript' },
@@ -490,10 +497,13 @@ export default function CandidatePortal() {
   ) => {
     if (interviewEnded || currentStep === 'setup') return;
 
-    // Apply 3-second cooldown per violation type to prevent spam/duplicate logs
+    const adminOnly = isInterviewAdminOnlyProctorType(violationType);
+
+    // Apply cooldown per violation type (longer for silent behavioral events)
     const nowMs = Date.now();
     const lastTimeMs = lastTriggeredViolationsRef.current[violationType] || 0;
-    if (nowMs - lastTimeMs < 3000) {
+    const cooldownMs = adminOnly ? SILENT_PROCTOR_COOLDOWN_MS : 3000;
+    if (nowMs - lastTimeMs < cooldownMs) {
       return;
     }
     lastTriggeredViolationsRef.current[violationType] = nowMs;
@@ -502,15 +512,11 @@ export default function CandidatePortal() {
       ? Math.max(0, (Date.now() - recordingStartTimeRef.current) / 1000)
       : 0;
 
-    // Let's determine if this violation should count as a warning strikes:
-    const isWarningStrike = [
+    // Integrity strikes (fullscreen/tab/etc.) — NOT silent face/voice/gaze events
+    const isWarningStrike = !adminOnly && [
       "Fullscreen Exit Detected",
       "Tab Switch Detected",
       "Window Lost Focus",
-      "Face Missing",
-      "Multiple People Detected",
-      "Multiple Voices Detected",
-      "Background Conversation",
       "Mobile Phone Detected",
       "Right Click Attempted",
       "DevTools Shortcut Blocked",
@@ -518,12 +524,12 @@ export default function CandidatePortal() {
     ].includes(violationType);
 
     setWarningCount(prevCount => {
-      const newCount = typeof customWarningCount === 'number'
+      const newCount = typeof customWarningCount === 'number' && !adminOnly
         ? customWarningCount
         : (isWarningStrike ? prevCount + 1 : prevCount);
       const timestamp = new Date().toISOString();
 
-      // Post violation event to backend
+      // Always persist for admin audit (silent for candidate when adminOnly)
       fetch(`/api/interview/${resumeId}/proctor_violation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -534,17 +540,18 @@ export default function CandidatePortal() {
           duration: parseFloat(duration.toFixed(1)),
           confidence: parseFloat(confidence.toFixed(2)),
           description,
-          videoTimestamp: parseFloat(elapsedSeconds.toFixed(1))
+          videoTimestamp: parseFloat(elapsedSeconds.toFixed(1)),
+          silent: adminOnly,
         })
       }).catch(err => console.error("Failed to log proctor violation:", err));
 
-      // Append to local state array
       setViolations(prev => [
         ...prev,
         { type: violationType, timestamp, warningCount: newCount }
       ]);
 
-      if (newCount >= 3) {
+      // Auto-submit only on integrity strikes, never on silent behavioral logs
+      if (!adminOnly && newCount >= 3) {
         setTimeout(() => {
           finalizeInterview();
           setShowEndConfirm(false);
@@ -817,18 +824,17 @@ export default function CandidatePortal() {
     };
   }, []);
 
-  // Proctor State checks using clmtrackr face tracking & head-pose gaze estimation
+  // Silent face / gaze / multi-person monitoring (admin report only — no candidate UI)
   useEffect(() => {
     if (currentStep === 'setup' || interviewEnded) return;
 
     let trackerInstance: any = null;
     let intervalId: any = null;
-    let lastState: 'one' | 'none' | 'left' | 'right' | 'up' | 'down' | 'multiple' | 'phone' = 'one';
+    let multiFaceIntervalId: ReturnType<typeof setInterval> | null = null;
+    let lastState: 'one' | 'none' | 'left' | 'right' | 'up' | 'down' = 'one';
     let stateStartTime = Date.now();
-    let hasIncrementedWarning = false;
     let isTracking = false;
-
-    // History for smoothing/debouncing state transitions
+    let cancelled = false;
     const stateHistory: string[] = [];
 
     const startTracking = () => {
@@ -848,93 +854,73 @@ export default function CandidatePortal() {
       startTracking();
     }
 
-    const flushPending = () => {
-      if (hasIncrementedWarning && lastState !== 'one') {
-        const duration = (Date.now() - stateStartTime) / 1000;
-        let type = "Face Missing";
-        let desc = "Face completely leaves the frame, is obscured, or camera blocked.";
-        let confidence = 0.90;
+    const logGazeEvent = (
+      type: string,
+      duration: number,
+      confidence: number,
+      description: string
+    ) => {
+      // Fire immediately for admin; do not bump candidate strike counter
+      triggerProctorEvent(type, duration, confidence, description);
+      stateStartTime = Date.now();
+    };
 
-        if (lastState === 'left') { type = "Looking Left"; desc = "Candidate looked away to the left."; confidence = 0.85; }
-        else if (lastState === 'right') { type = "Looking Right"; desc = "Candidate looked away to the right."; confidence = 0.85; }
-        else if (lastState === 'up') { type = "Looking Up"; desc = "Candidate looked up excessively."; confidence = 0.80; }
-        else if (lastState === 'down') { type = "Looking Down"; desc = "Candidate looked down (possible phone usage)."; confidence = 0.85; }
-        else if (lastState === 'multiple') { type = "Multiple People Detected"; desc = "Multiple people detected in webcam feed."; confidence = 0.95; }
-        else if (lastState === 'phone') { type = "Mobile Phone Detected"; desc = "Mobile phone detected in webcam feed."; confidence = 0.98; }
-
-        triggerProctorEvent(type, duration, confidence, desc, warningCountRef.current);
-        hasIncrementedWarning = false;
+    flushPendingViolationRef.current = () => {
+      // On interview end, flush any long-running gaze state still active
+      if (lastState === 'one') return;
+      const duration = (Date.now() - stateStartTime) / 1000;
+      if (lastState === 'down' && duration >= LOOKING_DOWN_SECONDS) {
+        logGazeEvent(
+          "Looking Down",
+          duration,
+          0.88,
+          `Candidate looked down for ${duration.toFixed(1)}s (possible phone usage).`
+        );
+      } else if (lastState === 'none' && duration >= FACE_MISSING_SECONDS) {
+        logGazeEvent(
+          "Face Missing",
+          duration,
+          0.9,
+          `No face detected for ${duration.toFixed(1)}s.`
+        );
+      } else if (['left', 'right', 'up'].includes(lastState) && duration >= LOOK_AWAY_SECONDS) {
+        const label =
+          lastState === 'left' ? "Looking Left" : lastState === 'right' ? "Looking Right" : "Looking Up";
+        logGazeEvent(label, duration, 0.82, `Candidate gaze ${lastState} for ${duration.toFixed(1)}s.`);
       }
     };
 
-    flushPendingViolationRef.current = flushPending;
-
     intervalId = setInterval(() => {
-      // Check developer mode overrides
-      if (proctorState === 'none') {
+      // Dev overrides still supported for QA without changing candidate UI
+      if (proctorState === 'none' || proctorState === 'multiple' || proctorState === 'phone') {
         const now = Date.now();
-        if (lastState !== 'none') {
-          flushPending();
-          lastState = 'none';
-          stateStartTime = now;
-          hasIncrementedWarning = false;
-        } else if (now - stateStartTime >= 2000 && !hasIncrementedWarning) {
-          setWarningCount(prev => {
-            const next = prev + 1;
-            warningCountRef.current = next;
-            return next;
-          });
-          hasIncrementedWarning = true;
+        if (proctorState === 'none') {
+          if (lastState !== 'none') {
+            lastState = 'none';
+            stateStartTime = now;
+          } else if ((now - stateStartTime) / 1000 >= FACE_MISSING_SECONDS) {
+            logGazeEvent("Face Missing", (now - stateStartTime) / 1000, 0.95, "Dev override: face missing.");
+          }
+        } else if (proctorState === 'multiple') {
+          triggerProctorEvent(
+            "Multiple People Detected",
+            2,
+            0.98,
+            "Dev override: multiple people in frame."
+          );
+        } else if (proctorState === 'phone') {
+          triggerProctorEvent(
+            "Mobile Phone Detected",
+            2,
+            0.98,
+            "Dev override: mobile phone detected."
+          );
         }
         return;
       }
 
-      if (proctorState === 'multiple') {
-        const now = Date.now();
-        if (lastState !== 'multiple') {
-          flushPending();
-          lastState = 'multiple';
-          stateStartTime = now;
-          hasIncrementedWarning = false;
-        } else if (now - stateStartTime >= 2000 && !hasIncrementedWarning) {
-          setWarningCount(prev => {
-            const next = prev + 1;
-            warningCountRef.current = next;
-            return next;
-          });
-          hasIncrementedWarning = true;
-        }
-        return;
-      }
-
-      if (proctorState === 'phone') {
-        const now = Date.now();
-        if (lastState !== 'phone') {
-          flushPending();
-          lastState = 'phone';
-          stateStartTime = now;
-          hasIncrementedWarning = false;
-        } else if (now - stateStartTime >= 2000 && !hasIncrementedWarning) {
-          setWarningCount(prev => {
-            const next = prev + 1;
-            warningCountRef.current = next;
-            return next;
-          });
-          hasIncrementedWarning = true;
-        }
-        return;
-      }
-
-      if (!clmReady || !isTracking || !trackerInstance || !(window as any).clm || !(window as any).pModel) {
-        if (lastState !== 'one') {
-          flushPending();
-          lastState = 'one';
-          stateStartTime = Date.now();
-          hasIncrementedWarning = false;
-        }
-        if (clmReady) {
-          startTracking();
-        }
+      if (!clmReady || !isTracking || !trackerInstance) {
+        if (clmReady) startTracking();
         return;
       }
 
@@ -942,11 +928,9 @@ export default function CandidatePortal() {
       const score = trackerInstance.getScore();
 
       let detectedState: typeof lastState = 'one';
-      let confidence = score || 0;
 
       if (!positions || positions.length < 70 || score < 0.35) {
         detectedState = 'none';
-        confidence = score || 0.15;
       } else {
         const noseX = positions[62][0];
         const noseY = positions[62][1];
@@ -955,32 +939,18 @@ export default function CandidatePortal() {
         const noseBridgeY = positions[33][1];
         const chinY = positions[7][1];
 
-        const leftDist = noseX - leftFaceX;
-        const rightDist = rightFaceX - noseX;
-        const horizontalRatio = leftDist / (rightDist || 1);
+        const horizontalRatio = (noseX - leftFaceX) / (rightFaceX - noseX || 1);
+        const verticalRatio = (noseY - noseBridgeY) / (chinY - noseY || 1);
 
-        const noseLen = noseY - noseBridgeY;
-        const chinLen = chinY - noseY;
-        const verticalRatio = noseLen / (chinLen || 1);
-
-        if (horizontalRatio < 0.78) {
-          detectedState = 'right';
-        } else if (horizontalRatio > 1.28) {
-          detectedState = 'left';
-        } else if (verticalRatio < 0.48) {
-          detectedState = 'up';
-        } else if (verticalRatio > 0.82) {
-          detectedState = 'down';
-        } else {
-          detectedState = 'one';
-        }
+        if (horizontalRatio < 0.78) detectedState = 'right';
+        else if (horizontalRatio > 1.28) detectedState = 'left';
+        else if (verticalRatio < 0.48) detectedState = 'up';
+        else if (verticalRatio > 0.82) detectedState = 'down';
+        else detectedState = 'one';
       }
 
-      // Smooth the raw detectedState with a majority vote filter
       stateHistory.push(detectedState);
-      if (stateHistory.length > 5) {
-        stateHistory.shift();
-      }
+      if (stateHistory.length > 5) stateHistory.shift();
 
       const counts: Record<string, number> = {};
       let maxCount = 0;
@@ -989,51 +959,96 @@ export default function CandidatePortal() {
         counts[s] = (counts[s] || 0) + 1;
         if (counts[s] > maxCount) {
           maxCount = counts[s];
-          smoothedState = s as any;
+          smoothedState = s as typeof lastState;
         }
       }
 
       const now = Date.now();
       if (smoothedState !== lastState) {
-        flushPending();
         lastState = smoothedState;
         stateStartTime = now;
-        hasIncrementedWarning = false;
       } else {
         const duration = (now - stateStartTime) / 1000;
-        const isCodingPhase = questions[currentIndex]?.startsWith("Coding Challenge:");
-        const lookAwayDurationThreshold = isCodingPhase ? 10.0 : 4.0;
-        const faceMissingDurationThreshold = isCodingPhase ? 15.0 : 6.0;
-
-        if (!hasIncrementedWarning) {
-          if (lastState === 'none' && duration >= faceMissingDurationThreshold) {
-            setWarningCount(prev => {
-              const next = prev + 1;
-              warningCountRef.current = next;
-              return next;
-            });
-            hasIncrementedWarning = true;
-          } else if (['left', 'right', 'up', 'down'].includes(lastState) && duration >= lookAwayDurationThreshold) {
-            setWarningCount(prev => {
-              const next = prev + 1;
-              warningCountRef.current = next;
-              return next;
-            });
-            hasIncrementedWarning = true;
-          }
+        if (lastState === 'none' && duration >= FACE_MISSING_SECONDS) {
+          logGazeEvent(
+            "Face Missing",
+            duration,
+            Math.max(0.5, score || 0.4),
+            `No face detected for ${duration.toFixed(1)}s.`
+          );
+        } else if (lastState === 'down' && duration >= LOOKING_DOWN_SECONDS) {
+          logGazeEvent(
+            "Looking Down",
+            duration,
+            0.88,
+            `Candidate looked down for ${duration.toFixed(1)}s (possible phone usage).`
+          );
+        } else if (
+          (lastState === 'left' || lastState === 'right' || lastState === 'up') &&
+          duration >= LOOK_AWAY_SECONDS
+        ) {
+          const label =
+            lastState === 'left'
+              ? "Looking Left"
+              : lastState === 'right'
+                ? "Looking Right"
+                : "Looking Up";
+          logGazeEvent(
+            label,
+            duration,
+            0.82,
+            `Candidate gaze ${lastState} for ${duration.toFixed(1)}s.`
+          );
         }
       }
-    }, 200);
+    }, 250);
+
+    // Multi-person detection (Chrome/Edge FaceDetector) — silent admin log
+    const FaceDetectorCtor = (window as any).FaceDetector as
+      | (new (opts?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+          detect: (image: CanvasImageSource) => Promise<Array<{ boundingBox: DOMRectReadOnly }>>;
+        })
+      | undefined;
+
+    if (typeof FaceDetectorCtor === "function") {
+      let detector: InstanceType<typeof FaceDetectorCtor> | null = null;
+      try {
+        detector = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 5 });
+      } catch {
+        detector = null;
+      }
+
+      if (detector) {
+        multiFaceIntervalId = setInterval(async () => {
+          if (cancelled || !videoRef.current || videoRef.current.readyState < 2) return;
+          try {
+            const faces = await detector!.detect(videoRef.current);
+            if (faces.length >= 2) {
+              triggerProctorEvent(
+                "Multiple People Detected",
+                2,
+                0.95,
+                `${faces.length} faces visible in the camera frame.`
+              );
+            }
+          } catch {
+            // Transient FaceDetector failures are ignored
+          }
+        }, 2000);
+      }
+    }
 
     return () => {
+      cancelled = true;
       clearInterval(intervalId);
+      if (multiFaceIntervalId) clearInterval(multiFaceIntervalId);
       flushPendingViolationRef.current = null;
       if (trackerInstance) {
         try {
           trackerInstance.stop();
-        } catch(e){}
+        } catch (e) {}
       }
-    }
+    };
   }, [currentStep, interviewEnded, clmReady, proctorState, triggerProctorEvent]);
 
   // Sync stream with verification video element
@@ -1174,13 +1189,38 @@ export default function CandidatePortal() {
     }, 2 * 60 * 1000);
 
     try {
+      // Browser face embeddings — works on Vercel without GEMINI_API_KEY.
+      let idDescriptor: number[] | null = null;
+      let selfieDescriptor: number[] | null = null;
+      try {
+        const { extractIdAndSelfieDescriptors } = await import(
+          "@/lib/client-face-descriptors"
+        );
+        const descriptors = await extractIdAndSelfieDescriptors(
+          idImageBase64,
+          selfieImageBase64
+        );
+        idDescriptor = descriptors.idDescriptor;
+        selfieDescriptor = descriptors.selfieDescriptor;
+      } catch (faceErr: any) {
+        console.warn("Client face-api embedding failed:", faceErr);
+        const msg = String(faceErr?.message || "");
+        // Hard fail when no face is detectable — Gemini optional path can't help much either.
+        if (/No clear face/i.test(msg)) {
+          throw new Error(msg);
+        }
+        // Otherwise continue — server may still use Gemini if configured.
+      }
+
       const res = await fetch(`/api/interview/${resumeId}/verify_id`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idType: selectedIdType,
           idImage: idImageBase64,
-          selfieImage: selfieImageBase64
+          selfieImage: selfieImageBase64,
+          idDescriptor,
+          selfieDescriptor,
         })
       });
 
@@ -1567,7 +1607,7 @@ export default function CandidatePortal() {
       const audioContext = new AudioContextClass();
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 512;
       source.connect(analyser);
 
       audioContextRef.current = audioContext;
@@ -1583,60 +1623,86 @@ export default function CandidatePortal() {
       const checkVolume = () => {
         if (!analyserRef.current) return;
         analyserRef.current.getByteFrequencyData(dataArray);
-        
+
         let sum = 0;
+        let low = 0;
+        let mid = 0;
+        let high = 0;
+        const third = Math.floor(bufferLength / 3);
         for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
+          const v = dataArray[i];
+          sum += v;
+          if (i < third) low += v;
+          else if (i < third * 2) mid += v;
+          else high += v;
         }
         const average = sum / bufferLength;
-        // Map average amplitude to a readable 0-100 scale
         const volume = Math.min(100, Math.round((average / 128) * 100));
         setUserVolume(volume);
-        
+
         const activeListening = isMicListeningRef.current;
         setIsUserSpeaking(volume > 5 && activeListening);
 
-        if (activeListening) {
-          const now = Date.now();
+        // Always monitor during the interview (not only while STT is listening)
+        const now = Date.now();
+        const lowAvg = low / Math.max(1, third);
+        const midAvg = mid / Math.max(1, third);
+        const highAvg = high / Math.max(1, bufferLength - third * 2);
 
-          // Excessive Noise check (volume > 85, duration >= 2.5s)
-          if (volume > 85) {
-            if (!excessiveNoiseStart) excessiveNoiseStart = now;
-            const duration = (now - excessiveNoiseStart) / 1000;
-            if (duration >= 2.5) {
-              triggerProctorEvent("Excessive Noise", duration, 0.95, "Excessive ambient noise or sound levels detected.");
-              excessiveNoiseStart = now; // reset start time to prevent spamming
-            }
-          } else {
-            excessiveNoiseStart = 0;
-          }
-
-          // Multiple Voices check (volume > 65, duration >= 3.5s)
-          if (volume > 65) {
-            if (!multipleVoicesStart) multipleVoicesStart = now;
-            const duration = (now - multipleVoicesStart) / 1000;
-            if (duration >= 3.5) {
-              triggerProctorEvent("Multiple Voices Detected", duration, 0.90, "Multiple distinct speaking voices detected in candidate vicinity.");
-              multipleVoicesStart = now;
-            }
-          } else {
-            multipleVoicesStart = 0;
-          }
-
-          // Background Conversation check (volume > 25, duration >= 5s)
-          if (volume > 25) {
-            if (!backgroundConversationStart) backgroundConversationStart = now;
-            const duration = (now - backgroundConversationStart) / 1000;
-            if (duration >= 5.0) {
-              triggerProctorEvent("Background Conversation", duration, 0.80, "Sustained secondary talking or background conversation detected.");
-              backgroundConversationStart = now;
-            }
-          } else {
-            backgroundConversationStart = 0;
+        // Excessive Noise (very loud sustained)
+        if (volume > 85) {
+          if (!excessiveNoiseStart) excessiveNoiseStart = now;
+          const duration = (now - excessiveNoiseStart) / 1000;
+          if (duration >= 2.5) {
+            triggerProctorEvent(
+              "Excessive Noise",
+              duration,
+              0.9,
+              `Sustained high ambient volume (${volume}/100) for ${duration.toFixed(1)}s.`
+            );
+            excessiveNoiseStart = now;
           }
         } else {
           excessiveNoiseStart = 0;
+        }
+
+        // Multiple voices heuristic:
+        // concurrent energy in mid + high bands (two speech-like sources) OR
+        // loud audio while candidate is not the one speaking into the mic UI.
+        const dualBandSpeech = midAvg > 45 && highAvg > 35 && lowAvg > 20 && volume > 40;
+        const backgroundSpeaker = !activeListening && volume > 45 && midAvg > 40;
+        if (dualBandSpeech || backgroundSpeaker) {
+          if (!multipleVoicesStart) multipleVoicesStart = now;
+          const duration = (now - multipleVoicesStart) / 1000;
+          if (duration >= 3.5) {
+            triggerProctorEvent(
+              "Multiple Voices Detected",
+              duration,
+              dualBandSpeech ? 0.86 : 0.8,
+              dualBandSpeech
+                ? `Concurrent speech-like energy across frequency bands for ${duration.toFixed(1)}s (possible second speaker).`
+                : `Elevated speech audio while candidate mic turn was inactive for ${duration.toFixed(1)}s.`
+            );
+            multipleVoicesStart = now;
+          }
+        } else {
           multipleVoicesStart = 0;
+        }
+
+        // Background conversation: moderate sustained speech when not answering
+        if (!activeListening && volume > 28 && midAvg > 25) {
+          if (!backgroundConversationStart) backgroundConversationStart = now;
+          const duration = (now - backgroundConversationStart) / 1000;
+          if (duration >= 5.0) {
+            triggerProctorEvent(
+              "Background Conversation",
+              duration,
+              0.78,
+              `Sustained secondary talking / background conversation for ${duration.toFixed(1)}s.`
+            );
+            backgroundConversationStart = now;
+          }
+        } else if (activeListening || volume <= 20) {
           backgroundConversationStart = 0;
         }
 

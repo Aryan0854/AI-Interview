@@ -80,6 +80,7 @@ export default function AdminResponseReviewPage() {
   const [isDragging, setIsDragging] = useState(false);
   const seekerRef = useRef<HTMLDivElement>(null);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [videoUnavailable, setVideoUnavailable] = useState(false);
 
   const getCalculatedDuration = () => {
     let reportObj: any = {};
@@ -247,7 +248,7 @@ export default function AdminResponseReviewPage() {
 
   // Admin face tracking overlay setup
   useEffect(() => {
-    if (!clmReady || !resume?.report?.videoUrl) return;
+    if (!clmReady || !resume?.id) return;
     if (!(window as any).clm || !(window as any).pModel) return;
 
     let trackerInstance: any = null;
@@ -342,7 +343,7 @@ export default function AdminResponseReviewPage() {
         cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [clmReady, resume?.report?.videoUrl]);
+  }, [clmReady, resume?.id]);
 
   useEffect(() => {
     if (!resumeId) return;
@@ -376,12 +377,31 @@ export default function AdminResponseReviewPage() {
   }, []);
 
   useEffect(() => {
-    if (resume?.report?.videoUrl) {
-      setVideoSrc(`${resume.report.videoUrl}?t=${Date.now()}`);
-    } else {
+    if (!resume?.id) {
       setVideoSrc(null);
+      setVideoUnavailable(false);
+      return;
     }
-  }, [resume?.report?.videoUrl]);
+
+    // report may be a JSON string from Supabase — unwrap videoUrl safely
+    let reportObj: any = resume.report;
+    if (typeof reportObj === "string") {
+      try {
+        reportObj = JSON.parse(reportObj);
+      } catch {
+        reportObj = {};
+      }
+    }
+
+    // Always point at the interview video endpoint so the player is present
+    // even when report.videoUrl was never written.
+    const base =
+      (typeof reportObj?.videoUrl === "string" && reportObj.videoUrl.trim()) ||
+      `/api/interview/${resume.id}/video`;
+    const sep = base.includes("?") ? "&" : "?";
+    setVideoUnavailable(false);
+    setVideoSrc(`${base}${sep}t=${Date.now()}`);
+  }, [resume?.id, resume?.report]);
 
   return (
     <AdminAuthGate>
@@ -478,11 +498,25 @@ export default function AdminResponseReviewPage() {
                 return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
               };
 
-              // 3. Click-to-seek handler
+              // 3. Click-to-seek handler — jump video to the flagged moment
               const handleSeek = (seconds: number | undefined) => {
-                if (videoRef.current && typeof seconds === 'number') {
-                  videoRef.current.currentTime = seconds;
-                  videoRef.current.play().catch(() => {});
+                if (!videoRef.current || typeof seconds !== "number" || Number.isNaN(seconds)) return;
+                const el = videoRef.current;
+                const seekTo = Math.max(0, seconds);
+                const apply = () => {
+                  try {
+                    el.currentTime = seekTo;
+                    setVideoCurrentTime(seekTo);
+                    el.play().catch(() => {});
+                  } catch {
+                    // ignore seek errors on unloaded media
+                  }
+                };
+                if (el.readyState >= 1) {
+                  apply();
+                } else {
+                  el.addEventListener("loadedmetadata", apply, { once: true });
+                  el.load();
                 }
               };
 
@@ -496,14 +530,17 @@ export default function AdminResponseReviewPage() {
                   if (type === "Multiple People Detected" || type === "Mobile Phone Detected") {
                     score -= 25;
                     highRiskCount++;
+                  } else if (type === "Looking Down" || type === "Multiple Voices Detected") {
+                    score -= 15;
+                    highRiskCount++;
                   } else if (type === "Fullscreen Exit Detected") {
                     score -= 15;
                     highRiskCount++;
                   } else if (type === "Face Missing") {
                     score -= 12;
-                  } else if (["Tab Switch Detected", "Window Lost Focus", "Multiple Voices Detected", "Background Conversation"].includes(type)) {
+                  } else if (["Tab Switch Detected", "Window Lost Focus", "Background Conversation"].includes(type)) {
                     score -= 10;
-                  } else if (["Looking Left", "Looking Right", "Looking Up", "Looking Down", "Excessive Noise"].includes(type)) {
+                  } else if (["Looking Left", "Looking Right", "Looking Up", "Excessive Noise"].includes(type)) {
                     score -= 5;
                   }
                 });
@@ -584,8 +621,7 @@ export default function AdminResponseReviewPage() {
                     </div>
                   </Card>
 
-                  {resume.report?.videoUrl ? (
-                    <div className="grid gap-6 lg:grid-cols-12">
+                  <div className="grid gap-6 lg:grid-cols-12">
                       {/* Left: Video Player (5 cols) */}
                       <div className="lg:col-span-5 space-y-6">
                         <Card className="p-6 bg-card border border-border shadow-soft rounded-3xl">
@@ -606,22 +642,38 @@ export default function AdminResponseReviewPage() {
                                   onMouseEnter={() => setIsHoveringVideo(true)}
                                   onMouseLeave={() => setIsHoveringVideo(false)}
                                 >
+                                  {/* Always mount the video element so seek-from-log works once media loads */}
                                   <video
+                                    key={videoSrc || resume.id}
                                     ref={videoRef}
-                                    src={videoSrc ?? undefined}
+                                    src={videoSrc ?? `/api/interview/${resume.id}/video`}
                                     preload="auto"
+                                    playsInline
                                     onTimeUpdate={(e) => setVideoCurrentTime(e.currentTarget.currentTime)}
                                     onLoadedMetadata={(e) => {
                                       const d = e.currentTarget.duration;
                                       if (d && isFinite(d)) {
                                         setVideoDuration(d);
                                       }
+                                      setVideoUnavailable(false);
                                     }}
+                                    onLoadedData={() => setVideoUnavailable(false)}
+                                    onCanPlay={() => setVideoUnavailable(false)}
+                                    onError={() => setVideoUnavailable(true)}
                                     onPlay={() => setIsPlaying(true)}
                                     onPause={() => setIsPlaying(false)}
                                     className="w-full h-full object-contain cursor-pointer"
                                     onClick={togglePlay}
                                   />
+                                  {videoUnavailable && (
+                                    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 text-slate-300 px-6 text-center bg-slate-950/90 pointer-events-none">
+                                      <Video className="w-8 h-8 opacity-60" />
+                                      <p className="text-xs font-semibold">Loading proctoring video…</p>
+                                      <p className="text-[10px] text-slate-500">
+                                        If this stays empty, the session recording was not uploaded. Timestamps on the right still apply once video is available.
+                                      </p>
+                                    </div>
+                                  )}
                                   <canvas
                                     ref={canvasRef}
                                     className="absolute top-0 left-0 w-full h-full pointer-events-none z-10"
@@ -695,7 +747,7 @@ export default function AdminResponseReviewPage() {
                             );
                           })()}
                           <div className="mt-4 p-4 bg-indigo-50/50 dark:bg-slate-800/40 rounded-2xl border border-indigo-100/50 dark:border-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-400">
-                            💡 Use the timeline on the right to jump directly to specific violation events.
+                            💡 Click a timestamp (e.g. <span className="font-mono text-primary">00:17</span>) on the right to jump the video to that moment.
                           </div>
                         </Card>
                       </div>
@@ -710,7 +762,7 @@ export default function AdminResponseReviewPage() {
                                   <ShieldAlert className="w-4 h-4 text-primary" /> Proctoring Integrity Logs
                                 </h3>
                                 <p className="text-xs text-muted-foreground mt-0.5 font-semibold">
-                                  Review real-time violations, gaze shifts, tab activity, and voice triggers.
+                                  Click any timestamp to seek the proctoring video to that event.
                                 </p>
                               </div>
                               
@@ -792,21 +844,23 @@ export default function AdminResponseReviewPage() {
                             </div>
 
                             {/* Violations List */}
-                            <div className="overflow-y-auto max-h-[300px] border border-indigo-50/50 dark:border-slate-800 rounded-2xl bg-slate-50/30 dark:bg-slate-950/20 scrollbar-thin">
+                            <div className="overflow-y-auto max-h-[420px] border border-indigo-50/50 dark:border-slate-800 rounded-2xl bg-slate-50/30 dark:bg-slate-950/20 scrollbar-thin">
                               {filteredViolations.length > 0 ? (
                                 <div className="divide-y divide-indigo-50 dark:divide-slate-800">
                                   {filteredViolations.map((v: any, index: number) => {
                                     const isAudio = ["Multiple Voices Detected", "Background Conversation", "Excessive Noise"].includes(v.type);
-                                    const isCritical = ["Multiple People Detected", "Fullscreen Exit Detected", "Mobile Phone Detected"].includes(v.type);
+                                    const isCritical = ["Multiple People Detected", "Fullscreen Exit Detected", "Mobile Phone Detected", "Looking Down", "Multiple Voices Detected"].includes(v.type);
                                     
                                     return (
-                                      <div
+                                      <button
+                                        type="button"
                                         key={index}
                                         onClick={() => handleSeek(v.videoTimestamp)}
-                                        className="p-3 flex items-start gap-3 hover:bg-indigo-50/60 dark:hover:bg-slate-800/40 transition-all cursor-pointer group"
+                                        title={`Jump video to ${formatVideoTime(v.videoTimestamp)}`}
+                                        className="w-full text-left p-3 flex items-start gap-3 hover:bg-indigo-50/60 dark:hover:bg-slate-800/40 transition-all cursor-pointer group"
                                       >
-                                        {/* Timestamp tag */}
-                                        <div className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-slate-800 text-primary font-mono text-xs font-bold flex-shrink-0 mt-0.5 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                                        {/* Timestamp tag — click seeks video */}
+                                        <div className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-slate-800 text-primary font-mono text-xs font-bold flex-shrink-0 mt-0.5 group-hover:bg-indigo-600 group-hover:text-white transition-all underline-offset-2 group-hover:underline">
                                           {formatVideoTime(v.videoTimestamp)}
                                         </div>
 
@@ -826,11 +880,11 @@ export default function AdminResponseReviewPage() {
                                             <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.2 rounded-md font-bold ${
                                               isCritical
                                                 ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-rose-455 border border-red-200 dark:border-red-900/40'
-                                                : ['Looking Left', 'Looking Right', 'Looking Up', 'Looking Down', 'Excessive Noise'].includes(v.type)
+                                                : ['Looking Left', 'Looking Right', 'Looking Up', 'Excessive Noise'].includes(v.type)
                                                   ? 'bg-secondary text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
                                                   : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40'
                                             }`}>
-                                              {isCritical ? 'Critical' : ['Looking Left', 'Looking Right', 'Looking Up', 'Looking Down', 'Excessive Noise'].includes(v.type) ? 'Low' : 'Medium'}
+                                              {isCritical ? 'Critical' : ['Looking Left', 'Looking Right', 'Looking Up', 'Excessive Noise'].includes(v.type) ? 'Low' : 'Medium'}
                                             </span>
                                           </div>
                                           
@@ -852,7 +906,7 @@ export default function AdminResponseReviewPage() {
                                         <div className="w-6 h-6 rounded-full bg-secondary border border-indigo-100 dark:border-slate-700 items-center justify-center flex opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
                                           <Play className="w-3 h-3 text-primary fill-indigo-600 dark:fill-violet-400" />
                                         </div>
-                                      </div>
+                                      </button>
                                     );
                                   })}
                                 </div>
@@ -866,56 +920,6 @@ export default function AdminResponseReviewPage() {
                         </Card>
                       </div>
                     </div>
-                  ) : (
-                    violationsList.length > 0 && (
-                      <Card className="p-6 bg-card border border-border shadow-soft rounded-3xl">
-                        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                          <div>
-                            <h3 className="text-sm font-bold text-slate-850 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                              <ShieldAlert className="w-4 h-4 text-primary" /> Proctoring Integrity Logs (No Video Stream)
-                            </h3>
-                          </div>
-                          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border font-bold text-xs ${metrics.bg}`}>
-                            <span className="text-slate-605 dark:text-slate-350">Integrity Score:</span>
-                            <span className={`text-sm font-black ${metrics.color}`}>{metrics.score}%</span>
-                            <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded-md bg-white/85 dark:bg-slate-900 border ${metrics.color}`}>
-                              {metrics.rating}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="overflow-y-auto max-h-[300px] border border-indigo-50/50 dark:border-slate-800 rounded-2xl bg-slate-50/30 dark:bg-slate-950/20 scrollbar-thin">
-                          <div className="divide-y divide-indigo-50 dark:divide-slate-800">
-                            {violationsList.map((v: any, index: number) => {
-                              const isAudio = ["Multiple Voices Detected", "Background Conversation", "Excessive Noise"].includes(v.type);
-                              const isCritical = ["Multiple People Detected", "Fullscreen Exit Detected"].includes(v.type);
-                              return (
-                                <div key={index} className="p-3 flex items-start gap-3 hover:bg-indigo-50/60 dark:hover:bg-slate-800/40 transition-all">
-                                  <div className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-slate-800 text-primary font-mono text-xs font-bold flex-shrink-0 mt-0.5">
-                                    {formatVideoTime(v.videoTimestamp)}
-                                  </div>
-                                  <div className="flex-grow min-w-0">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-extrabold text-xs text-slate-800 dark:text-slate-200">{v.type}</span>
-                                      <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.2 rounded-md font-bold bg-secondary text-slate-550 dark:text-slate-400">
-                                        {isAudio ? 'Audio' : 'Video'}
-                                      </span>
-                                      <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.2 rounded-md font-bold ${
-                                        isCritical ? 'bg-red-50 dark:bg-red-950/30 text-red-600 border border-red-200' : 'bg-amber-50 dark:bg-amber-950/30 text-amber-605 border border-amber-200'
-                                      }`}>
-                                        {isCritical ? 'Critical' : 'Medium'}
-                                      </span>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mt-1 leading-snug font-medium">{v.description}</p>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </Card>
-                    )
-                  )}
 
                   <Card className="bg-card border-border shadow-soft overflow-x-auto">
                     <table className="min-w-full divide-y divide-indigo-50 dark:divide-slate-800 text-sm text-left">

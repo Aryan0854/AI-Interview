@@ -19,7 +19,8 @@ export async function POST(
       duration,
       confidence,
       description,
-      videoTimestamp
+      videoTimestamp,
+      silent,
     } = body;
 
     if (!violationType || typeof warningCount !== 'number') {
@@ -48,22 +49,29 @@ export async function POST(
       reportObj.proctoring = {
         warningCount: 0,
         violations: [],
-        autoSubmitted: false
+        autoSubmitted: false,
+        eventCount: 0,
       };
     }
 
-    reportObj.proctoring.warningCount = warningCount;
+    // Silent behavioral events still append to the audit timeline but do not
+    // raise strike count / auto-submit (candidate experience unchanged).
+    if (!silent) {
+      reportObj.proctoring.warningCount = warningCount;
+    }
+    reportObj.proctoring.eventCount = (reportObj.proctoring.eventCount || 0) + 1;
     reportObj.proctoring.violations.push({
       type: violationType,
       timestamp: timestamp || new Date().toISOString(),
-      warningCount,
+      warningCount: silent ? reportObj.proctoring.warningCount || 0 : warningCount,
       duration: typeof duration === 'number' ? duration : undefined,
       confidence: typeof confidence === 'number' ? confidence : undefined,
       description: description || undefined,
-      videoTimestamp: typeof videoTimestamp === 'number' ? videoTimestamp : undefined
+      videoTimestamp: typeof videoTimestamp === 'number' ? videoTimestamp : undefined,
+      silent: Boolean(silent),
     });
 
-    if (warningCount >= 3) {
+    if (!silent && warningCount >= 3) {
       reportObj.proctoring.autoSubmitted = true;
     }
 
