@@ -12,6 +12,17 @@ import { checkCsrf, getClientIp } from '@/lib/security';
 
 export const runtime = 'nodejs';
 
+type MailRecipient = {
+  employee_id: string;
+  email: string;
+  full_name: string;
+  department?: string;
+  skills?: string;
+  grade?: string;
+  designation?: string;
+  score?: number;
+};
+
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
 };
@@ -41,6 +52,55 @@ const getTransporter = () => {
     tls: { rejectUnauthorized: false }
   });
 };
+
+function resolveAppOrigin(request: NextRequest): string {
+  const configured = (process.env.NEXT_PUBLIC_APP_URL || "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+  return new URL(request.url).origin;
+}
+
+/** Shared BizX Assessment Invitation HTML template. */
+function buildAssessmentInviteHtml(opts: {
+  fullName: string;
+  loginHint: string;
+  portalUrl: string;
+  assessmentLabel: string;
+}): string {
+  const { fullName, loginHint, portalUrl, assessmentLabel } = opts;
+  return `
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e0e7ff; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+  <div style="text-align: center; margin-bottom: 24px;">
+    <div style="display: inline-block; width: 48px; height: 48px; border-radius: 12px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); line-height: 48px; color: #ffffff; font-size: 24px; font-weight: bold; font-family: sans-serif;">B</div>
+    <h2 style="color: #1e1b4b; margin-top: 12px; margin-bottom: 4px; font-size: 20px; font-weight: 800; font-family: sans-serif;">BizX Intelligence Portal</h2>
+    <span style="color: #6b7280; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: sans-serif;">Assessment Invitation</span>
+  </div>
+  <hr style="border: 0; border-top: 1px solid #f3f4f6; margin-bottom: 24px;" />
+  <div style="color: #374151; font-size: 14px; line-height: 1.6; font-weight: 500; font-family: sans-serif;">
+    <p>Dear <strong>${fullName}</strong>,</p>
+    <p>Congratulations! Our HR team evaluated your profile against one of our open position's Job, and classified you as a <strong>Highly Suitable</strong> candidate.</p>
+    <p>We are excited to invite you to the next step of our recruitment process: a secure, voice-assisted ${assessmentLabel} evaluation on our screening portal.</p>
+    
+    <div style="margin: 28px 0; text-align: center;">
+      <a href="${portalUrl}" target="_blank" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 10px rgba(79, 70, 229, 0.25);">Start Assessment</a>
+    </div>
+
+    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin: 20px 0;">
+      <h4 style="color: #1e293b; margin: 0 0 8px 0; font-size: 13px; font-weight: 700;">Instructions for logging in:</h4>
+      <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #475569;">
+        <li style="margin-bottom: 4px;">Go to: <a href="${portalUrl}" style="color: #4f46e5; text-decoration: underline;">${portalUrl}</a></li>
+        <li style="margin-bottom: 4px;">${loginHint}</li>
+        <li>You will have exactly <strong>one attempt</strong> to take the ${assessmentLabel} evaluation. Please make sure you are in a quiet room with a working microphone.</li>
+      </ul>
+    </div>
+    
+    <p style="margin-top: 24px;">Good luck with your interview!</p>
+    <p style="color: #9ca3af; font-size: 12px; margin-top: 32px; border-top: 1px solid #f3f4f6; padding-top: 16px; text-align: center;">
+      This is an automated simulation email dispatched by the BizX Screening Console.
+    </p>
+  </div>
+</div>
+`;
+}
 
 async function logDispatchedEmail(emailRecord: any) {
   try {
@@ -75,6 +135,21 @@ async function logDispatchedEmail(emailRecord: any) {
   } catch (localErr) {}
 }
 
+function normalizeRecipients(raw: any[]): MailRecipient[] {
+  return raw
+    .map((item) => ({
+      employee_id: String(item?.employee_id || "").trim(),
+      email: String(item?.email || "").trim(),
+      full_name: String(item?.full_name || item?.fullName || "").trim() || "Employee",
+      department: item?.department,
+      skills: item?.skills,
+      grade: item?.grade,
+      designation: item?.designation,
+      score: item?.score,
+    }))
+    .filter((item) => item.employee_id && item.email);
+}
+
 export async function POST(request: NextRequest) {
   if (!checkCsrf(request)) {
     return NextResponse.json({ error: "Forbidden (CSRF check failed)" }, { status: 403 });
@@ -88,29 +163,42 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const requesterEmail = body.adminEmail || "admin@infinite.com";
+    const portalMode = body.portal === true;
 
-    const requestUrl = new URL(request.url);
-    const portalUrl = 'https://ai-interview-ahkoe7hof-aryan0854s-projects.vercel.app';
+    const appOrigin = resolveAppOrigin(request);
+    const portalUrl = portalMode
+      ? `${appOrigin}/employee?org=BizX`
+      : appOrigin;
 
-    const jsonPath = getEmployeesJsonPath();
-    let employees = [];
-    try {
-      const raw = await readFile(jsonPath, "utf8");
-      employees = JSON.parse(raw);
-    } catch (e) {
-      return NextResponse.json({ error: "Employee pool not loaded" }, { status: 404 });
-    }
+    let targets: MailRecipient[] = [];
 
-    const targetEmployeeIds = body.employeeIds;
-    let targets = [];
-    if (Array.isArray(targetEmployeeIds) && targetEmployeeIds.length > 0) {
-      targets = employees.filter((e: any) => targetEmployeeIds.includes(e.employee_id));
+    if (Array.isArray(body.recipients) && body.recipients.length > 0) {
+      targets = normalizeRecipients(body.recipients);
     } else {
-      targets = employees.filter((e: any) => e.shortlisted);
+      const jsonPath = getEmployeesJsonPath();
+      let employees: any[] = [];
+      try {
+        const raw = await readFile(jsonPath, "utf8");
+        employees = JSON.parse(raw);
+      } catch (e) {
+        return NextResponse.json({ error: "Employee pool not loaded" }, { status: 404 });
+      }
+
+      const targetEmployeeIds = body.employeeIds;
+      if (Array.isArray(targetEmployeeIds) && targetEmployeeIds.length > 0) {
+        targets = normalizeRecipients(
+          employees.filter((e: any) => targetEmployeeIds.includes(e.employee_id))
+        );
+      } else {
+        targets = normalizeRecipients(employees.filter((e: any) => e.shortlisted));
+      }
     }
 
     if (targets.length === 0) {
-      return NextResponse.json({ error: "No target employees found to dispatch invite emails." }, { status: 400 });
+      return NextResponse.json(
+        { error: "No target employees found to dispatch invite emails." },
+        { status: 400 }
+      );
     }
 
     const transporter = getTransporter();
@@ -122,86 +210,61 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // 1. Create a dummy/placeholder resume record for the employee
-      const resumeId = crypto.randomUUID();
-      const dummyResume = {
-        id: resumeId,
-        filename: `Employee_${emp.employee_id}.txt`,
-        originalText: `Employee Profile\nName: ${emp.full_name}\nID: ${emp.employee_id}\nDept: ${emp.department}\nSkills: ${emp.skills}`,
-        parsed: {
-          personal: {
-            fullName: emp.full_name,
-            email: emp.email,
-            phone: ""
+      // Candidate-pool invites still create a resume/session for the public screening portal.
+      if (!portalMode) {
+        const resumeId = crypto.randomUUID();
+        const dummyResume = {
+          id: resumeId,
+          filename: `Employee_${emp.employee_id}.txt`,
+          originalText: `Employee Profile\nName: ${emp.full_name}\nID: ${emp.employee_id}\nDept: ${emp.department}\nSkills: ${emp.skills}`,
+          parsed: {
+            personal: {
+              fullName: emp.full_name,
+              email: emp.email,
+              phone: ""
+            },
+            skills: {
+              technical: emp.skills ? [emp.skills] : [],
+              soft: []
+            },
+            experience: [],
+            education: []
           },
-          skills: {
-            technical: emp.skills ? [emp.skills] : [],
-            soft: []
+          analysis: {
+            executiveSummary: `Employee profile matched for internal screening. Grade: ${emp.grade || 'N/A'}, Designation: ${emp.designation || 'N/A'}.`,
+            overallScore: emp.score || 50,
+            atsScore: emp.score || 50,
+            technicalScore: emp.score || 50,
+            jdMatchScore: emp.score || 50
           },
-          experience: [],
-          education: []
-        },
-        analysis: {
-          executiveSummary: `Employee profile matched for internal screening. Grade: ${emp.grade || 'N/A'}, Designation: ${emp.designation || 'N/A'}.`,
-          overallScore: emp.score || 50,
-          atsScore: emp.score || 50,
-          technicalScore: emp.score || 50,
-          jdMatchScore: emp.score || 50
-        },
-        enhanced: null,
-        report: {
-          rmEmail: requesterEmail,
-          verification: null
-        },
-        error: null,
-        fileHash: `emp_${emp.employee_id}_hash`,
-        fileBase64: null,
-        status: 'parsed',
-        createdAt: new Date().toISOString()
-      };
+          enhanced: null,
+          report: {
+            rmEmail: requesterEmail,
+            verification: null
+          },
+          error: null,
+          fileHash: `emp_${emp.employee_id}_hash`,
+          fileBase64: null,
+          status: 'parsed',
+          createdAt: new Date().toISOString()
+        };
 
-      // Save dummy resume row
-      await resumeService.saveResumeRow(dummyResume as any);
+        await resumeService.saveResumeRow(dummyResume as any);
+        await sessionService.createCandidateSession(emp.email, resumeId);
+      }
 
-      // 2. Register candidate session
-      await sessionService.createCandidateSession(emp.email, resumeId);
-
-      // 3. Dispatch simulated/real email
       const subject = `Assessment Invitation - BizX Screening Console`;
-      
-      const htmlBody = `
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #e0e7ff; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-  <div style="text-align: center; margin-bottom: 24px;">
-    <div style="display: inline-block; width: 48px; height: 48px; border-radius: 12px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); line-height: 48px; color: #ffffff; font-size: 24px; font-weight: bold; font-family: sans-serif;">B</div>
-    <h2 style="color: #1e1b4b; margin-top: 12px; margin-bottom: 4px; font-size: 20px; font-weight: 800; font-family: sans-serif;">BizX Intelligence Portal</h2>
-    <span style="color: #6b7280; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-family: sans-serif;">Assessment Invitation</span>
-  </div>
-  <hr style="border: 0; border-top: 1px solid #f3f4f6; margin-bottom: 24px;" />
-  <div style="color: #374151; font-size: 14px; line-height: 1.6; font-weight: 500; font-family: sans-serif;">
-    <p>Dear <strong>${emp.full_name}</strong>,</p>
-    <p>Congratulations! Our HR team evaluated your profile against one of our open position's Job, and classified you as a <strong>Highly Suitable</strong> candidate.</p>
-    <p>We are excited to invite you to the next step of our recruitment process: a secure, voice-assisted technical evaluation on our screening portal.</p>
-    
-    <div style="margin: 28px 0; text-align: center;">
-      <a href="${portalUrl}" target="_blank" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 10px rgba(79, 70, 229, 0.25);">Start Assessment</a>
-    </div>
+      const assessmentLabel = portalMode ? "technical" : "technical";
+      const loginHint = portalMode
+        ? `Login with Employee ID: <strong>${emp.employee_id}</strong>`
+        : `Login email address: <strong>${emp.email}</strong>`;
 
-    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin: 20px 0;">
-      <h4 style="color: #1e293b; margin: 0 0 8px 0; font-size: 13px; font-weight: 700;">Instructions for logging in:</h4>
-      <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #475569;">
-        <li style="margin-bottom: 4px;">Go to: <a href="${portalUrl}" style="color: #4f46e5; text-decoration: underline;">${portalUrl}</a></li>
-        <li style="margin-bottom: 4px;">Login email address: <strong>${emp.email}</strong></li>
-        <li>You will have exactly <strong>one attempt</strong> to take the technical evaluation. Please make sure you are in a quiet room with a working microphone.</li>
-      </ul>
-    </div>
-    
-    <p style="margin-top: 24px;">Good luck with your interview!</p>
-    <p style="color: #9ca3af; font-size: 12px; margin-top: 32px; border-top: 1px solid #f3f4f6; padding-top: 16px; text-align: center;">
-      This is an automated simulation email dispatched by the BizX Screening Console.
-    </p>
-  </div>
-</div>
-`;
+      const htmlBody = buildAssessmentInviteHtml({
+        fullName: emp.full_name,
+        loginHint,
+        portalUrl,
+        assessmentLabel,
+      });
 
       let status = 'simulated';
       if (transporter) {
@@ -220,7 +283,6 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Log email outbox
       const emailRecord = {
         id: crypto.randomUUID(),
         to: emp.email,
@@ -235,17 +297,22 @@ export async function POST(request: NextRequest) {
 
       await auditLogService.addLog({
         actorEmail: requesterEmail,
-        action: "ADMIN_INVITE_EMPLOYEE",
+        action: portalMode ? "ADMIN_INVITE_PORTAL_EMPLOYEE" : "ADMIN_INVITE_EMPLOYEE",
         target: emp.email,
-        details: `Dispatched internal assessment invite to employee ${emp.full_name} (${emp.employee_id}). Status: ${status}.`,
+        details: `Dispatched ${portalMode ? "employee portal" : "internal"} assessment invite to ${emp.full_name} (${emp.employee_id}). Status: ${status}.`,
         ipAddress: ip
       });
 
       dispatched.push({ email: emp.email, name: emp.full_name, status });
     }
 
-    await writeLog('employee', 'DISPATCH_EMPLOYEE_MAILS', 'success', `Successfully dispatched assessment invitations to ${targets.length} employees.`);
-    return NextResponse.json({ success: true, count: targets.length, dispatched });
+    await writeLog(
+      'employee',
+      portalMode ? 'DISPATCH_PORTAL_EMPLOYEE_MAILS' : 'DISPATCH_EMPLOYEE_MAILS',
+      'success',
+      `Successfully dispatched assessment invitations to ${dispatched.length} employees.`
+    );
+    return NextResponse.json({ success: true, count: dispatched.length, dispatched });
   } catch (error: any) {
     console.error("Failed to dispatch internal emails:", error);
     await writeLog('employee', 'DISPATCH_EMPLOYEE_MAILS_FAILED', 'failed', `Failed to dispatch internal emails: ${error.message}`);

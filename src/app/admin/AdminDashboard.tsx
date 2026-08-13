@@ -654,6 +654,8 @@ export default function AdminDashboard() {
   const [isExportingPortal, setIsExportingPortal] = useState(false);
   const [isDispatchingMails, setIsDispatchingMails] = useState(false);
   const [isBulkDispatchingMails, setIsBulkDispatchingMails] = useState(false);
+  const [portalMailSendingId, setPortalMailSendingId] = useState<string | null>(null);
+  const [isBulkPortalMailing, setIsBulkPortalMailing] = useState(false);
   const [activeEmployee, setActiveEmployee] = useState<any>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [requirementSearch, setRequirementSearch] = useState("");
@@ -1218,6 +1220,97 @@ export default function AdminDashboard() {
     setDeleteTargetId("bulk-portal-videos");
     setDeletePasswordInput("");
     setDeleteModalError(null);
+  };
+
+  const buildPortalMailRecipients = (employeeIds: string[]) => {
+    return employeeIds
+      .map((id) => {
+        const account = resourcePortalEmployees.find((entry) => entry.employee_id === id);
+        if (!account?.email) return null;
+        return {
+          employee_id: account.employee_id,
+          email: account.email,
+          full_name: portalEmployeeName(account),
+        };
+      })
+      .filter(Boolean) as Array<{ employee_id: string; email: string; full_name: string }>;
+  };
+
+  const handleSendPortalEmployeeMail = async (account: {
+    employee_id: string;
+    email?: string | null;
+    full_name?: string | null;
+  }) => {
+    if (!account.email) {
+      setActionError("Cannot send mail: this employee has no email address.");
+      return;
+    }
+    setPortalMailSendingId(account.employee_id);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const response = await fetch("/api/admin/employees/dispatch_mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminEmail,
+          portal: true,
+          recipients: [
+            {
+              employee_id: account.employee_id,
+              email: account.email,
+              full_name: portalEmployeeName(account),
+            },
+          ],
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send assessment invitation.");
+      }
+      setActionSuccess(
+        `Assessment invitation sent to ${portalEmployeeName(account)} (${account.email}).`
+      );
+      await loadEmails();
+    } catch (err: any) {
+      setActionError(err.message || "Failed to send assessment invitation.");
+    } finally {
+      setPortalMailSendingId(null);
+    }
+  };
+
+  const handleBulkSendPortalEmployeeMails = async () => {
+    const recipients = buildPortalMailRecipients(selectedPortalEmployeeIds);
+    if (recipients.length === 0) {
+      setActionError("Selected employees have no email addresses to send mail to.");
+      return;
+    }
+    setIsBulkPortalMailing(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const response = await fetch("/api/admin/employees/dispatch_mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminEmail,
+          portal: true,
+          recipients,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send assessment invitations.");
+      }
+      setActionSuccess(
+        `Assessment invitation sent to ${data.count} selected employee(s).`
+      );
+      await loadEmails();
+    } catch (err: any) {
+      setActionError(err.message || "Failed to send assessment invitations.");
+    } finally {
+      setIsBulkPortalMailing(false);
+    }
   };
 
   const portalDashboardStats = useMemo(() => {
@@ -4261,7 +4354,7 @@ export default function AdminDashboard() {
                     </div>
 
                     {selectedPortalEmployeeIds.length > 0 && (
-                      <div className="flex items-center justify-between p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
+                      <div className="flex items-center justify-between gap-3 p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
                         <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
                           {selectedPortalEmployeeIds.length} employee
                           {selectedPortalEmployeeIds.length > 1 ? "s" : ""} selected
@@ -4269,6 +4362,24 @@ export default function AdminDashboard() {
                             ? ` · ${selectedPortalVideoTargets.length} with recording`
                             : " · none with a recording to delete"}
                         </span>
+                        <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isBulkPortalMailing}
+                          onClick={handleBulkSendPortalEmployeeMails}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 border-border text-primary hover:bg-secondary"
+                        >
+                          {isBulkPortalMailing ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending...
+                            </>
+                          ) : (
+                            <>
+                              <Mail className="w-3.5 h-3.5" /> Send Mail
+                            </>
+                          )}
+                        </Button>
                         <Button
                           variant="destructive"
                           size="sm"
@@ -4289,6 +4400,7 @@ export default function AdminDashboard() {
                             </>
                           )}
                         </Button>
+                        </div>
                       </div>
                     )}
 
@@ -4507,6 +4619,31 @@ export default function AdminDashboard() {
                                               <>
                                                 <RefreshCcw className="w-3.5 h-3.5 mr-1" />
                                                 Reset Test
+                                              </>
+                                            )}
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={
+                                              !account.email ||
+                                              portalMailSendingId === account.employee_id ||
+                                              isBulkPortalMailing
+                                            }
+                                            title={
+                                              account.email
+                                                ? `Send assessment invitation to ${account.email}`
+                                                : "No email address on file"
+                                            }
+                                            onClick={() => handleSendPortalEmployeeMail(account)}
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
+                                          >
+                                            {portalMailSendingId === account.employee_id ? (
+                                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                              <>
+                                                <Mail className="w-3.5 h-3.5 mr-1" />
+                                                Send Mail
                                               </>
                                             )}
                                           </Button>
