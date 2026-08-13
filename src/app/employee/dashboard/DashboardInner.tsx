@@ -224,6 +224,16 @@ export function DashboardInner() {
             </p>
           </div>
         </div>
+
+        <div className="max-w-4xl mx-auto mt-10 text-center">
+          <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-indigo-100 backdrop-blur-sm">
+            <Sparkles className="w-4 h-4" /> Welcome to Infinite Journey
+          </div>
+          <h2 className="mt-6 text-3xl sm:text-4xl font-extrabold tracking-tight text-white">Your learning adventure takes center stage</h2>
+          <p className="mt-4 text-base sm:text-lg leading-8 text-indigo-100/90">
+            Every quiz, lesson, and assessment is part of your infinite growth path. Dive in with confidence, explore your strengths, and watch your readiness score rise as you progress.
+          </p>
+        </div>
       </div>
 
       <main className="max-w-full mx-auto px-6 md:px-12 -mt-6 pb-14 space-y-6 relative z-10">

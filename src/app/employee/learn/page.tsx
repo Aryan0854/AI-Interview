@@ -110,7 +110,7 @@ export default function EmployeeLearnPage() {
                   href={`/employee/learn/${subject.id}`}
                   className="text-sm font-bold text-primary hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors flex items-center gap-1 group-hover:gap-2"
                 >
-                  Take test <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                  Explore <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </div>
             </Card>
