@@ -108,21 +108,207 @@ function portalCompletedDayKey(value: string | null | undefined): string | null 
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
+  return portalDayKeyFromDate(date);
+}
+
+function portalDayKeyFromDate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
+function portalParseDayKey(dayKey: string): Date {
+  return new Date(`${dayKey}T12:00:00`);
+}
+
+/** Monday (local) of the week that contains `date`. Weeks are Mon–Sun. */
+function portalStartOfWeekMonday(date: Date): Date {
+  const local = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = local.getDay(); // 0=Sun ... 6=Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  local.setDate(local.getDate() + diff);
+  return local;
+}
+
+function portalAddDays(date: Date, days: number): Date {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function portalWeekStartKeyForDay(dayKey: string): string {
+  return portalDayKeyFromDate(portalStartOfWeekMonday(portalParseDayKey(dayKey)));
+}
+
+function portalWeekEndKey(weekStartKey: string): string {
+  return portalDayKeyFromDate(portalAddDays(portalParseDayKey(weekStartKey), 6));
+}
+
 /** Display like "Aug 12, 2026" from a YYYY-MM-DD key. */
 function formatPortalCompletedDayLabel(dayKey: string): string {
-  const date = new Date(`${dayKey}T12:00:00`);
+  const date = portalParseDayKey(dayKey);
   if (Number.isNaN(date.getTime())) return dayKey;
   return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
+}
+
+/** Display like "Aug 3 - Aug 9" for a Mon–Sun week start key. */
+function formatPortalWeekRangeShort(weekStartKey: string): string {
+  const start = portalParseDayKey(weekStartKey);
+  const end = portalParseDayKey(portalWeekEndKey(weekStartKey));
+  const startLabel = start.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${startLabel} - ${endLabel}`;
+}
+
+type PortalCompletedFilterOption = {
+  value: string;
+  label: string;
+};
+
+type PortalCompletedOlderWeek = {
+  weekStartKey: string;
+  weekFilterValue: string;
+  label: string;
+  dayKeys: string[];
+  dayOptions: PortalCompletedFilterOption[];
+};
+
+type PortalCompletedFilterModel = {
+  currentWeekOptions: PortalCompletedFilterOption[];
+  lastWeekOptions: PortalCompletedFilterOption[];
+  lastWeekDayKeys: string[];
+  olderWeeks: PortalCompletedOlderWeek[];
+};
+
+type PortalCompletedDateMenu =
+  | { type: "root" }
+  | { type: "last-week" }
+  | { type: "week"; weekStartKey: string };
+
+const PORTAL_LAST_WEEK_FILTER = "last-week";
+const PORTAL_WEEK_FILTER_PREFIX = "week:";
+
+function buildPortalCompletedFilterModel(
+  dayKeys: string[],
+  now: Date = new Date()
+): PortalCompletedFilterModel {
+  const currentWeekStart = portalStartOfWeekMonday(now);
+  const currentWeekStartKey = portalDayKeyFromDate(currentWeekStart);
+  const lastWeekStartKey = portalDayKeyFromDate(portalAddDays(currentWeekStart, -7));
+
+  const byWeek = new Map<string, string[]>();
+  for (const dayKey of dayKeys) {
+    const weekStartKey = portalWeekStartKeyForDay(dayKey);
+    const list = byWeek.get(weekStartKey) ?? [];
+    list.push(dayKey);
+    byWeek.set(weekStartKey, list);
+  }
+
+  const toDayOptions = (days: string[] | undefined): PortalCompletedFilterOption[] =>
+    [...(days ?? [])]
+      .sort((a, b) => b.localeCompare(a))
+      .map((dayKey) => ({
+        value: dayKey,
+        label: formatPortalCompletedDayLabel(dayKey),
+      }));
+
+  const currentWeekOptions = toDayOptions(byWeek.get(currentWeekStartKey));
+  const lastWeekDayKeys = [...(byWeek.get(lastWeekStartKey) ?? [])].sort((a, b) =>
+    b.localeCompare(a)
+  );
+  const lastWeekOptions = toDayOptions(lastWeekDayKeys);
+
+  const olderWeeks: PortalCompletedOlderWeek[] = Array.from(byWeek.keys())
+    .filter((weekStartKey) => weekStartKey < lastWeekStartKey)
+    .sort((a, b) => b.localeCompare(a))
+    .map((weekStartKey) => {
+      const weekDayKeys = [...(byWeek.get(weekStartKey) ?? [])].sort((a, b) =>
+        b.localeCompare(a)
+      );
+      return {
+        weekStartKey,
+        weekFilterValue: `${PORTAL_WEEK_FILTER_PREFIX}${weekStartKey}`,
+        label: `Week (${formatPortalWeekRangeShort(weekStartKey)})`,
+        dayKeys: weekDayKeys,
+        dayOptions: toDayOptions(weekDayKeys),
+      };
+    });
+
+  return {
+    currentWeekOptions,
+    lastWeekOptions,
+    lastWeekDayKeys,
+    olderWeeks,
+  };
+}
+
+function matchesPortalCompletedDateFilter(
+  dayKey: string | null,
+  filter: string,
+  now: Date = new Date()
+): boolean {
+  if (filter === "all") return true;
+  if (!dayKey) return false;
+
+  if (filter === PORTAL_LAST_WEEK_FILTER) {
+    const currentWeekStart = portalStartOfWeekMonday(now);
+    const lastWeekStartKey = portalDayKeyFromDate(portalAddDays(currentWeekStart, -7));
+    return portalWeekStartKeyForDay(dayKey) === lastWeekStartKey;
+  }
+
+  if (filter.startsWith(PORTAL_WEEK_FILTER_PREFIX)) {
+    const weekStartKey = filter.slice(PORTAL_WEEK_FILTER_PREFIX.length);
+    return portalWeekStartKeyForDay(dayKey) === weekStartKey;
+  }
+
+  return dayKey === filter;
+}
+
+function isPortalLastWeekFilterValue(
+  filter: string,
+  lastWeekDayKeys: string[]
+): boolean {
+  return filter === PORTAL_LAST_WEEK_FILTER || lastWeekDayKeys.includes(filter);
+}
+
+function findPortalOlderWeekForFilter(
+  filter: string,
+  olderWeeks: PortalCompletedOlderWeek[]
+): PortalCompletedOlderWeek | null {
+  if (filter.startsWith(PORTAL_WEEK_FILTER_PREFIX)) {
+    const weekStartKey = filter.slice(PORTAL_WEEK_FILTER_PREFIX.length);
+    return olderWeeks.find((week) => week.weekStartKey === weekStartKey) ?? null;
+  }
+  return olderWeeks.find((week) => week.dayKeys.includes(filter)) ?? null;
+}
+
+function getPortalCompletedDateMenuForFilter(
+  filter: string,
+  model: PortalCompletedFilterModel
+): PortalCompletedDateMenu {
+  if (isPortalLastWeekFilterValue(filter, model.lastWeekDayKeys)) {
+    return { type: "last-week" };
+  }
+  const olderWeek = findPortalOlderWeekForFilter(filter, model.olderWeeks);
+  if (olderWeek) {
+    return { type: "week", weekStartKey: olderWeek.weekStartKey };
+  }
+  return { type: "root" };
+}
+
+function formatPortalCompletedFilterButtonLabel(filter: string): string {
+  if (filter === "all") return "Completed On: All";
+  if (filter === PORTAL_LAST_WEEK_FILTER) return "Completed On: Last Week";
+  if (filter.startsWith(PORTAL_WEEK_FILTER_PREFIX)) {
+    const weekStartKey = filter.slice(PORTAL_WEEK_FILTER_PREFIX.length);
+    return `Completed On: Week (${formatPortalWeekRangeShort(weekStartKey)})`;
+  }
+  return `Completed On: ${formatPortalCompletedDayLabel(filter)}`;
 }
 
 function portalVideoTest(account: {
@@ -426,6 +612,11 @@ export default function AdminDashboard() {
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [testStatusFilter, setTestStatusFilter] = useState<PortalTestStatusFilter>("all");
   const [portalCompletedDateFilter, setPortalCompletedDateFilter] = useState<string>("all");
+  const [portalCompletedDateMenu, setPortalCompletedDateMenu] = useState<PortalCompletedDateMenu>({
+    type: "root",
+  });
+  const [portalCompletedDateOpen, setPortalCompletedDateOpen] = useState(false);
+  const portalCompletedDateRef = useRef<HTMLDivElement | null>(null);
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
   const [expandedProctorFlags, setExpandedProctorFlags] = useState<Record<string, boolean>>({});
   const [testAttemptDetails, setTestAttemptDetails] = useState<
@@ -910,14 +1101,53 @@ export default function AdminDashboard() {
   const isEmployeeDataPending =
     loading || isEmployeesLoading || refreshingType === "employees";
 
-  const portalCompletedDateOptions = useMemo(() => {
+  const portalCompletedDateModel = useMemo(() => {
     const keys = new Set<string>();
     for (const account of resourcePortalEmployees) {
       const day = portalCompletedDayKey(portalPrimaryCompletedAt(account));
       if (day) keys.add(day);
     }
-    return Array.from(keys).sort((a, b) => b.localeCompare(a));
+    return buildPortalCompletedFilterModel(Array.from(keys));
   }, [resourcePortalEmployees]);
+
+  useEffect(() => {
+    if (!portalCompletedDateOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (
+        portalCompletedDateRef.current &&
+        target &&
+        !portalCompletedDateRef.current.contains(target)
+      ) {
+        setPortalCompletedDateOpen(false);
+        setPortalCompletedDateMenu(
+          getPortalCompletedDateMenuForFilter(
+            portalCompletedDateFilter,
+            portalCompletedDateModel
+          )
+        );
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [portalCompletedDateOpen, portalCompletedDateFilter, portalCompletedDateModel]);
+
+  useEffect(() => {
+    if (portalCompletedDateFilter === "all") return;
+    const validValues = new Set<string>([
+      PORTAL_LAST_WEEK_FILTER,
+      ...portalCompletedDateModel.currentWeekOptions.map((o) => o.value),
+      ...portalCompletedDateModel.lastWeekOptions.map((o) => o.value),
+      ...portalCompletedDateModel.olderWeeks.flatMap((week) => [
+        week.weekFilterValue,
+        ...week.dayKeys,
+      ]),
+    ]);
+    if (!validValues.has(portalCompletedDateFilter)) {
+      setPortalCompletedDateFilter("all");
+      setPortalCompletedDateMenu({ type: "root" });
+    }
+  }, [portalCompletedDateFilter, portalCompletedDateModel]);
 
   const filteredPortalEmployees = useMemo(() => {
     const term = testResultsSearch.trim().toLowerCase();
@@ -927,7 +1157,7 @@ export default function AdminDashboard() {
       }
       if (portalCompletedDateFilter !== "all") {
         const day = portalCompletedDayKey(portalPrimaryCompletedAt(account));
-        if (day !== portalCompletedDateFilter) return false;
+        if (!matchesPortalCompletedDateFilter(day, portalCompletedDateFilter)) return false;
       }
       if (!term) return true;
       return (
@@ -3790,20 +4020,198 @@ export default function AdminDashboard() {
                             className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
                           />
                         </div>
-                        <div className="w-full sm:w-44 shrink-0">
-                          <select
-                            value={portalCompletedDateFilter}
-                            onChange={(e) => setPortalCompletedDateFilter(e.target.value)}
-                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                        <div className="w-full sm:w-56 shrink-0 relative" ref={portalCompletedDateRef}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPortalCompletedDateOpen((open) => {
+                                const next = !open;
+                                if (next) {
+                                  setPortalCompletedDateMenu(
+                                    getPortalCompletedDateMenuForFilter(
+                                      portalCompletedDateFilter,
+                                      portalCompletedDateModel
+                                    )
+                                  );
+                                }
+                                return next;
+                              });
+                            }}
+                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 flex items-center justify-between gap-2"
                             aria-label="Completed On date filter"
+                            aria-expanded={portalCompletedDateOpen}
                           >
-                            <option value="all">Completed On: All</option>
-                            {portalCompletedDateOptions.map((dayKey) => (
-                              <option key={dayKey} value={dayKey}>
-                                {formatPortalCompletedDayLabel(dayKey)}
-                              </option>
-                            ))}
-                          </select>
+                            <span className="truncate text-left">
+                              {formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter)}
+                            </span>
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 shrink-0 opacity-70 transition-transform ${
+                                portalCompletedDateOpen ? "rotate-180" : ""
+                              }`}
+                            />
+                          </button>
+                          {portalCompletedDateOpen ? (
+                            <div className="absolute z-50 mt-1 w-full min-w-[15rem] max-h-64 overflow-auto rounded-xl border border-border bg-white dark:bg-slate-950 shadow-lg py-1">
+                              {portalCompletedDateMenu.type === "last-week" ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
+                                    onClick={() => setPortalCompletedDateMenu({ type: "root" })}
+                                  >
+                                    ← Back
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                      portalCompletedDateFilter === PORTAL_LAST_WEEK_FILTER
+                                        ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                        : "text-slate-700 dark:text-slate-200"
+                                    }`}
+                                    onClick={() => {
+                                      setPortalCompletedDateFilter(PORTAL_LAST_WEEK_FILTER);
+                                      setPortalCompletedDateOpen(false);
+                                    }}
+                                  >
+                                    Last Week: All dates
+                                  </button>
+                                  {portalCompletedDateModel.lastWeekOptions.map((option) => (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                        portalCompletedDateFilter === option.value
+                                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                          : "text-slate-700 dark:text-slate-200"
+                                      }`}
+                                      onClick={() => {
+                                        setPortalCompletedDateFilter(option.value);
+                                        setPortalCompletedDateOpen(false);
+                                      }}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  ))}
+                                </>
+                              ) : portalCompletedDateMenu.type === "week" ? (
+                                (() => {
+                                  const olderWeek =
+                                    portalCompletedDateModel.olderWeeks.find(
+                                      (week) =>
+                                        week.weekStartKey ===
+                                        (portalCompletedDateMenu.type === "week"
+                                          ? portalCompletedDateMenu.weekStartKey
+                                          : "")
+                                    ) ?? null;
+                                  if (!olderWeek) return null;
+                                  return (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
+                                        onClick={() => setPortalCompletedDateMenu({ type: "root" })}
+                                      >
+                                        ← Back
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                          portalCompletedDateFilter === olderWeek.weekFilterValue
+                                            ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                            : "text-slate-700 dark:text-slate-200"
+                                        }`}
+                                        onClick={() => {
+                                          setPortalCompletedDateFilter(olderWeek.weekFilterValue);
+                                          setPortalCompletedDateOpen(false);
+                                        }}
+                                      >
+                                        {olderWeek.label}: All dates
+                                      </button>
+                                      {olderWeek.dayOptions.map((option) => (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                            portalCompletedDateFilter === option.value
+                                              ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                              : "text-slate-700 dark:text-slate-200"
+                                          }`}
+                                          onClick={() => {
+                                            setPortalCompletedDateFilter(option.value);
+                                            setPortalCompletedDateOpen(false);
+                                          }}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      ))}
+                                    </>
+                                  );
+                                })()
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                      portalCompletedDateFilter === "all"
+                                        ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                        : "text-slate-700 dark:text-slate-200"
+                                    }`}
+                                    onClick={() => {
+                                      setPortalCompletedDateFilter("all");
+                                      setPortalCompletedDateOpen(false);
+                                    }}
+                                  >
+                                    Completed On: All
+                                  </button>
+                                  {portalCompletedDateModel.currentWeekOptions.map((option) => (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                        portalCompletedDateFilter === option.value
+                                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                          : "text-slate-700 dark:text-slate-200"
+                                      }`}
+                                      onClick={() => {
+                                        setPortalCompletedDateFilter(option.value);
+                                        setPortalCompletedDateOpen(false);
+                                      }}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  ))}
+                                  {portalCompletedDateModel.lastWeekOptions.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between"
+                                      onClick={() =>
+                                        setPortalCompletedDateMenu({ type: "last-week" })
+                                      }
+                                    >
+                                      <span>Last Week</span>
+                                      <span aria-hidden="true">▸</span>
+                                    </button>
+                                  ) : null}
+                                  {portalCompletedDateModel.olderWeeks.map((week) => (
+                                    <button
+                                      key={week.weekFilterValue}
+                                      type="button"
+                                      className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between"
+                                      onClick={() =>
+                                        setPortalCompletedDateMenu({
+                                          type: "week",
+                                          weekStartKey: week.weekStartKey,
+                                        })
+                                      }
+                                    >
+                                      <span>{week.label}</span>
+                                      <span aria-hidden="true">▸</span>
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                         <div className="w-full sm:w-44 shrink-0">
                           <select
