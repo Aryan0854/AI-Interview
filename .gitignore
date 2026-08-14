@@ -14,8 +14,10 @@ build
 # Production
 dist
 
-# Misc
-.DS_Store
+# Generated / legacy question bank exports (use QB-new.xlsx only)
+Question Bank*.xlsx
+__pycache__/
+*.pyc
 *.pem
 *.bak
 
@@ -51,8 +53,3 @@ scratch/
 
 # Kilo audit tool directory
 .kilo/
-# Python
-venv/
-.venv/
-__pycache__/
-*.pyc

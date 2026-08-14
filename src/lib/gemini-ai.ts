@@ -292,21 +292,34 @@ export class GeminiAIEngine {
       await writeFile(selfieTempPath, Buffer.from(selfieData.data, "base64"));
 
       const pythonScriptPath = join(process.cwd(), "faceproj", "compare_images.py");
+      const preferredPython = process.platform === 'win32' ? 'py -3.11' : 'python3.11';
+      const fallbackPython = 'python';
+      let cmd = `${preferredPython} "${pythonScriptPath}" "${idTempPath}" "${selfieTempPath}"`;
 
-// Force use of Python from the virtual environment
-const pythonExe = join(process.cwd(), "venv", "Scripts", "python.exe");
+      console.log(`Executing local biometric check command: ${cmd}`);
+      let stdout: string;
+      let stderr: string;
+      try {
+        const result = await execPromise(cmd, { maxBuffer: 10 * 1024 * 1024 });
+        stdout = result.stdout;
+        stderr = result.stderr;
+      } catch (err: any) {
+        // On Windows, prefer using the Python launcher; if that fails, fall back to the default python command.
+        if (process.platform === 'win32') {
+          cmd = `${fallbackPython} "${pythonScriptPath}" "${idTempPath}" "${selfieTempPath}"`;
+          console.warn(`Preferred Python command failed, falling back to: ${cmd}`);
+          const result = await execPromise(cmd, { maxBuffer: 10 * 1024 * 1024 });
+          stdout = result.stdout;
+          stderr = result.stderr;
+        } else {
+          throw err;
+        }
+      }
 
-const cmd = `"${pythonExe}" "${pythonScriptPath}" "${idTempPath}" "${selfieTempPath}"`;
-
-console.log(`Executing local biometric check command: ${cmd}`);
-
-const { stdout, stderr } = await execPromise(cmd);
-
-if (stderr) {
-  console.error("Python stderr:", stderr);
-}
-
-console.log("Local biometric check result:", stdout);
+      if (stderr && stderr.trim().length > 0) {
+        console.warn("Local biometric check stderr:", stderr);
+      }
+      console.log("Local biometric check result:", stdout);
 
       // Clean up temp files
       try {
@@ -339,7 +352,13 @@ console.log("Local biometric check result:", stdout);
       } catch (cleanupErr) {
         console.warn("Failed to clean up temp files on error:", cleanupErr);
       }
-      throw new Error(`Local Biometric Match Failed: ${error.message || "Unknown error"}`);
+      const message = error.message || String(error);
+      if (message.includes("No module named 'facenet_pytorch'") || message.includes('ModuleNotFoundError')) {
+        throw new Error(
+          "Local biometric engine dependency missing: install faceproj/requirements.txt and ensure Python dependencies are available."
+        );
+      }
+      throw new Error(`Local Biometric Match Failed: ${message}`);
     }
   }
 }

@@ -14,11 +14,13 @@ interface SubjectItem {
   description: string;
   icon: string;
   color: string;
+  href?: string;
 }
 
 export default function EmployeeLearnPage() {
   const router = useRouter();
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
+  const [employeeProfile, setEmployeeProfile] = useState<{ employee_id: string; full_name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -30,14 +32,31 @@ export default function EmployeeLearnPage() {
       return;
     }
 
-    fetch("/api/employee/catalog", {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error("Failed to load subjects.");
-        const data = await res.json();
+    Promise.all([
+      fetch("/api/employee/subjects", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }),
+      fetch("/api/employee/auth/validate", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }),
+    ])
+      .then(async ([subjectsRes, profileRes]) => {
+        if (!subjectsRes.ok) throw new Error("Failed to load subjects.");
+        const data = await subjectsRes.json();
         setSubjects(data ?? []);
+
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          const employee = profileData?.employee;
+          if (employee?.employee_id) {
+            setEmployeeProfile({
+              employee_id: employee.employee_id,
+              full_name: employee.full_name ?? employee.employee_id,
+            });
+          }
+        }
       })
       .catch((err) => {
         setError(err.message || "Unable to load learning subjects.");
@@ -56,6 +75,13 @@ export default function EmployeeLearnPage() {
               <p className="text-xs font-bold tracking-wider text-indigo-700 dark:text-indigo-300 uppercase">Learning Catalog</p>
             </div>
             <h1 className="text-3xl font-extrabold text-foreground leading-tight">Explore subjects &amp; learning topics</h1>
+            {employeeProfile && (
+              <p className="mt-2 text-sm font-semibold text-foreground">
+                {employeeProfile.full_name?.trim() || employeeProfile.employee_id}
+                <span className="mx-2 text-muted-foreground">·</span>
+                Employee ID: {employeeProfile.employee_id}
+              </p>
+            )}
             <p className="mt-2 text-sm text-muted-foreground leading-relaxed">Choose a subject and start a personalized learning path.</p>
           </div>
           <div className="inline-flex items-center gap-2 rounded-2xl border border-indigo-100 dark:border-slate-850 bg-gradient-to-r from-indigo-50 to-violet-50 dark:from-indigo-900/10 dark:to-violet-900/10 px-5 py-3 text-primary shadow-soft">
@@ -107,10 +133,10 @@ export default function EmployeeLearnPage() {
               <div className="mt-6 flex items-center justify-between gap-3">
                 <Badge className="bg-indigo-100 dark:bg-slate-800 text-primary border border-indigo-200 dark:border-slate-700 font-semibold">Core</Badge>
                 <Link
-                  href={`/employee/learn/${subject.id}`}
+                  href={subject.href ?? `/employee/learn/${subject.id}`}
                   className="text-sm font-bold text-primary hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors flex items-center gap-1 group-hover:gap-2"
                 >
-                  Explore <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                  Take test <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </div>
             </Card>

@@ -5,7 +5,8 @@ import { readFile, writeFile } from 'fs/promises';
 import { refreshEmployees, EmployeeRecord, calculateSkillMatch } from '@/services/automation-service';
 import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
-import { localTestsDb } from '@/services/local-tests-db';
+import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
+import { allowLocalTestsFallback } from '@/lib/db-mode';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -16,6 +17,12 @@ const getEmployeesJsonPath = () => {
 };
 
 import { cacheStore } from '@/lib/cache-store';
+import {
+  buildResourcePortalEmployees,
+  loadEmployeeTestManifest,
+} from '@/services/resource-mapping-service';
+import { normalizeProctoring } from '@/lib/employee-proctoring';
+import { listEmployeeTestRecordingIds } from '@/lib/employee-test-video';
 
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -25,177 +32,231 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const activeJdId = searchParams.get('activeJdId') || undefined;
   const isExport = searchParams.get('export') === 'true';
+  const skipCache = searchParams.get('fresh') === '1';
 
-  const cached = cacheStore.get("employees", 5000, activeJdId);
+  const cached = !skipCache && cacheStore.get("employees", 120000, activeJdId);
   if (cached && !isExport) {
     return NextResponse.json(cached);
   }
 
   const jsonPath = getEmployeesJsonPath();
-  let employees: EmployeeRecord[] = [];
 
-  try {
-    const raw = await readFile(jsonPath, "utf8");
-    const parsed = JSON.parse(raw) as EmployeeRecord[];
-    const seen = new Set<string>();
-    employees = parsed.filter(emp => {
-      if (!emp.employee_id) return true;
-      if (seen.has(emp.employee_id)) return false;
-      seen.add(emp.employee_id);
-      return true;
-    });
-  } catch (e: any) {
-    if (e.code === "ENOENT") {
-      const res = await refreshEmployees(activeJdId);
-      try {
-        const raw = await readFile(jsonPath, "utf8");
-        employees = JSON.parse(raw);
-      } catch (e2) {
-        employees = [];
+  const loadEmployeesFromFile = async (): Promise<EmployeeRecord[]> => {
+    try {
+      const raw = await readFile(jsonPath, "utf8");
+      const parsed = JSON.parse(raw) as EmployeeRecord[];
+      const seen = new Set<string>();
+      return parsed.filter((emp) => {
+        if (!emp.employee_id) return true;
+        if (seen.has(emp.employee_id)) return false;
+        seen.add(emp.employee_id);
+        return true;
+      });
+    } catch (e: any) {
+      if (e.code === "ENOENT") {
+        await refreshEmployees(activeJdId);
+        try {
+          const raw = await readFile(jsonPath, "utf8");
+          return JSON.parse(raw);
+        } catch {
+          return [];
+        }
       }
+      return [];
     }
-  }
+  };
 
-  // If activeJdId is provided, dynamically re-calculate match scores against it
-  if (activeJdId && activeJdId !== 'all' && employees.length > 0) {
+  const [employeesInitial, manifest] = await Promise.all([
+    loadEmployeesFromFile(),
+    loadEmployeeTestManifest(),
+  ]);
+  let employees = employeesInitial;
+
+  // Query MCQ test results from Supabase (production source of truth),
+  // with a hard timeout so a slow DB cannot block the portal indefinitely.
+  const testResultsMap = new Map<string, { status: string; score: number; completedAt: string | null }[]>();
+  const allTestResults: any[] = [];
+
+  const applyJdSkillMatch = async () => {
+    if (!activeJdId || activeJdId === "all" || employees.length === 0) return;
     try {
       const { data: dbJd } = await supabase
-        .from('job_descriptions')
-        .select('jd_text')
-        .eq('id', activeJdId)
+        .from("job_descriptions")
+        .select("jd_text")
+        .eq("id", activeJdId)
         .single();
-      
-      if (dbJd && dbJd.jd_text) {
-        employees = employees.map(emp => {
-          const matchResult = calculateSkillMatch(emp.skills || '', dbJd.jd_text);
+
+      if (dbJd?.jd_text) {
+        employees = employees.map((emp) => {
+          const matchResult = calculateSkillMatch(emp.skills || "", dbJd.jd_text);
           return {
             ...emp,
             score: matchResult.score,
-            matchingSkills: matchResult.matchingSkills
+            matchingSkills: matchResult.matchingSkills,
           };
         });
       }
     } catch (dbErr) {
       console.error("Failed to query JD or recalculate employee skill match:", dbErr);
     }
-  }
+  };
 
-  // Query MCQ test results for each employee
-  const testResultsMap = new Map<string, { status: string; score: number; completedAt: string | null }[]>();
-  const allTestResults: any[] = [];
-
+  const loadSupabaseResults = async () => {
   try {
-    const { data: dbTests } = await supabase
-      .from("tests")
-      .select(`
-        id,
-        employee_id,
-        topic_id,
-        subject_id,
-        difficulty,
-        total_questions,
-        status,
-        started_at,
-        completed_at,
-        employees (
-          employee_id,
-          full_name
-        ),
-        learning_topics (
-          title
-        ),
-        learning_subjects (
-          title
-        )
-      `);
+    const { data: viewRows, error: viewError } = await supabase
+      .from("employee_test_results")
+      .select("*");
 
-    const { data: dbAttempts } = await supabase
-      .from("test_attempts")
-      .select("test_id, is_correct");
+    if (viewError) {
+      // View may not exist on older schemas — fall back to tests table
+      const { data: dbTests, error: dbTestsError } = await supabase.from("tests").select("*");
+      if (dbTestsError) throw dbTestsError;
 
-    const attemptsMap = new Map<string, { correct: number; total: number }>();
-    if (dbAttempts) {
-      dbAttempts.forEach(att => {
-        const current = attemptsMap.get(att.test_id) || { correct: 0, total: 0 };
-        current.total += 1;
-        if (att.is_correct) current.correct += 1;
-        attemptsMap.set(att.test_id, current);
+      const { data: employeeRows } = await supabase
+        .from("employees")
+        .select("id, employee_id, full_name");
+      const employeeUuidMap = new Map<string, { employee_id: string; full_name: string }>();
+      (employeeRows ?? []).forEach((row) => {
+        if (row.id) employeeUuidMap.set(row.id, row);
       });
-    }
 
-    if (dbTests) {
-      dbTests.forEach(test => {
-        const empInfo = test.employees as any;
-        const empId = empInfo?.employee_id;
+      (dbTests ?? []).forEach((test) => {
+        const linked = employeeUuidMap.get(String(test.employee_id ?? ""));
+        const empId = (test as any).employee_code || linked?.employee_id;
         if (!empId) return;
 
-        const attInfo = attemptsMap.get(test.id);
-        const score = attInfo && attInfo.total > 0 ? Math.round((attInfo.correct / attInfo.total) * 100) : 0;
-
-        const list = testResultsMap.get(empId) || [];
-        list.push({
-          status: test.status,
-          score,
-          completedAt: test.completed_at
-        });
-        testResultsMap.set(empId, list);
-
-        const topicInfo = test.learning_topics as any;
-        const subjectInfo = test.learning_subjects as any;
+        const totalQs = (test as any).score_total ?? test.total_questions ?? 25;
+        const score = (test as any).score_correct ?? 0;
+        const scorePercent =
+          (test as any).score_percent ??
+          (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
 
         allTestResults.push({
           id: test.id,
           employeeUuid: test.employee_id,
           employeeId: empId,
-          employeeName: empInfo?.full_name || empId,
+          employeeName: linked?.full_name || empId,
           topicId: test.topic_id,
-          topicTitle: topicInfo?.title || "Unknown Topic",
+          topicTitle: (test as any).topic_title || "Unknown Topic",
           subjectId: test.subject_id,
-          subjectTitle: subjectInfo?.title || "Unknown Subject",
+          subjectTitle: (test as any).subject_title || "Unknown Subject",
           difficulty: test.difficulty,
-          totalQuestions: test.total_questions,
+          totalQuestions: totalQs,
           status: test.status,
+          answeredCount: 0,
+          correctCount: score,
           score,
+          scorePercent,
+          videoUrl: (test as any).session_recording_url || null,
+          proctoring: normalizeProctoring((test as any).proctoring),
           startedAt: test.started_at,
-          completedAt: test.completed_at
+          completedAt: test.completed_at,
         });
+
+        const list = testResultsMap.get(empId) || [];
+        list.push({ status: test.status, score: scorePercent, completedAt: test.completed_at });
+        testResultsMap.set(empId, list);
+      });
+    } else {
+      (viewRows ?? []).forEach((row: any) => {
+        const empId = row.employee_code;
+        if (!empId) return;
+
+        const totalQs = row.score_total ?? row.total_questions ?? 25;
+        const score = row.score_correct ?? 0;
+        const scorePercent =
+          row.score_percent ??
+          (totalQs > 0 ? Math.round((score / totalQs) * 100) : 0);
+
+        allTestResults.push({
+          id: row.test_id,
+          employeeUuid: null,
+          employeeId: empId,
+          employeeName: row.employee_name || empId,
+          topicId: row.topic_id,
+          topicTitle: row.topic_title || "Unknown Topic",
+          subjectId: row.subject_id,
+          subjectTitle: row.subject_title || "Unknown Subject",
+          difficulty: "medium",
+          totalQuestions: totalQs,
+          status: row.status,
+          answeredCount: row.answers_submitted ?? 0,
+          correctCount: score,
+          score,
+          scorePercent,
+          videoUrl: row.video_url || null,
+          proctoring: normalizeProctoring(row.proctoring),
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+        });
+
+        const list = testResultsMap.get(empId) || [];
+        list.push({ status: row.status, score: scorePercent, completedAt: row.completed_at });
+        testResultsMap.set(empId, list);
       });
     }
   } catch (err) {
-    console.warn("Failed to fetch test results from Supabase:", err);
+    console.error("Failed to fetch test results from Supabase:", err);
   }
+  };
 
+  await Promise.all([
+    applyJdSkillMatch(),
+    Promise.race([
+      loadSupabaseResults(),
+      new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+    ]),
+  ]);
+
+  // Overlay / fill from local JSON when allowed (also used as prod fallback if Supabase timed out)
+  if (allowLocalTestsFallback() || allTestResults.length === 0) {
   try {
     const localTests = await localTestsDb.loadDB().catch(() => null);
     if (localTests) {
-      const localAttempts = localTests.test_attempts || [];
-      const localAttemptsMap = new Map<string, { correct: number; total: number }>();
-      localAttempts.forEach(att => {
-        const current = localAttemptsMap.get(att.test_id) || { correct: 0, total: 0 };
-        current.total += 1;
-        if (att.is_correct) current.correct += 1;
-        localAttemptsMap.set(att.test_id, current);
-      });
+      const attemptsByTest = new Map<string, any[]>();
+      for (const attempt of localTests.test_attempts || []) {
+        const list = attemptsByTest.get(attempt.test_id) || [];
+        list.push(attempt);
+        attemptsByTest.set(attempt.test_id, list);
+      }
 
-      localTests.tests.forEach(test => {
-        const empId = test.employee_id;
+      const employeesById = new Map(
+        employees
+          .filter((e) => e.employee_id)
+          .map((e) => [String(e.employee_id).trim().toUpperCase(), e])
+      );
+      const resultIndexById = new Map(allTestResults.map((t, idx) => [t.id, idx]));
+
+      localTests.tests.forEach((test) => {
+        const empId = test.employee_code || test.employee_id;
         if (!empId) return;
 
-        const attInfo = localAttemptsMap.get(test.id);
-        const score = attInfo && attInfo.total > 0 ? Math.round((attInfo.correct / attInfo.total) * 100) : 0;
+        const testAttempts = attemptsByTest.get(test.id) || [];
+        const answeredCount = testAttempts.length;
+        const correctCount = LocalTestsDb.scoreFromAttempts(testAttempts, test);
+        const totalQs = test.total_questions ?? 25;
+        const score = correctCount;
+        const scorePercent =
+          test.score_percent ??
+          (totalQs > 0 ? Math.round((correctCount / totalQs) * 100) : 0);
 
-        const list = testResultsMap.get(empId) || [];
-        if (!list.some(t => t.completedAt === test.completed_at)) {
-          list.push({
+        const existingIdx = resultIndexById.get(test.id);
+        if (existingIdx !== undefined) {
+          allTestResults[existingIdx] = {
+            ...allTestResults[existingIdx],
             status: test.status,
+            answeredCount,
+            correctCount,
             score,
-            completedAt: test.completed_at
-          });
-          testResultsMap.set(empId, list);
-        }
-
-        if (!allTestResults.some(t => t.id === test.id)) {
-          const matchingEmp = employees.find(e => e.employee_id === empId);
+            scorePercent,
+            // Local row is authoritative — do not keep a stale Supabase video URL.
+            videoUrl: test.session_recording_url || null,
+            proctoring: normalizeProctoring(test.proctoring),
+            startedAt: test.started_at,
+            completedAt: test.completed_at,
+          };
+        } else {
+          const matchingEmp = employeesById.get(String(empId).trim().toUpperCase());
           allTestResults.push({
             id: test.id,
             employeeUuid: empId,
@@ -206,17 +267,42 @@ export async function GET(request: NextRequest) {
             subjectId: test.subject_id,
             subjectTitle: test.subject_title || "Unknown Subject",
             difficulty: test.difficulty,
-            totalQuestions: test.total_questions,
+            totalQuestions: totalQs,
             status: test.status,
+            answeredCount,
+            correctCount,
             score,
+            scorePercent,
+            videoUrl: test.session_recording_url || null,
+            proctoring: normalizeProctoring(test.proctoring),
             startedAt: test.started_at,
             completedAt: test.completed_at
           });
+          resultIndexById.set(test.id, allTestResults.length - 1);
+        }
+
+        const list = testResultsMap.get(empId) || [];
+        if (!list.some(t => t.completedAt === test.completed_at && test.status === "completed")) {
+          list.push({
+            status: test.status,
+            score: scorePercent,
+            completedAt: test.completed_at
+          });
+          testResultsMap.set(empId, list);
         }
       });
     }
   } catch (err) {
     console.warn("Failed to fetch test results from local DB:", err);
+  }
+  }
+
+  const recordingIds = await listEmployeeTestRecordingIds();
+  for (let i = 0; i < allTestResults.length; i++) {
+    allTestResults[i] = {
+      ...allTestResults[i],
+      hasRecording: recordingIds.has(String(allTestResults[i].id ?? "")),
+    };
   }
 
   // Attach testResults to employees
@@ -263,7 +349,15 @@ export async function GET(request: NextRequest) {
   }
 
   if (!isExport) {
-    cacheStore.set("employees", { employees, allTestResults }, activeJdId);
+    let resourcePortalEmployees: any[] = [];
+    try {
+      resourcePortalEmployees = await buildResourcePortalEmployees(allTestResults, manifest);
+    } catch (mappingErr) {
+      console.warn("Failed to load employee portal mapping:", mappingErr);
+    }
+
+    cacheStore.set("employees", { employees, allTestResults, resourcePortalEmployees }, activeJdId);
+    return NextResponse.json({ employees, allTestResults, resourcePortalEmployees });
   }
 
   return NextResponse.json({ employees, allTestResults });

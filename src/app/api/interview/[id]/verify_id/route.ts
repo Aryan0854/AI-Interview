@@ -64,7 +64,16 @@ export async function POST(
       return NextResponse.json({ error: 'Resume record not found' }, { status: 404 });
     }
 
-    const { idImage, selfieImage } = await request.json();
+    const { idImage, selfieImage, idType } = await request.json();
+    if (!idType || typeof idType !== 'string') {
+      return NextResponse.json({ error: 'Government ID type is required' }, { status: 400 });
+    }
+
+    const validIdTypes = ['aadhar', 'driving_license', 'pan_card', 'voter_id'];
+    if (!validIdTypes.includes(idType)) {
+      return NextResponse.json({ error: 'Invalid Government ID type selected' }, { status: 400 });
+    }
+
     if (!idImage || !selfieImage) {
       return NextResponse.json({ error: 'ID image and Selfie snapshot are required' }, { status: 400 });
     }
@@ -107,12 +116,10 @@ export async function POST(
       );
     } catch (aiErr: any) {
       console.error("Local face verification error:", aiErr);
-      isSystemError = true;
-      matchResult = {
-        matched: false,
-        confidence: 0,
-        reason: `Local biometric matching engine encountered an error. Images have been saved for manual audit.`
-      };
+      return NextResponse.json(
+        { error: aiErr.message || 'Biometric verification engine failed' },
+        { status: 500 }
+      );
     }
 
     // 5. Persist verification details in resume report
@@ -123,6 +130,7 @@ export async function POST(
         matched: matchResult.matched,
         confidence: matchResult.confidence,
         reason: matchResult.reason,
+        idType,
         verifiedAt: new Date().toISOString(),
         idImageUrl: `/api/interview/${id}/verification/id`,
         selfieImageUrl: `/api/interview/${id}/verification/selfie`,
@@ -154,8 +162,8 @@ export async function POST(
         : (matchResult.matched ? "CANDIDATE_IDENTITY_VERIFIED" : "CANDIDATE_IDENTITY_FAILED"),
       target: id,
       details: isSystemError 
-        ? `Biometric service unavailable. ID and Selfie saved for manual review.`
-        : `Confidence: ${matchResult.confidence}%. Rationale: ${matchResult.reason}`,
+        ? `Biometric service unavailable. ID and Selfie saved for manual review. ID Type: ${idType}`
+        : `ID Type: ${idType}. Confidence: ${matchResult.confidence}%. Rationale: ${matchResult.reason}`,
       ipAddress: ip
     });
 

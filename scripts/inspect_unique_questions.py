@@ -3,7 +3,7 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import openpyxl
 
-wb = openpyxl.load_workbook("Question Bank-20th July '26.xlsx", data_only=True)
+wb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
 
 for sheetname in wb.sheetnames:
     sheet = wb[sheetname]

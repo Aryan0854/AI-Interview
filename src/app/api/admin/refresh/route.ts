@@ -7,6 +7,9 @@ import {
   refreshInterviews 
 } from '@/services/automation-service';
 
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -30,11 +30,11 @@ export async function POST(request: NextRequest) {
       actorEmail: adminEmail || "admin@infinite.com",
       action: "ADMIN_UPDATE_PORTAL_SETTINGS",
       target: "portal-settings",
-      details: `Updated portal settings: Effectiveness=${updated.showEffectivenessTab}, ManagerConsole=${updated.showManagerConsoleTab}`,
+      details: `Updated portal settings: SystemLogsViewer=${updated.showSystemLogsViewer}`,
       ipAddress: ip,
     });
 
-    await writeLog('employee', 'UPDATE_PORTAL_SETTINGS', 'success', `Updated portal settings: Effectiveness=${updated.showEffectivenessTab}, ManagerConsole=${updated.showManagerConsoleTab}`);
+    await writeLog('employee', 'UPDATE_PORTAL_SETTINGS', 'success', `Updated portal settings: SystemLogsViewer=${updated.showSystemLogsViewer}`);
     return NextResponse.json({ success: true, settings: updated });
   } catch (error: any) {
     console.error("Failed to update portal settings:", error);

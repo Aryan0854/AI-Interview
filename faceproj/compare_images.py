@@ -50,7 +50,7 @@ def detect_and_extract_face(img_path, mtcnn, resnet, device):
         # Fallback to Haar Cascade on this rotation
         try:
             cv_img = cv2.cvtColor(np.array(rotated_img), cv2.COLOR_RGB2BGR)
-            face_cascade_path = os.path.join(os.path.dirname(__file__), 'haarcascade_frontalface_default.xml')
+            face_cascade_path = os.path.join(os.path.dirname(__file__), 'haarcascade_frontalface_default .xml')
             if not os.path.exists(face_cascade_path):
                 face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
                 
@@ -116,7 +116,7 @@ def main():
         dist = float(np.linalg.norm(id_embedding - selfie_embedding))
         
         # Tolerance check (InceptionResnetV1 threshold is around 0.8)
-        tolerance = 1.0
+        tolerance = 0.85
         matched = dist < tolerance
 
         # Confidence calculation
@@ -127,7 +127,11 @@ def main():
             # Scale distance [0.85, 1.6+] to confidence [0, 69]%
             confidence = int(max(0, 69 - ((dist - tolerance) / 0.75) * 69))
 
-        reason = "Local biometric comparison complete."
+        reason = (
+    "Your identity has been verified successfully."
+    if matched
+    else "Identity verification failed. Please try again."
+)
 
         result = {
             "matched": matched,

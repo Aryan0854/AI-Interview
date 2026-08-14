@@ -1,0 +1,11 @@
+# Local biometric engine requirements.
+# Use Python 3.11 or 3.12 for best compatibility.
+# On Windows, run:
+#   py -3.11 -m pip install -r requirements.txt
+
+torch==2.2.2
+torchvision==0.17.2
+facenet_pytorch==2.6.0
+opencv-python==4.11.0.86
+Pillow==10.2.0
+numpy==1.26.4

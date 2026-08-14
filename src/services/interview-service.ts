@@ -282,19 +282,23 @@ export class InterviewService {
         overlapping: 8,
         gap: 3,
         projects: 4,
-        coding: 2
+        coding: 2,
+        behavioral: 5,
+        leadership: 5,
+        softskills: 5
       }
     };
 
     const isTech = config.interviewType === 'technical';
+    const isBoth = config.interviewType === 'both';
     const jdText = await getJobDescriptionText(resume.report?.jdId);
 
     let questions: string[] = [];
 
     // Use Gemini if available
     try {
-      if (isTech) {
-        const sections = config.sections || { overlapping: 8, gap: 3, projects: 4, coding: 2 };
+      if (isTech || isBoth) {
+        const sections = config.sections || { overlapping: 8, gap: 3, projects: 4, coding: 2, behavioral: 5, leadership: 5, softskills: 5 };
         const overlappingCount = sections.overlapping !== undefined ? Number(sections.overlapping) : 8;
         const gapCount = sections.gap !== undefined ? Number(sections.gap) : 3;
         const projectsCount = sections.projects !== undefined ? Number(sections.projects) : 4;
@@ -407,7 +411,9 @@ export class InterviewService {
           }
           throw new Error("Invalid question object format");
         });
-      } else {
+      }
+
+      if (!isTech) {
         // Non-technical Interview
         const sections = config.sections || { behavioral: 5, leadership: 5, softskills: 5 };
         const behavioralCount = sections.behavioral !== undefined ? Number(sections.behavioral) : 5;
@@ -459,13 +465,19 @@ export class InterviewService {
           throw new Error(`Invalid format: expected ${totalNonTechCount} questions in non-technical array`);
         }
 
-        questions = rawNonTech.map((qObj: any) => {
+        const nonTechQuestions = rawNonTech.map((qObj: any) => {
           if (typeof qObj === 'string') return qObj;
           if (qObj && typeof qObj === 'object' && typeof qObj.question === 'string') {
             return qObj.question;
           }
           throw new Error("Invalid question object format");
         });
+
+        if (isBoth) {
+          questions = [...questions, ...nonTechQuestions];
+        } else {
+          questions = nonTechQuestions;
+        }
       }
     } catch (err) {
       console.warn("Failed to generate questions with AI, falling back to dynamic defaults.", err);

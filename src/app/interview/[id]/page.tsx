@@ -19,6 +19,14 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   java: `// Java Code Template\npublic class Solution {\n    public static void solution() {\n        // Write your code here\n    }\n}`
 };
 
+const LANGUAGE_LABELS: Record<string, string> = {
+  javascript: 'JavaScript',
+  typescript: 'TypeScript',
+  python: 'Python',
+  cpp: 'C++',
+  java: 'Java',
+};
+
 const TOTAL_SECONDS = 15 * 60;
 const COMPLETION_TEXT = "The interview has concluded. Your responses have been securely shared with the recruitment team for review. We will contact you regarding the next steps.";
 
@@ -83,6 +91,7 @@ export default function CandidatePortal() {
   const [showIdVerification, setShowIdVerification] = useState(false);
   const [idImageBase64, setIdImageBase64] = useState<string | null>(null);
   const [selfieImageBase64, setSelfieImageBase64] = useState<string | null>(null);
+  const [selectedIdType, setSelectedIdType] = useState<string>('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [verificationResult, setVerificationResult] = useState<{ matched: boolean; confidence: number; reason: string } | null>(null);
@@ -91,10 +100,12 @@ export default function CandidatePortal() {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
   const [showSubmitWithoutRunConfirm, setShowSubmitWithoutRunConfirm] = useState(false);
+  const [showLanguageMismatchConfirm, setShowLanguageMismatchConfirm] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<{
     step: 'intro' | 'questions' | 'candidate_question';
     index: number;
   } | null>(null);
+  const [pendingLanguageSelection, setPendingLanguageSelection] = useState<string | null>(null);
   
   // Proctoring States
   const [warningCount, setWarningCount] = useState(0);
@@ -1053,6 +1064,11 @@ export default function CandidatePortal() {
   };
 
   const handleVerifyIdentity = async () => {
+    if (!selectedIdType) {
+      setVerificationError("Please select your government ID type before verification.");
+      return;
+    }
+
     if (!idImageBase64 || !selfieImageBase64) {
       setVerificationError("Both Government ID and Selfie snapshot are required.");
       return;
@@ -1077,6 +1093,7 @@ export default function CandidatePortal() {
         isSystemError: true
       } as any);
       setIsVerifying(false);
+      verificationTimeoutRef.current = null;
     }, 7 * 60 * 1000);
 
     try {
@@ -1085,7 +1102,8 @@ export default function CandidatePortal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idImage: idImageBase64,
-          selfieImage: selfieImageBase64
+          selfieImage: selfieImageBase64,
+          idType: selectedIdType
         })
       });
 
@@ -1991,8 +2009,25 @@ export default function CandidatePortal() {
     }
   };
 
-  const handleRunCode = async () => {
+  const getExpectedLanguageFromQuestion = (question: string) => {
+    const text = question.toLowerCase();
+    if (/typescript/.test(text)) return 'typescript';
+    if (/javascript/.test(text)) return 'javascript';
+    if (/\bpython\b/.test(text)) return 'python';
+    if (/c\+\+/.test(text) || /cpp/.test(text)) return 'cpp';
+    if (/\bjava\b/.test(text) && !/javascript/.test(text)) return 'java';
+    return null;
+  };
+
+  const handleRunCode = async (forceSubmit = false) => {
     if (isRunningCode || isSubmitting) return;
+    const expectedLanguage = getExpectedLanguageFromQuestion(questions[currentIndex] || '');
+    const isLanguageMismatch = expectedLanguage && expectedLanguage !== selectedLanguage;
+    if (!forceSubmit && expectedLanguage && isLanguageMismatch) {
+      setShowLanguageMismatchConfirm(true);
+      return;
+    }
+
     setIsRunningCode(true);
     setTerminalOutput(null);
 
@@ -2265,6 +2300,28 @@ export default function CandidatePortal() {
                   </p>
                 </div>
 
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-2">
+                      <label htmlFor="idType" className="text-[11px] font-black text-slate-500 uppercase tracking-widest text-left">Select Government ID Type</label>
+                      <select
+                        id="idType"
+                        value={selectedIdType}
+                        onChange={(e) => setSelectedIdType(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-sm text-slate-900 dark:text-slate-100 px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="">Choose ID Type</option>
+                        <option value="aadhar">Aadhar Card</option>
+                        <option value="driving_license">Driving License</option>
+                        <option value="pan_card">PAN Card</option>
+                        <option value="voter_id">Voter ID</option>
+                      </select>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        Please choose the government ID type you are presenting before capturing or uploading the document.
+                      </p>
+                    </div>
+                  </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Webcam Snap Panel */}
                   <div className="flex flex-col gap-3">
@@ -2305,6 +2362,7 @@ export default function CandidatePortal() {
                     </div>
                   </div>
                 </div>
+              </div>
 
                 <div className="flex justify-start border-t border-slate-100 dark:border-slate-800 pt-4">
                   <Button
@@ -2398,16 +2456,16 @@ export default function CandidatePortal() {
                           <AlertCircle className="w-7 h-7" />
                         </div>
                         <h3 className="text-lg font-black text-foreground">
-                          {showManualCheckNotice ? "Manual Verification Required" : "Verification System Busy"}
+                          {showManualCheckNotice ? "Manual Verification Required" : "Verification Unavailable"}
                         </h3>
                         
                         <div className="my-4 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-150 dark:border-amber-900/30 text-amber-800 dark:text-amber-350 text-xs font-semibold leading-relaxed text-left w-full">
                           <strong className="block mb-1 text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-450">
-                            {showManualCheckNotice ? "Manual Check Notice:" : "System Load Notice:"}
+                            {showManualCheckNotice ? "Manual Check Notice:" : "Verification Notice:"}
                           </strong>
                           {showManualCheckNotice 
                             ? "The biometric verification process is taking longer than expected. A manual check will be conducted. Your Government ID and Selfie snapshot have been saved for review. You may proceed to the assessment."
-                            : "The automated matching service is temporarily busy. Your Government ID and Selfie snapshot have been successfully saved for manual verification by the recruiter. You may proceed to the assessment instructions."
+                            : "The automated matching service is temporarily unavailable. Your Government ID and Selfie snapshot have been successfully saved for manual verification by the recruiter. You may proceed to the assessment instructions."
                           }
                         </div>
 
@@ -2740,7 +2798,7 @@ export default function CandidatePortal() {
             </div>
             <h2 className="text-2xl font-black text-foreground mb-4 text-center">Submit Without Running?</h2>
             <p className="text-muted-foreground mb-6 text-center leading-relaxed text-sm font-semibold">
-              If you submit the code without running it will be considered no answered.
+              If you submit the code without running it will be considered not answered.
             </p>
             <div className="flex flex-wrap gap-4 justify-center">
               <Button 
@@ -2766,6 +2824,43 @@ export default function CandidatePortal() {
                 className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white gap-2 rounded-2xl px-6 font-bold shadow-md shadow-amber-500/25 hover:shadow-lg hover:shadow-amber-500/35 transition-all"
               >
                 Submit Anyway
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+      )}
+
+      {showLanguageMismatchConfirm && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4"
+        >
+          <Card className="max-w-lg w-full p-8 shadow-2xl border border-border relative overflow-hidden bg-card rounded-3xl">
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-600 to-sky-500" />
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-sky-500 flex items-center justify-center shadow-lg shadow-blue-500/30 mb-6">
+              <AlertCircle className="w-7 h-7 text-white" />
+            </div>
+            <h2 className="text-2xl font-black text-foreground mb-4 text-center">Language Mismatch Detected</h2>
+            <p className="text-muted-foreground mb-6 text-center leading-relaxed text-sm font-semibold">
+              The selected language does not match the one suggested by this coding challenge. Please confirm that you want to continue with the selected language.
+            </p>
+            <div className="flex flex-wrap gap-4 justify-center">
+              <Button
+                onClick={() => setShowLanguageMismatchConfirm(false)}
+                variant="outline"
+                className="rounded-2xl border-border text-primary hover:bg-secondary px-6 font-bold"
+              >
+                Change Language
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowLanguageMismatchConfirm(false);
+                  handleRunCode(true);
+                }}
+                className="bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 text-white gap-2 rounded-2xl px-6 font-bold shadow-md shadow-blue-500/25 hover:shadow-lg hover:shadow-blue-500/35 transition-all"
+              >
+                Continue Anyway
               </Button>
             </div>
           </Card>
@@ -3704,7 +3799,7 @@ export default function CandidatePortal() {
                   <div className="lg:col-span-5 flex flex-col space-y-6">
                     <Card className="p-6 border-border shadow-md bg-card rounded-3xl flex-1 flex flex-col overflow-hidden min-h-[500px]">
                       {/* Editor Header */}
-                      <div className="flex items-center justify-between mb-4 pb-3 border-b border-indigo-50 dark:border-slate-850">
+                          <div className="flex items-center justify-between mb-4 pb-3 border-b border-indigo-50 dark:border-slate-850">
                         {/* Language Selector */}
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">Language:</span>
@@ -3722,23 +3817,17 @@ export default function CandidatePortal() {
                         </div>
 
                         <div className="flex gap-2">
-                          {/* Run Code */}
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={handleRunCode}
+                            onClick={() => handleRunCode()}
                             disabled={isRunningCode || isSubmitting}
                             className="h-8 px-2.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 border-border hover:bg-slate-50 dark:hover:bg-slate-850 rounded-xl font-bold gap-1 text-[11px]"
                           >
-                            {isRunningCode ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Code2 className="w-3.5 h-3.5" />
-                            )}
-                            {isRunningCode ? "Running..." : "Run Code"}
+                            {isRunningCode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Code2 className="w-3.5 h-3.5" />}
+                            {isRunningCode ? 'Running...' : 'Run Code'}
                           </Button>
 
-                          {/* Reset Code */}
                           <Button
                             variant="outline"
                             size="sm"
@@ -3750,7 +3839,20 @@ export default function CandidatePortal() {
                         </div>
                       </div>
 
-
+                      {(() => {
+                        const expected = getExpectedLanguageFromQuestion(questions[currentIndex] || '');
+                        if (isCodingQuestion && expected && expected !== selectedLanguage) {
+                          return (
+                            <div className="mt-3 rounded-2xl border border-amber-300 bg-amber-50/80 text-amber-900 dark:bg-amber-950/20 dark:border-amber-700 dark:text-amber-200 p-3 text-sm font-semibold">
+                              <div className="font-bold">Language Mismatch Warning</div>
+                              <p className="mt-1 text-[12px] leading-relaxed">
+                                This coding challenge appears to target <span className="font-bold">{LANGUAGE_LABELS[expected] || expected}</span>, but you have selected <span className="font-bold">{LANGUAGE_LABELS[selectedLanguage] || selectedLanguage}</span>. The evaluation will still run in the selected language and may affect scoring.
+                              </p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {/* Editor Workspace Container */}
                       <div className="relative flex-1 flex border border-border rounded-2xl overflow-hidden bg-slate-950 text-slate-100 font-mono text-[13px] leading-relaxed min-h-[280px]">

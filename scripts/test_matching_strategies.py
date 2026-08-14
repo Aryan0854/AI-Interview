@@ -9,7 +9,7 @@ def clean_str(val):
         return ""
     return str(val).strip()
 
-wb_qb = openpyxl.load_workbook("Question Bank-20th July '26.xlsx", data_only=True)
+wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
 
 # Build question pools per product
 # QB Product names in QB sheets:
