@@ -2,12 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { join } from 'path';
 import { readFile, writeFile } from 'fs/promises';
-import { refreshEmployees, EmployeeRecord, calculateSkillMatch } from '@/services/automation-service';
+import { refreshEmployees, EmployeeRecord } from '@/services/automation-service';
 import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
-import { allowLocalTestsFallback, allowLocalDataFallback } from '@/lib/db-mode';
+import { allowLocalTestsFallback } from '@/lib/db-mode';
 import { formatProductDisplayName, formatTopicTitleForDisplay } from '@/lib/product-display-name';
+import { readPersistedJson } from '@/lib/runtime-data';
+import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
+import { cacheStore } from '@/lib/cache-store';
+import {
+  buildResourcePortalEmployees,
+  loadEmployeeTestManifest,
+} from '@/services/resource-mapping-service';
+import { normalizeProctoring } from '@/lib/employee-proctoring';
+import { listEmployeeTestRecordingIds } from '@/lib/employee-test-video';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -16,14 +25,6 @@ const getUploadsRoot = () => {
 const getEmployeesJsonPath = () => {
   return join(getUploadsRoot(), "employees.json");
 };
-
-import { cacheStore } from '@/lib/cache-store';
-import {
-  buildResourcePortalEmployees,
-  loadEmployeeTestManifest,
-} from '@/services/resource-mapping-service';
-import { normalizeProctoring } from '@/lib/employee-proctoring';
-import { listEmployeeTestRecordingIds } from '@/lib/employee-test-video';
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -56,22 +57,33 @@ export async function GET(request: NextRequest) {
   const jsonPath = getEmployeesJsonPath();
 
   const loadEmployeesFromFile = async (): Promise<EmployeeRecord[]> => {
-    try {
-      const raw = await readFile(jsonPath, "utf8");
+    const parseList = (raw: string): EmployeeRecord[] => {
       const parsed = JSON.parse(raw) as EmployeeRecord[];
       const seen = new Set<string>();
-      return parsed.filter((emp) => {
+      return (Array.isArray(parsed) ? parsed : []).filter((emp) => {
         if (!emp.employee_id) return true;
         if (seen.has(emp.employee_id)) return false;
         seen.add(emp.employee_id);
         return true;
       });
+    };
+
+    try {
+      const persisted = await readPersistedJson("employees.json");
+      if (persisted) return parseList(persisted);
+    } catch (err) {
+      console.warn("[employees] persisted employees.json read failed:", err);
+    }
+
+    try {
+      const raw = await readFile(jsonPath, "utf8");
+      return parseList(raw);
     } catch (e: any) {
       if (e.code === "ENOENT") {
         await refreshEmployees(activeJdId);
         try {
           const raw = await readFile(jsonPath, "utf8");
-          return JSON.parse(raw);
+          return parseList(raw);
         } catch {
           return [];
         }
@@ -98,14 +110,17 @@ export async function GET(request: NextRequest) {
         if (!data?.length) break;
         for (const row of data) {
           if (!row.employee_id) continue;
+          const product = row.product ? String(row.product) : "";
+          const designation = row.role && row.role !== "employee" ? String(row.role) : "";
           rows.push({
             employee_id: String(row.employee_id),
             full_name: row.full_name || String(row.employee_id),
             email: row.email || "",
             department: row.department || "",
-            skills: row.product ? String(row.product) : "",
+            skills: "",
+            product,
             grade: "",
-            designation: row.role || "employee",
+            designation: designation || row.role || "employee",
             status: "Active",
             shortlisted: false,
             score: typeof row.ai_readiness_score === "number" ? row.ai_readiness_score : 0,
@@ -129,33 +144,42 @@ export async function GET(request: NextRequest) {
       if (!key) continue;
       byId.set(key, emp);
     }
-    // Primary (usually Corp Pool JSON) wins on overlapping fields so screening skills stay intact.
     for (const emp of primary) {
       const key = String(emp.employee_id || "").trim().toUpperCase();
       if (!key) continue;
       const prev = byId.get(key);
-      byId.set(key, prev ? { ...prev, ...emp, skills: emp.skills || prev.skills } : emp);
+      if (!prev) {
+        byId.set(key, emp);
+        continue;
+      }
+      const skills = (prev.skills && prev.skills.length >= (emp.skills || "").length)
+        ? prev.skills
+        : (emp.skills || prev.skills || "");
+      byId.set(key, {
+        ...prev,
+        ...emp,
+        skills,
+        product: emp.product || prev.product,
+        designation: emp.designation && emp.designation !== "employee" ? emp.designation : prev.designation,
+        matchingSkills: emp.matchingSkills?.length ? emp.matchingSkills : prev.matchingSkills,
+      });
     }
     return Array.from(byId.values());
   };
 
   const [employeesFromFile, employeesFromDb, manifest] = await Promise.all([
-    allowLocalDataFallback() ? loadEmployeesFromFile() : Promise.resolve([] as EmployeeRecord[]),
+    loadEmployeesFromFile(),
     loadEmployeesFromSupabase(),
     loadEmployeeTestManifest(),
   ]);
 
-  // Supabase roster is source of truth; local JSON only fills gaps when fallback is allowed.
+  // Supabase roster is source of truth; persisted corp-pool JSON overlays skills.
   let employees =
     employeesFromDb.length > 0
       ? mergeEmployeeRosters(employeesFromDb, employeesFromFile)
       : employeesFromFile;
 
-  if (employeesFromDb.length === 0 && employeesFromFile.length > 0 && !allowLocalDataFallback()) {
-    console.warn(
-      "[employees] Supabase returned 0 rows and local JSON fallback is disabled (ALLOW_LOCAL_DATA_FALLBACK)."
-    );
-  } else if (employeesFromDb.length === 0 && employeesFromFile.length === 0) {
+  if (employeesFromDb.length === 0 && employeesFromFile.length === 0) {
     console.warn("[employees] No employees from Supabase or local sources.");
   }
 
@@ -167,22 +191,32 @@ export async function GET(request: NextRequest) {
   const applyJdSkillMatch = async () => {
     if (!activeJdId || activeJdId === "all" || employees.length === 0) return;
     try {
+      let jdText = "";
       const { data: dbJd } = await supabase
         .from("job_descriptions")
         .select("jd_text")
         .eq("id", activeJdId)
-        .single();
-
+        .maybeSingle();
       if (dbJd?.jd_text) {
-        employees = employees.map((emp) => {
-          const matchResult = calculateSkillMatch(emp.skills || "", dbJd.jd_text);
-          return {
-            ...emp,
-            score: matchResult.score,
-            matchingSkills: matchResult.matchingSkills,
-          };
-        });
+        jdText = dbJd.jd_text;
+      } else {
+        const { data: latestJd } = await supabase
+          .from("job_descriptions")
+          .select("jd_text")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        jdText = latestJd?.[0]?.jd_text || "";
       }
+      if (!jdText.trim()) return;
+
+      employees = employees.map((emp) => {
+        const matchResult = calculateSkillMatch(employeeMatchText(emp), jdText);
+        return {
+          ...emp,
+          score: matchResult.score,
+          matchingSkills: matchResult.matchingSkills,
+        };
+      });
     } catch (dbErr) {
       console.error("Failed to query JD or recalculate employee skill match:", dbErr);
     }

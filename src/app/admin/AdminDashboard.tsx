@@ -61,6 +61,7 @@ import {
 } from "@/lib/portal-test-status";
 import { formatProductDisplayName } from "@/lib/product-display-name";
 import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
+import { calculateSkillMatch, employeeMatchText } from "@/lib/skill-match";
 
 function formatSyncAge(date: Date): string {
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -1223,6 +1224,28 @@ export default function AdminDashboard() {
     });
   }, [resourcePortalEmployees, testResultsSearch, testStatusFilter, portalCompletedDateFilter]);
 
+  const portalDateOnlyMatchCount = useMemo(() => {
+    if (portalCompletedDateFilter === "all") return 0;
+    return resourcePortalEmployees.filter((account) =>
+      matchesPortalCompletedDateFilter(
+        portalCompletedDayKey(portalPrimaryCompletedAt(account)),
+        portalCompletedDateFilter
+      )
+    ).length;
+  }, [resourcePortalEmployees, portalCompletedDateFilter]);
+
+  const hasActivePortalFilters =
+    Boolean(testResultsSearch.trim()) ||
+    testStatusFilter !== "all" ||
+    portalCompletedDateFilter !== "all";
+
+  const clearPortalFilters = () => {
+    setTestResultsSearch("");
+    setTestStatusFilter("all");
+    setPortalCompletedDateFilter("all");
+    setPortalCompletedDateMenu({ type: "root" });
+  };
+
   const selectedPortalVideoTargets = useMemo(() => {
     return selectedPortalEmployeeIds
       .map((id) => {
@@ -1813,7 +1836,8 @@ export default function AdminDashboard() {
           setJdText("");
         }
       } else {
-        console.warn("[admin] jd payload missing/timed out; keeping prior state");
+        console.warn("[admin] jd payload missing/timed out; retrying JD load");
+        await loadJobDescriptions(email);
       }
 
       if (Array.isArray(resumesData.resumes)) {
@@ -3374,7 +3398,25 @@ export default function AdminDashboard() {
     );
   });
 
-  const filteredEmployees = employees
+  const scoredEmployees = useMemo(() => {
+    const jdText = jdSavedText.trim();
+    const jdIsActive =
+      Boolean(jdText) &&
+      Boolean(selectedJdId) &&
+      selectedJdId !== "all" &&
+      !selectedJdId.includes("@");
+    if (!jdIsActive) return employees;
+    return employees.map((emp) => {
+      const result = calculateSkillMatch(employeeMatchText(emp), jdText);
+      return {
+        ...emp,
+        score: result.score,
+        matchingSkills: result.matchingSkills,
+      };
+    });
+  }, [employees, jdSavedText, selectedJdId]);
+
+  const filteredEmployees = scoredEmployees
     .filter(emp => {
       if (!employeeSearch) return true;
       const term = employeeSearch.toLowerCase();
@@ -3386,8 +3428,8 @@ export default function AdminDashboard() {
     })
     .sort((a, b) => (b.score || 0) - (a.score || 0));
 
-  const bestMatch = employees.length > 0
-    ? employees.reduce((best, current) => (current.score || 0) > (best.score || 0) ? current : best, employees[0])
+  const bestMatch = scoredEmployees.length > 0
+    ? scoredEmployees.reduce((best, current) => (current.score || 0) > (best.score || 0) ? current : best, scoredEmployees[0])
     : null;
 
   const emailsToRender = emails.filter((email) => {
@@ -3987,14 +4029,14 @@ export default function AdminDashboard() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total Employees</span>
-                          <span className="text-xl md:text-2xl font-black text-primary">{employees.length}</span>
+                          <span className="text-xl md:text-2xl font-black text-primary">{scoredEmployees.length}</span>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center flex flex-col items-center justify-center min-h-[70px]">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Matches &gt;60% (JD)</span>
                           {selectedJdId && selectedJdId !== "all" ? (
                             <div className="w-full">
                               <span className="text-xl md:text-2xl font-black text-emerald-600 dark:text-emerald-400 block leading-none">
-                                {employees.filter(e => (e.score || 0) > 60).length}
+                                {scoredEmployees.filter(e => (e.score || 0) > 60).length}
                               </span>
                               <span className="text-[10px] font-bold text-muted-foreground block mt-1.5 leading-none">
                                 Qualified Profiles
@@ -4007,13 +4049,13 @@ export default function AdminDashboard() {
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Shortlisted</span>
                           <span className="text-xl md:text-2xl font-black text-violet-600 dark:text-fuchsia-400">
-                            {employees.filter(e => e.shortlisted).length}
+                            {scoredEmployees.filter(e => e.shortlisted).length}
                           </span>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Avg Match Score</span>
                           <span className="text-xl md:text-2xl font-black text-primary">
-                            {employees.length > 0 ? Math.round(employees.reduce((acc, curr) => acc + (curr.score || 0), 0) / employees.length) : 0}%
+                            {scoredEmployees.length > 0 ? Math.round(scoredEmployees.reduce((acc, curr) => acc + (curr.score || 0), 0) / scoredEmployees.length) : 0}%
                           </span>
                         </div>
                       </div>
@@ -4264,8 +4306,18 @@ export default function AdminDashboard() {
                             placeholder="Search name, ID, product, email..."
                             value={testResultsSearch}
                             onChange={(e) => setTestResultsSearch(e.target.value)}
-                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 pr-8 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
                           />
+                          {testResultsSearch ? (
+                            <button
+                              type="button"
+                              onClick={() => setTestResultsSearch("")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                              aria-label="Clear search"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          ) : null}
                         </div>
                         <div className="w-full sm:w-56 shrink-0 relative" ref={portalCompletedDateRef}>
                           <button
@@ -4506,6 +4558,51 @@ export default function AdminDashboard() {
                         </Button>
                       </div>
                     </div>
+
+                    {hasActivePortalFilters && (
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {testResultsSearch.trim() ? (
+                          <button
+                            type="button"
+                            onClick={() => setTestResultsSearch("")}
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 px-2.5 py-1 text-[10px] font-bold"
+                          >
+                            Search: {testResultsSearch.trim()}
+                            <X className="w-3 h-3" />
+                          </button>
+                        ) : null}
+                        {portalCompletedDateFilter !== "all" ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPortalCompletedDateFilter("all");
+                              setPortalCompletedDateMenu({ type: "root" });
+                            }}
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 px-2.5 py-1 text-[10px] font-bold"
+                          >
+                            {formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter)}
+                            <X className="w-3 h-3" />
+                          </button>
+                        ) : null}
+                        {testStatusFilter !== "all" ? (
+                          <button
+                            type="button"
+                            onClick={() => setTestStatusFilter("all")}
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 px-2.5 py-1 text-[10px] font-bold"
+                          >
+                            Status: {getPortalTestStatusLabel(testStatusFilter)}
+                            <X className="w-3 h-3" />
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={clearPortalFilters}
+                          className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 underline"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                    )}
 
                     {selectedPortalEmployeeIds.length > 0 && (
                       <div className="flex items-center justify-between gap-3 p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
@@ -5124,10 +5221,43 @@ export default function AdminDashboard() {
                               })}
                             {filteredPortalEmployees.length === 0 && (
                               <tr>
-                                <td colSpan={15} className="text-center py-12 text-slate-400 italic">
-                                  {resourcePortalEmployees.length === 0
-                                    ? "No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root."
-                                    : "No employees match the current search or test status filter."}
+                                <td colSpan={15} className="text-center py-12 text-slate-400">
+                                  {resourcePortalEmployees.length === 0 ? (
+                                    <span className="italic">
+                                      No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root.
+                                    </span>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-2 px-6">
+                                      <p className="italic">
+                                        {testResultsSearch.trim() && portalCompletedDateFilter !== "all"
+                                          ? `No employees match search “${testResultsSearch.trim()}” for ${formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter).replace(/^Completed On: /, "")}.`
+                                          : testResultsSearch.trim()
+                                            ? `No employees match search “${testResultsSearch.trim()}”.`
+                                            : portalCompletedDateFilter !== "all"
+                                              ? `No employees completed on ${formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter).replace(/^Completed On: /, "")}.`
+                                              : testStatusFilter !== "all"
+                                                ? `No employees match test status “${getPortalTestStatusLabel(testStatusFilter)}”.`
+                                                : "No employees match the current filters."}
+                                      </p>
+                                      {testResultsSearch.trim() && portalDateOnlyMatchCount > 0 ? (
+                                        <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                          {portalDateOnlyMatchCount} employee{portalDateOnlyMatchCount > 1 ? "s" : ""} completed on that date
+                                          {testResultsSearch.trim() ? " — clear search to see them." : "."}
+                                        </p>
+                                      ) : null}
+                                      {hasActivePortalFilters ? (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={clearPortalFilters}
+                                          className="mt-1 h-8 text-xs font-bold rounded-xl"
+                                        >
+                                          Clear filters
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             )}

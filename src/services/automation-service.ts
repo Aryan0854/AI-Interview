@@ -13,6 +13,8 @@ import {
   readDocFileBuffer,
   writeDocFile,
 } from '@/lib/docs-storage';
+import { writePersistedJson } from '@/lib/runtime-data';
+import { calculateSkillMatch } from '@/lib/skill-match';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -24,6 +26,7 @@ export interface EmployeeRecord {
   email: string;
   department: string;
   skills: string;
+  product?: string;
   grade: string;
   designation: string;
   status: string;
@@ -37,119 +40,6 @@ export interface EmployeeRecord {
  */
 export async function ensureDocsDirectories() {
   await ensureDocsStorage();
-}
-
-/**
- * Helper to calculate skill match score based on keyword overlap
- */
-export function calculateSkillMatch(employeeSkills: string, jdSkills: string): { score: number; matchingSkills: string[] } {
-  if (!employeeSkills || !jdSkills) {
-    return { score: 0, matchingSkills: [] };
-  }
-
-  // Common technical skills catalog
-  const COMMON_TECH_SKILLS = [
-    // Languages
-    "javascript", "typescript", "python", "java", "c++", "c#", "c", "ruby", "golang", "php", "rust", "swift", "kotlin", "perl", "r", "scala",
-    // Web / Frontend / Backend
-    "react", "angular", "vue", "next.js", "nextjs", "nuxt", "node.js", "nodejs", "express", "django", "flask", "spring", "springboot", "asp.net", "laravel", "rails",
-    // Databases / Data Store
-    "sql", "postgresql", "postgres", "oracle", "mysql", "sql server", "sqlite", "mongodb", "mongo", "redis", "cassandra", "dynamodb", "mariadb", "couchdb", "neo4j",
-    // Cloud / DevOps
-    "aws", "amazon web services", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s", "jenkins", "ansible", "terraform", "ci/cd", "cicd", "git", "github", "gitlab",
-    // System / OS / Admin
-    "linux", "windows", "unix", "ubuntu", "centos", "redhat", "red hat", "debian", "macos", "shell", "bash", "powershell",
-    // Monitoring / Logging / Tools
-    "splunk", "datadog", "dynatrace", "appdynamics", "new relic", "prometheus", "grafana", "elk", "elasticsearch", "logstash", "kibana", "service now", "servicenow", "jira", "confluence",
-    // QA / Testing / Tools
-    "manual testing", "manual", "automation", "selenium", "postman", "jmeter", "cucumber", "testing",
-    // Architecture / Concepts
-    "microservices", "api", "apis", "rest", "graphql", "soap", "kafka", "rabbitmq", "mq", "activemq", "architecture", "architect", "estimation", "rca", "incident management", "problem management", "change management"
-  ];
-
-  const extractSkills = (text: string) => {
-    const lower = text.toLowerCase();
-    const found = new Set<string>();
-    for (const skill of COMMON_TECH_SKILLS) {
-      const escaped = skill.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(`(^|[^a-zA-Z0-9_#+])(${escaped})([^a-zA-Z0-9_#+]|$)`, 'i');
-      if (regex.test(lower)) {
-        // Normalize synonyms
-        if (skill === "postgres") found.add("postgresql");
-        else if (skill === "nodejs") found.add("node.js");
-        else if (skill === "nextjs") found.add("next.js");
-        else if (skill === "amazon web services") found.add("aws");
-        else if (skill === "google cloud") found.add("gcp");
-        else if (skill === "servicenow") found.add("service now");
-        else if (skill === "red hat") found.add("redhat");
-        else if (skill === "apis") found.add("api");
-        else found.add(skill);
-      }
-    }
-    return Array.from(found);
-  };
-
-  const empSkills = extractSkills(employeeSkills);
-  const jdSkillsList = extractSkills(jdSkills);
-
-  if (empSkills.length === 0 || jdSkillsList.length === 0) {
-    // Fallback to basic word boundary matching if no standard keywords found
-    const STOP_WORDS = new Set(["to", "and", "the", "for", "in", "of", "on", "with", "at", "by", "from", "an", "is", "as", "end", "be", "or", "exp", "year", "years", "total", "skills", "basics", "basic", "etc", "ex", "eg"]);
-    const cleanSkills = (str: string) => {
-      return str.toLowerCase()
-        .split(/[,;+\n/|]/)
-        .map(s => s.trim())
-        .flatMap(s => {
-          if (s === "end-to-end" || s === "ci-cd" || s === "ci/cd") return [s];
-          return s.split(/\s*-\s*/); // Split on hyphens with surrounding spaces (like "api - postman")
-        })
-        .map(s => s.trim())
-        .filter(s => s.length > 1 && !STOP_WORDS.has(s));
-    };
-    
-    const empSkillsList = cleanSkills(employeeSkills);
-    if (empSkillsList.length === 0) {
-      return { score: 0, matchingSkills: [] };
-    }
-    
-    const lowercaseJd = jdSkills.toLowerCase();
-    const matchingSkills: string[] = [];
-    
-    for (const empSkill of empSkillsList) {
-      const skillLower = empSkill.toLowerCase();
-      const escaped = skillLower.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(`(^|[^a-zA-Z0-9_#+])(${escaped})([^a-zA-Z0-9_#+]|$)`, 'i');
-      if (regex.test(lowercaseJd)) {
-        matchingSkills.push(empSkill);
-      }
-    }
-    const uniqueMatches = Array.from(new Set(matchingSkills));
-    const score = Math.min(100, Math.round((uniqueMatches.length / empSkillsList.length) * 100));
-    
-    // Map matches back to pretty uppercase format
-    const prettyMatches = uniqueMatches.map(s => {
-      return s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    });
-    
-    return { score, matchingSkills: prettyMatches };
-  }
-
-  // Intersection of keywords
-  const matchingSkills = empSkills.filter(skill => jdSkillsList.includes(skill));
-  
-  // Calculate a match score based on how many of the JD required skills the employee has. Capped at a divisor of 8.
-  const divisor = Math.min(8, jdSkillsList.length);
-  const score = Math.min(100, Math.round((matchingSkills.length / divisor) * 100));
-
-  // Map normalized skills back to their pretty counterparts
-  const prettyMatches = matchingSkills.map(s => {
-    return s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-  });
-
-  return {
-    score,
-    matchingSkills: prettyMatches
-  };
 }
 
 /**
@@ -804,8 +694,12 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
     });
   } catch (e) {}
   
-  // Save enriched records
-  await writeFile(jsonPath, JSON.stringify(finalEmployees, null, 2), "utf8");
+  // Save enriched records (local + cloud app-data so Vercel keeps skills)
+  const serialized = JSON.stringify(finalEmployees, null, 2);
+  await writeFile(jsonPath, serialized, "utf8");
+  await writePersistedJson("employees.json", serialized).catch((err) => {
+    console.warn("Failed to persist employees.json to app-data:", err);
+  });
   await writeLog('employee', 'SYNC_EMPLOYEE_POOL', 'success', `Successfully loaded ${loaded} employees from /docs/Corp Pool`);
   
   return { success: true, loaded };

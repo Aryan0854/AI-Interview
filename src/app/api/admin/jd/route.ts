@@ -143,13 +143,16 @@ export async function GET(request: NextRequest) {
     // Sort uniqueJds by createdAt descending to preserve newest-first ordering
     uniqueJds.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     jds = uniqueJds;
-    
+
+    // Shared org JDs (admin@infinite.com) are visible to every admin login.
     if (!email || email === "admin@infinite.com") {
       return NextResponse.json({ jds });
-    } else {
-      const filtered = jds.filter((j: any) => j.rmEmail?.toLowerCase().trim() === email);
-      return NextResponse.json({ jds: filtered });
     }
+    const filtered = jds.filter((j: any) => {
+      const owner = (j.rmEmail || "").toLowerCase().trim();
+      return owner === email || owner === "admin@infinite.com" || !owner;
+    });
+    return NextResponse.json({ jds: filtered });
   } catch (error: any) {
     console.error("Failed to read JDs:", error);
     return NextResponse.json({ error: "Failed to read Job Descriptions" }, { status: 500 });
