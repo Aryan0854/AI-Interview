@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import type { Test, TestQuestion } from "@/types/learning";
 import { useEmployeeProctoring, isFullscreenActive } from "@/hooks/useEmployeeProctoring";
 import type { EmployeeProctoringState } from "@/lib/employee-proctoring";
+import { EMPLOYEE_PROCTOR_MAX_VIOLATIONS } from "@/lib/employee-proctoring";
 import {
   createMediaRecorder,
   flushRecorderAndStop,
@@ -526,7 +527,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         },
         body: JSON.stringify({
           answers: responseList,
-          autoSubmitted: isAuto || warningCount >= 3,
+          autoSubmitted: isAuto || warningCount >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS,
         }),
       });
 
@@ -732,7 +733,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
             </li>
             <li>Tab switch, minimize, refresh, copy/paste, and DevTools are blocked.</li>
             <li>Session may be video-recorded when camera access is granted.</li>
-            <li>5 strikes auto-submits your assessment.</li>
+            <li>{EMPLOYEE_PROCTOR_MAX_VIOLATIONS} strikes auto-submits your assessment.</li>
           </ul>
         </div>
 
@@ -949,12 +950,12 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
               {showProctorWarning}
             </p>
             <div className="bg-red-50 dark:bg-red-950/20 py-2 px-4 rounded-xl text-xs font-bold text-red-700 dark:text-rose-400 inline-block">
-              Warning Strike: {warningCount} / 3
+              Warning Strike: {warningCount} / {EMPLOYEE_PROCTOR_MAX_VIOLATIONS}
             </div>
             <p className="text-xs text-slate-400">
-              Note: Reaching 5 strikes will automatically submit your assessment.
+              Note: Reaching {EMPLOYEE_PROCTOR_MAX_VIOLATIONS} strikes will automatically submit your assessment.
             </p>
-            {warningCount >= 3 ? (
+            {warningCount >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS ? (
               <Button
                 disabled
                 className="w-full bg-red-600 text-white rounded-xl py-3 font-semibold text-sm flex items-center justify-center gap-2"

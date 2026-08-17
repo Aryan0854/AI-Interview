@@ -656,6 +656,11 @@ export default function AdminDashboard() {
   const [isBulkDispatchingMails, setIsBulkDispatchingMails] = useState(false);
   const [portalMailSendingId, setPortalMailSendingId] = useState<string | null>(null);
   const [isBulkPortalMailing, setIsBulkPortalMailing] = useState(false);
+  const [isBulkPortalDownloading, setIsBulkPortalDownloading] = useState(false);
+  const [bulkPortalDownloadProgress, setBulkPortalDownloadProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [activeEmployee, setActiveEmployee] = useState<any>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [requirementSearch, setRequirementSearch] = useState("");
@@ -854,7 +859,11 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`);
       const data = await res.json();
-      setResumes(data.resumes || []);
+      if (Array.isArray(data.resumes)) {
+        setResumes(data.resumes);
+      } else {
+        console.warn("[admin] resumes payload missing resumes[]; keeping prior state");
+      }
     } catch (err) {
       console.error("Failed to fetch resumes", err);
     } finally {
@@ -868,9 +877,12 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/admin/jd?email=${encodeURIComponent(email)}`);
       const data = await res.json();
-      if (data.jds) {
-        setJds(data.jds || []);
-        if (data.jds.length > 0) {
+      if (!Array.isArray(data.jds)) {
+        console.warn("[admin] jd payload missing jds[]; keeping prior state");
+        return;
+      }
+      setJds(data.jds);
+      if (data.jds.length > 0) {
           setSelectedJdId((prevId) => {
             const exists = data.jds.some((j: any) => j.id === prevId);
             if (exists && prevId && prevId !== "all") {
@@ -895,7 +907,6 @@ export default function AdminDashboard() {
           setJdSavedText("");
           setJdText("");
         }
-      }
     } catch (err) {
       console.error("Failed to load JDs", err);
     } finally {
@@ -909,7 +920,11 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`);
       const data = await res.json();
-      setEmails(data.emails || []);
+      if (Array.isArray(data.emails)) {
+        setEmails(data.emails);
+      } else {
+        console.warn("[admin] emails payload missing emails[]; keeping prior state");
+      }
     } catch (err) {
       console.error("Failed to fetch emails", err);
     } finally {
@@ -945,9 +960,20 @@ export default function AdminDashboard() {
         `/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}${freshQuery}`
       );
       const data = await res.json();
-      setEmployees(data.employees || []);
-      setAllTestResults(data.allTestResults || []);
-      setResourcePortalEmployees(data.resourcePortalEmployees || []);
+      if (!res.ok) {
+        console.warn("[admin] employees fetch failed; keeping prior state", data?.error);
+        return;
+      }
+      // Never wipe prior roster/portal data on partial/empty error payloads
+      if (Array.isArray(data.employees)) {
+        setEmployees(data.employees);
+      }
+      if (Array.isArray(data.allTestResults)) {
+        setAllTestResults(data.allTestResults);
+      }
+      if (Array.isArray(data.resourcePortalEmployees)) {
+        setResourcePortalEmployees(data.resourcePortalEmployees);
+      }
       setLastEmployeeSyncAt(new Date());
     } catch (err) {
       console.error("Failed to fetch employees", err);
@@ -1100,8 +1126,21 @@ export default function AdminDashboard() {
     }
   }, [expandedEmployees, resourcePortalEmployees]);
 
+  const isDashboardBootstrapping = !dashboardReady;
   const isEmployeeDataPending =
-    loading || isEmployeesLoading || refreshingType === "employees";
+    isDashboardBootstrapping ||
+    loading ||
+    isEmployeesLoading ||
+    refreshingType === "employees";
+  const isTabContentLoading =
+    isDashboardBootstrapping ||
+    (activeTab === "employee" || activeTab === "employee-portal"
+      ? isEmployeeDataPending
+      : activeTab === "requirements"
+        ? isJdLoading
+        : activeTab === "outbox"
+          ? isEmailsLoading
+          : loading);
 
   const portalCompletedDateModel = useMemo(() => {
     const keys = new Set<string>();
@@ -1220,6 +1259,75 @@ export default function AdminDashboard() {
     setDeleteTargetId("bulk-portal-videos");
     setDeletePasswordInput("");
     setDeleteModalError(null);
+  };
+
+  const handleBulkDownloadPortalVideos = async () => {
+    if (selectedPortalVideoTargets.length === 0 || isBulkPortalDownloading) return;
+    setIsBulkPortalDownloading(true);
+    setBulkPortalDownloadProgress({ current: 0, total: selectedPortalVideoTargets.length });
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const usedNames = new Set<string>();
+      let downloaded = 0;
+      let skipped = 0;
+
+      for (const target of selectedPortalVideoTargets) {
+        const account = resourcePortalEmployees.find(
+          (entry) => entry.employee_id === target.employeeId
+        );
+        const employeeName = account ? portalEmployeeName(account) : target.employeeId;
+        try {
+          const { blob, fileName } = await fetchTestVideoBlob(
+            target.testId,
+            target.employeeId,
+            employeeName
+          );
+          let uniqueName = fileName;
+          if (usedNames.has(uniqueName)) {
+            const base = fileName.replace(/\.webm$/i, "");
+            uniqueName = `${base}-${sanitizeDownloadPart(target.testId) || "test"}.webm`;
+          }
+          usedNames.add(uniqueName);
+          zip.file(uniqueName, blob);
+          downloaded += 1;
+        } catch {
+          skipped += 1;
+        }
+        setBulkPortalDownloadProgress({
+          current: downloaded + skipped,
+          total: selectedPortalVideoTargets.length,
+        });
+      }
+
+      if (downloaded === 0) {
+        throw new Error("Could not download any selected recordings.");
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `employee_portal_videos_${new Date().toISOString().split("T")[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setActionSuccess(
+        skipped > 0
+          ? `Downloaded ${downloaded} video(s) as a ZIP. ${skipped} skipped (no recording or not found). Open WebM files in Chrome/Edge or VLC.`
+          : `Downloaded ${downloaded} video(s) as a ZIP. Open WebM files in Chrome/Edge or VLC — Windows Media Player does not support WebM.`
+      );
+      setTimeout(() => setActionSuccess(null), 5000);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to download selected videos.");
+    } finally {
+      setIsBulkPortalDownloading(false);
+      setBulkPortalDownloadProgress(null);
+    }
   };
 
   const buildPortalMailRecipients = (employeeIds: string[]) => {
@@ -1638,24 +1746,8 @@ export default function AdminDashboard() {
     setIsSystemLogsLoading(true);
 
     try {
-      // 1. Fetch JDs first to compute default selectedJdId
-      const jdRes = await fetch(`/api/admin/jd?email=${encodeURIComponent(email)}`);
-      const jdData = await jdRes.json();
-      const fetchedJds = jdData.jds || [];
-
-      let initialJdId = "all";
-      let initialJdText = "";
-      if (fetchedJds.length > 0) {
-        const defaultJd = pickDefaultJd(fetchedJds);
-        
-        if (defaultJd) {
-          initialJdId = defaultJd.id;
-          initialJdText = defaultJd.jdText;
-        }
-      }
-
-      // 2. Fetch all other states in parallel using computed default JD ID
-      const sendJdId = (initialJdId && !initialJdId.includes("@")) ? initialJdId : "all";
+      const sendJdId =
+        selectedJdId && !selectedJdId.includes("@") ? selectedJdId : "all";
       const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T | null> =>
         Promise.race([
           promise,
@@ -1667,26 +1759,63 @@ export default function AdminDashboard() {
           ),
         ]);
 
-      const [resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] = await Promise.all([
-        withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 60000, "resumes"),
-        withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
-        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1`), 60000, "employees"),
-        withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
-        withTimeout(fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`), 15000, "logs"),
-        withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
-      ]);
+      // Load all dashboard datasets together — never clear prior state on timeout/partial failure
+      const [jdRes, resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] =
+        await Promise.all([
+          withTimeout(fetch(`/api/admin/jd?email=${encodeURIComponent(email)}`), 60000, "jd"),
+          withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 60000, "resumes"),
+          withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
+          withTimeout(
+            fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1`),
+            60000,
+            "employees"
+          ),
+          withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
+          withTimeout(
+            fetch(
+              `/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`
+            ),
+            15000,
+            "logs"
+          ),
+          withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
+        ]);
 
-      const [resumesData, emailsData, employeesData, resetLogsData, logsData, settingsData] = await Promise.all([
-        resumesRes ? resumesRes.json().catch(() => ({})) : Promise.resolve({}),
-        emailsRes ? emailsRes.json().catch(() => ({})) : Promise.resolve({}),
-        employeesRes ? employeesRes.json().catch(() => ({})) : Promise.resolve({}),
-        resetLogsRes ? resetLogsRes.json().catch(() => ({})) : Promise.resolve({}),
-        logsRes ? logsRes.json().catch(() => ({})) : Promise.resolve({}),
-        settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
-      ]);
+      const [jdData, resumesData, emailsData, employeesData, resetLogsData, logsData, settingsData] =
+        await Promise.all([
+          jdRes ? jdRes.json().catch(() => ({})) : Promise.resolve({}),
+          resumesRes ? resumesRes.json().catch(() => ({})) : Promise.resolve({}),
+          emailsRes ? emailsRes.json().catch(() => ({})) : Promise.resolve({}),
+          employeesRes ? employeesRes.json().catch(() => ({})) : Promise.resolve({}),
+          resetLogsRes ? resetLogsRes.json().catch(() => ({})) : Promise.resolve({}),
+          logsRes ? logsRes.json().catch(() => ({})) : Promise.resolve({}),
+          settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
+        ]);
 
-      // 3. Batch state updates together — never wipe resumes on timeout/empty error payload
-      setJds(fetchedJds);
+      const fetchedJds = Array.isArray(jdData.jds) ? jdData.jds : null;
+      if (fetchedJds) {
+        setJds(fetchedJds);
+
+        let initialJdId = "all";
+        let initialJdText = "";
+        if (fetchedJds.length > 0) {
+          const defaultJd = pickDefaultJd(fetchedJds);
+          if (defaultJd) {
+            initialJdId = defaultJd.id;
+            initialJdText = defaultJd.jdText;
+          }
+          setSelectedJdId(initialJdId);
+          setJdSavedText(initialJdText);
+          setJdText(initialJdText);
+        } else {
+          setSelectedJdId(email === "admin@infinite.com" ? "all" : "");
+          setJdSavedText("");
+          setJdText("");
+        }
+      } else {
+        console.warn("[admin] jd payload missing/timed out; keeping prior state");
+      }
+
       if (Array.isArray(resumesData.resumes)) {
         setResumes(resumesData.resumes);
       } else if (resumesRes) {
@@ -1694,30 +1823,49 @@ export default function AdminDashboard() {
       } else {
         console.warn("[admin] resumes timed out; keeping prior state");
       }
-      setEmails(emailsData.emails || []);
-      setEmployees(employeesData.employees || []);
-      setAllTestResults(employeesData.allTestResults || []);
-      setResourcePortalEmployees(employeesData.resourcePortalEmployees || []);
-      setResetLogs(resetLogsData.logs || []);
-      setSystemLogs(logsData.logs || []);
-      setLastEmployeeSyncAt(new Date());
-      
+
+      if (Array.isArray(emailsData.emails)) {
+        setEmails(emailsData.emails);
+      } else if (emailsRes) {
+        console.warn("[admin] emails payload missing emails[]; keeping prior state");
+      } else {
+        console.warn("[admin] emails timed out; keeping prior state");
+      }
+
+      if (Array.isArray(employeesData.employees)) {
+        setEmployees(employeesData.employees);
+      } else if (employeesRes) {
+        console.warn("[admin] employees payload missing employees[]; keeping prior state");
+      } else {
+        console.warn("[admin] employees timed out; keeping prior state");
+      }
+
+      if (Array.isArray(employeesData.allTestResults)) {
+        setAllTestResults(employeesData.allTestResults);
+      }
+      if (Array.isArray(employeesData.resourcePortalEmployees)) {
+        setResourcePortalEmployees(employeesData.resourcePortalEmployees);
+      }
+      if (
+        Array.isArray(employeesData.employees) ||
+        Array.isArray(employeesData.resourcePortalEmployees) ||
+        Array.isArray(employeesData.allTestResults)
+      ) {
+        setLastEmployeeSyncAt(new Date());
+      }
+
+      if (Array.isArray(resetLogsData.logs)) {
+        setResetLogs(resetLogsData.logs);
+      }
+      if (Array.isArray(logsData.logs)) {
+        setSystemLogs(logsData.logs);
+      }
+
       if (settingsData && typeof settingsData === "object") {
         setPortalSettings({
           showSystemLogsViewer: settingsData.showSystemLogsViewer !== false,
         });
       }
-
-      if (fetchedJds.length > 0) {
-        setSelectedJdId(initialJdId);
-        setJdSavedText(initialJdText);
-        setJdText(initialJdText);
-      } else {
-        setSelectedJdId(email === "admin@infinite.com" ? "all" : "");
-        setJdSavedText("");
-        setJdText("");
-      }
-
     } catch (err) {
       console.error("Failed to load initial data", err);
     } finally {
@@ -3359,7 +3507,7 @@ export default function AdminDashboard() {
                   <ClipboardList className="w-4 h-4 text-primary" />
                   Requirements (BR / JD)
                   <Badge className={`border-0 text-[10px] ${activeTab === "requirements" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {filteredJds.length}
+                    {isDashboardBootstrapping || isJdLoading ? "…" : filteredJds.length}
                   </Badge>
                 </button>
                 <button
@@ -3372,7 +3520,7 @@ export default function AdminDashboard() {
                 >
                   Employee Data
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {isEmployeeDataPending ? "…" : employees.length}
+                    {isDashboardBootstrapping || isEmployeeDataPending ? "…" : employees.length}
                   </Badge>
                 </button>
                 <button
@@ -3385,7 +3533,7 @@ export default function AdminDashboard() {
                 >
                   Suitable Candidates
                   <Badge className={`border-0 text-[10px] ${activeTab === "suitable" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {suitableCandidates.length}
+                    {isDashboardBootstrapping || loading ? "…" : suitableCandidates.length}
                   </Badge>
                 </button>
                 <button
@@ -3398,7 +3546,7 @@ export default function AdminDashboard() {
                 >
                   Non-Suitable Candidates
                   <Badge className={`border-0 text-[10px] ${activeTab === "unsuitable" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {unsuitableCandidates.length}
+                    {isDashboardBootstrapping || loading ? "…" : unsuitableCandidates.length}
                   </Badge>
                 </button>
                 <button
@@ -3411,7 +3559,7 @@ export default function AdminDashboard() {
                 >
                   Employee Portal
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee-portal" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {isEmployeeDataPending
+                    {isDashboardBootstrapping || isEmployeeDataPending
                       ? "…"
                       : resourcePortalEmployees.length ||
                         Array.from(new Set(allTestResults.map((t) => t.employeeId))).length}
@@ -3428,22 +3576,28 @@ export default function AdminDashboard() {
                   <Mail className="w-4 h-4 text-primary" />
                   Email Outbox
                   <Badge className={`border-0 text-[10px] ${activeTab === "outbox" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {emails.length}
+                    {isDashboardBootstrapping || isEmailsLoading ? "…" : emails.length}
                   </Badge>
                 </button>
               </div>
 
               {/* Candidates List Container */}
               <div className="p-6">
-                {isEmployeeDataPending ? (
+                {isTabContentLoading ? (
                   <div className="flex-1 flex flex-col items-center justify-center py-24 gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
                     <p className="text-slate-500 font-bold text-sm">
-                      {activeTab === "employee-portal"
-                        ? "Loading employee portal data…"
-                        : activeTab === "employee"
-                          ? "Loading employee pool…"
-                          : "Loading screening dashboard…"}
+                      {isDashboardBootstrapping
+                        ? "Loading screening dashboard…"
+                        : activeTab === "employee-portal"
+                          ? "Loading employee portal data…"
+                          : activeTab === "employee"
+                            ? "Loading employee pool…"
+                            : activeTab === "requirements"
+                              ? "Loading requirements…"
+                              : activeTab === "outbox"
+                                ? "Loading email outbox…"
+                                : "Loading candidates…"}
                     </p>
                   </div>
                 ) : activeTab === "requirements" ? (
@@ -4360,13 +4514,13 @@ export default function AdminDashboard() {
                           {selectedPortalEmployeeIds.length > 1 ? "s" : ""} selected
                           {selectedPortalVideoTargets.length > 0
                             ? ` · ${selectedPortalVideoTargets.length} with recording`
-                            : " · none with a recording to delete"}
+                            : " · none with a recording"}
                         </span>
                         <div className="flex items-center gap-2">
                         <Button
                           variant="outline"
                           size="sm"
-                          disabled={isBulkPortalMailing}
+                          disabled={isBulkPortalMailing || isBulkPortalDownloading}
                           onClick={handleBulkSendPortalEmployeeMails}
                           className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 border-border text-primary hover:bg-secondary"
                         >
@@ -4381,10 +4535,34 @@ export default function AdminDashboard() {
                           )}
                         </Button>
                         <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            isBulkPortalDownloading ||
+                            selectedPortalVideoTargets.length === 0
+                          }
+                          onClick={handleBulkDownloadPortalVideos}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 border-border text-primary hover:bg-secondary"
+                        >
+                          {isBulkPortalDownloading ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              {bulkPortalDownloadProgress
+                                ? `Downloading ${bulkPortalDownloadProgress.current}/${bulkPortalDownloadProgress.total}...`
+                                : "Downloading..."}
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-3.5 h-3.5" /> Download Selected Videos
+                            </>
+                          )}
+                        </Button>
+                        <Button
                           variant="destructive"
                           size="sm"
                           disabled={
                             actionLoading === "bulk-portal-videos" ||
+                            isBulkPortalDownloading ||
                             selectedPortalVideoTargets.length === 0
                           }
                           onClick={handleBulkDeletePortalVideos}
