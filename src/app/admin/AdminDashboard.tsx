@@ -32,7 +32,8 @@ import {
   ChevronDown,
   ChevronUp,
   Edit2,
-  Pin
+  Pin,
+  Layers,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { formatPortalTimestamp } from "@/lib/portal-format";
@@ -422,6 +423,21 @@ function extractJobTitleFromJd(text: string, fallback = "Untitled requirement"):
   return fallback;
 }
 
+function requirementCreatedDayKey(createdAt: unknown): string {
+  const d = new Date(String(createdAt || ""));
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatRequirementDayLabel(dayKey: string): string {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  if (!y || !m || !d) return dayKey;
+  return new Date(y, m - 1, d).toLocaleDateString();
+}
+
 function requirementDuplicateKey(jd: { id?: string; jdText?: string }): string {
   const title = extractJobTitleFromJd(jd.jdText || "", "").toLowerCase();
   const skillsMatch = String(jd.jdText || "").match(/Mandatory Skills:\s*(.+?)(?:\n|$)/i);
@@ -436,14 +452,16 @@ function requirementDuplicateKey(jd: { id?: string; jdText?: string }): string {
   return text.length < 80 ? `id:${jd.id}` : `${title}::${text.slice(0, 240)}`;
 }
 
-function calculateCandidateMatch(row: any, jdText: string): {
-  score: number;
-  matchingSkills: string[];
-  matchedCount: number;
-  requiredCount: number;
-} {
+function calculateCandidateMatch(row: any, jdText: string) {
   if (!row || !jdText) {
-    return { score: 0, matchingSkills: [], matchedCount: 0, requiredCount: 0 };
+    return {
+      score: 0,
+      matchingSkills: [] as string[],
+      matchedCount: 0,
+      requiredCount: 0,
+      decision: "reject" as const,
+      rationale: "No skills or requirement text to score.",
+    };
   }
   return calculateSkillMatch(candidateMatchText(row), jdText);
 }
@@ -673,6 +691,8 @@ export default function AdminDashboard() {
   const [activeEmployee, setActiveEmployee] = useState<any>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [requirementSearch, setRequirementSearch] = useState("");
+  const [requirementDateFilter, setRequirementDateFilter] = useState("all");
+  const [requirementSkillFilter, setRequirementSkillFilter] = useState("all");
   const [candidateSearch, setCandidateSearch] = useState("");
   const [outboxSearch, setOutboxSearch] = useState("");
   const [expandedJdId, setExpandedJdId] = useState<string | null>(null);
@@ -691,7 +711,7 @@ export default function AdminDashboard() {
 
   // Ingestion status state
   const [pipelineStatus, setPipelineStatus] = useState("Ingestion: Idle");
-  const [refreshingType, setRefreshingType] = useState<"requirements" | "candidates" | "employees" | "interviews" | null>(null);
+  const [refreshingType, setRefreshingType] = useState<"requirements" | "candidates" | "employees" | "interviews" | "all" | null>(null);
   const [activityLogs, setActivityLogs] = useState<string[]>([]);
   const [uploadCategory, setUploadCategory] = useState("resume");
 
@@ -1156,7 +1176,8 @@ export default function AdminDashboard() {
     isDashboardBootstrapping ||
     loading ||
     isEmployeesLoading ||
-    refreshingType === "employees";
+    refreshingType === "employees" ||
+    refreshingType === "all";
   const isTabContentLoading =
     isDashboardBootstrapping ||
     (activeTab === "employee" || activeTab === "employee-portal"
@@ -1973,35 +1994,47 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleRefresh = async (type: "requirements" | "candidates" | "employees" | "interviews") => {
+  const handleRefresh = async (type: "requirements" | "candidates" | "employees" | "interviews" | "all") => {
     if (refreshingType) return;
     setRefreshingType(type);
+    const steps =
+      type === "all"
+        ? (["requirements", "candidates", "employees", "interviews"] as const)
+        : ([type] as const);
     setPipelineStatus(`Ingestion: Scanning & refreshing ${type}...`);
     setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Starting folder scan and refresh for ${type}...`, ...prev]);
     try {
       const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "all";
       const jdQuery = `&activeJdId=${encodeURIComponent(sendJdId)}`;
-      const res = await fetch(`/api/admin/refresh?type=${type}${jdQuery}`, {
-        method: "POST"
-      });
-      const result = await res.json();
-      if (result.success) {
-        setPipelineStatus(`Ingestion: Idle (Last scan: ${new Date().toLocaleTimeString()})`);
-        setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} completed.`, ...prev]);
-        
-        if (type === "requirements") {
+      for (const step of steps) {
+        setPipelineStatus(`Ingestion: Scanning & refreshing ${step}...`);
+        const res = await fetch(`/api/admin/refresh?type=${step}${jdQuery}`, {
+          method: "POST"
+        });
+        const result = await res.json();
+        if (!res.ok || !result.success) {
+          throw new Error(result.error || `Failed to refresh ${step}`);
+        }
+        if (step === "requirements") {
           await loadJobDescriptions();
-        } else if (type === "candidates" || type === "interviews") {
+        } else if (step === "candidates" || step === "interviews") {
           await loadResumes();
-        } else if (type === "employees") {
+        } else if (step === "employees") {
           await loadEmployees({ fresh: true });
         }
-        await loadLogs();
-        setActionSuccess(`Scan & refresh of ${type} completed successfully.`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      } else {
-        throw new Error(result.error || "Failed");
       }
+      if (type === "all") {
+        await loadEmails();
+      }
+      await loadLogs();
+      setPipelineStatus(`Ingestion: Idle (Last scan: ${new Date().toLocaleTimeString()})`);
+      setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} completed.`, ...prev]);
+      setActionSuccess(
+        type === "all"
+          ? "Scan & refresh of all sources completed successfully."
+          : `Scan & refresh of ${type} completed successfully.`
+      );
+      setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
       setPipelineStatus("Ingestion: Error");
       setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} failed: ${err.message}`, ...prev]);
@@ -3365,21 +3398,53 @@ export default function AdminDashboard() {
     return "all";
   })();
 
-  // Categorize candidate list
-  const activeJdResumes = resumes.filter((r) => {
-    if (selectedJdId && selectedJdId !== "all") {
-      if (selectedJdId.includes("@")) {
+  // Categorize candidate list against the selected JD / BR
+  const jdIsActiveForScoring = Boolean(
+    jdSavedText.trim() &&
+    selectedJdId &&
+    selectedJdId !== "all" &&
+    !String(selectedJdId).includes("@")
+  );
+
+  const activeJdResumes = useMemo(() => {
+    return resumes.filter((r) => {
+      if (selectedJdId && selectedJdId !== "all" && String(selectedJdId).includes("@")) {
         const emailJds = jds.filter(j => (j.rmEmail || "admin@infinite.com").toLowerCase().trim() === selectedJdId.toLowerCase().trim());
         const emailJdIds = emailJds.map(j => j.id);
         const emailJdDuplicateIds = emailJds.flatMap(j => Array.isArray(j.duplicateIds) ? j.duplicateIds.map(resolveJdId) : []);
         const candidateJdId = resolveJdId(r.report?.jdId);
         return emailJdIds.includes(candidateJdId) || emailJdDuplicateIds.includes(candidateJdId);
       }
-      // Show all candidate resumes, they will be dynamically classified as suitable/unsuitable based on score
       return true;
-    }
-    return true;
-  });
+    });
+  }, [resumes, selectedJdId, jds]);
+
+  const scoredResumes = useMemo(() => {
+    const jdText = jdSavedText.trim();
+    return activeJdResumes.map((row) => {
+      if (!jdIsActiveForScoring) {
+        return {
+          ...row,
+          score: row.report?.jdMatchScore ?? row.analysis?.overallScore ?? 0,
+          matchingSkills: [] as string[],
+          matchedCount: 0,
+          requiredCount: 0,
+          matchDecision: undefined as string | undefined,
+          matchRationale: row.report?.jdMatchRationale || "",
+        };
+      }
+      const result = calculateSkillMatch(candidateMatchText(row), jdText);
+      return {
+        ...row,
+        score: Number(result.score) || 0,
+        matchingSkills: result.matchingSkills,
+        matchedCount: result.matchedCount,
+        requiredCount: result.requiredCount,
+        matchDecision: result.decision,
+        matchRationale: result.rationale,
+      };
+    });
+  }, [activeJdResumes, jdIsActiveForScoring, jdSavedText]);
 
   const filteredJds = jds.filter((j) => {
     if (selectedJdId && selectedJdId !== "all") {
@@ -3396,42 +3461,87 @@ export default function AdminDashboard() {
     return true;
   });
 
+  const requirementFilterOptions = useMemo(() => {
+    const dates = new Map<string, string>();
+    const skills = new Map<string, string>();
+    for (const j of filteredJds) {
+      const dayKey = requirementCreatedDayKey(j.createdAt);
+      if (dayKey) dates.set(dayKey, formatRequirementDayLabel(dayKey));
+      for (const skill of extractSkillsFromText(j.jdText)) {
+        const label = String(skill || "").trim();
+        if (!label) continue;
+        const key = label.toLowerCase();
+        if (!skills.has(key)) skills.set(key, label);
+      }
+    }
+    return {
+      dates: Array.from(dates.entries())
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([value, label]) => ({ value, label })),
+      skills: Array.from(skills.entries())
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([value, label]) => ({ value, label })),
+    };
+  }, [filteredJds]);
+
+  useEffect(() => {
+    if (
+      requirementDateFilter !== "all" &&
+      !requirementFilterOptions.dates.some((d) => d.value === requirementDateFilter)
+    ) {
+      setRequirementDateFilter("all");
+    }
+    if (
+      requirementSkillFilter !== "all" &&
+      !requirementFilterOptions.skills.some(
+        (s) => s.value === requirementSkillFilter.toLowerCase()
+      )
+    ) {
+      setRequirementSkillFilter("all");
+    }
+  }, [requirementFilterOptions, requirementDateFilter, requirementSkillFilter]);
+
   const defaultJd = pickDefaultJd(jds);
   const activeJdIdForHighlight = (selectedJdId && selectedJdId !== "all" && !selectedJdId.includes("@")) ? selectedJdId : (defaultJd?.id || "");
 
   const getScore = (r: any) => {
-    if (selectedJdId && selectedJdId !== "all" && jdSavedText) {
+    const scored = scoredResumes.find((row) => row.id === r.id);
+    if (scored) return Number(scored.score) || 0;
+    if (jdIsActiveForScoring) {
       return calculateCandidateMatch(r, jdSavedText).score;
     }
     return r.report?.jdMatchScore ?? r.analysis?.overallScore ?? 0;
   };
 
   const getSuitability = (r: any) => {
-    const jdIsActive =
-      Boolean(selectedJdId) &&
-      selectedJdId !== "all" &&
-      !selectedJdId.includes("@") &&
-      Boolean(jdSavedText);
     if (
       r.report?.suitabilityOverridden &&
       r.report?.suitability &&
-      (!jdIsActive || !r.report?.jdId || r.report.jdId === selectedJdId)
+      (!jdIsActiveForScoring || !r.report?.jdId || r.report.jdId === selectedJdId)
     ) {
       return r.report.suitability;
     }
-    if (jdIsActive) {
+    if (jdIsActiveForScoring) {
       return getScore(r) >= QUALIFIED_COVERAGE_PERCENT ? "suitable" : "unsuitable";
     }
     return r.report?.suitability ?? "suitable";
   };
 
-  const suitableCandidates = activeJdResumes
+  const suitableCandidates = scoredResumes
     .filter((r) => getSuitability(r) === "suitable")
-    .sort((a, b) => getScore(b) - getScore(a));
+    .sort((a, b) => {
+      const scoreDelta = getScore(b) - getScore(a);
+      if (scoreDelta !== 0) return scoreDelta;
+      return (b.matchingSkills?.length || 0) - (a.matchingSkills?.length || 0);
+    });
 
-  const unsuitableCandidates = activeJdResumes
+  const unsuitableCandidates = scoredResumes
     .filter((r) => getSuitability(r) === "unsuitable")
-    .sort((a, b) => getScore(b) - getScore(a));
+    .sort((a, b) => {
+      const scoreDelta = getScore(b) - getScore(a);
+      if (scoreDelta !== 0) return scoreDelta;
+      return (b.matchingSkills?.length || 0) - (a.matchingSkills?.length || 0);
+    });
 
   const rawCandidates = activeTab === "suitable" ? suitableCandidates : unsuitableCandidates;
 
@@ -3467,6 +3577,9 @@ export default function AdminDashboard() {
         matchingSkills: result.matchingSkills,
         matchedCount: result.matchedCount,
         requiredCount: result.requiredCount,
+        matchDecision: result.decision,
+        matchRationale: result.rationale,
+        familyRelation: result.familyRelation,
       };
     });
   }, [employees, jdSavedText, selectedJdId]);
@@ -3710,9 +3823,9 @@ export default function AdminDashboard() {
                   </div>
                 ) : activeTab === "requirements" ? (
                   <div className="space-y-4">
-                    {/* Search requirements */}
-                    <div className="flex flex-col sm:flex-row gap-3 justify-between items-center shrink-0">
-                      <div className="w-full sm:w-72 relative">
+                    {/* Search + filters */}
+                    <div className="flex flex-col xl:flex-row gap-3 justify-between items-stretch xl:items-center shrink-0">
+                      <div className="w-full xl:flex-1 min-w-0 relative">
                         <input
                           type="text"
                           placeholder="Search requirements..."
@@ -3720,6 +3833,34 @@ export default function AdminDashboard() {
                           onChange={(e) => setRequirementSearch(e.target.value)}
                           className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
                         />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full xl:w-auto xl:min-w-[24rem]">
+                        <select
+                          value={requirementDateFilter}
+                          onChange={(e) => setRequirementDateFilter(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                          aria-label="Filter requirements by created date"
+                        >
+                          <option value="all">Date: All</option>
+                          {requirementFilterOptions.dates.map((d) => (
+                            <option key={d.value} value={d.value}>
+                              {d.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={requirementSkillFilter}
+                          onChange={(e) => setRequirementSkillFilter(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                          aria-label="Filter requirements by skill"
+                        >
+                          <option value="all">Skills: All</option>
+                          {requirementFilterOptions.skills.map((skill) => (
+                            <option key={`skill-${skill.value}`} value={skill.value}>
+                              {skill.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
 
@@ -3745,11 +3886,23 @@ export default function AdminDashboard() {
                                 const displayName = j.fileName || "";
                                 const email = j.rmEmail || "";
                                 const text = j.jdText || "";
-                                return (
+                                const matchesSearch =
+                                  !searchLower ||
                                   displayName.toLowerCase().includes(searchLower) ||
                                   email.toLowerCase().includes(searchLower) ||
-                                  text.toLowerCase().includes(searchLower)
-                                );
+                                  text.toLowerCase().includes(searchLower);
+                                if (!matchesSearch) return false;
+
+                                if (requirementDateFilter !== "all") {
+                                  if (requirementCreatedDayKey(j.createdAt) !== requirementDateFilter) return false;
+                                }
+
+                                if (requirementSkillFilter !== "all") {
+                                  const skills = extractSkillsFromText(j.jdText).map((s) => s.toLowerCase());
+                                  if (!skills.includes(requirementSkillFilter.toLowerCase())) return false;
+                                }
+
+                                return true;
                               });
 
                               // Group JDs by text to identify duplicates (keep short/empty texts unique)
@@ -4033,6 +4186,10 @@ export default function AdminDashboard() {
                                               setJdText(j.jdText);
                                               setEmployeeSearch("");
                                               setActiveTab("employee");
+                                              void fetch(
+                                                `/api/admin/refresh?type=sync-selected&activeJdId=${encodeURIComponent(j.id)}`,
+                                                { method: "POST" }
+                                              ).catch(() => {});
                                             }}
                                             className={`h-7 px-2.5 rounded-lg text-[10px] font-extrabold transition duration-200 ${
                                               isActive
@@ -4128,14 +4285,14 @@ export default function AdminDashboard() {
                           <span className="text-xl md:text-2xl font-black text-primary">{scoredEmployees.length}</span>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center flex flex-col items-center justify-center min-h-[70px]">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Coverage &gt;60% of JD skills</span>
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Recruiter fit ≥60%</span>
                           {selectedJdId && selectedJdId !== "all" && jdSavedText.trim() ? (
                             <div className="w-full">
                               <span className="text-xl md:text-2xl font-black text-emerald-600 dark:text-emerald-400 block leading-none">
                                 {jdCoverageQualifiedCount}
                               </span>
                               <span className="text-[10px] font-bold text-muted-foreground block mt-1.5 leading-none">
-                                Qualified Profiles
+                                Qualified for this req
                               </span>
                             </div>
                           ) : (
@@ -4310,14 +4467,17 @@ export default function AdminDashboard() {
                                         className={`font-black text-sm ${
                                           Number(emp.score) >= QUALIFIED_COVERAGE_PERCENT ? 'text-emerald-600 dark:text-emerald-400' : (Number(emp.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
                                         }`}
-                                        title={
-                                          emp.requiredCount
+                                        title={emp.matchRationale || (emp.requiredCount
                                             ? `${emp.matchedCount}/${emp.requiredCount} required JD skills`
-                                            : undefined
-                                        }
+                                            : undefined)}
                                       >
                                         {emp.score}%
                                       </span>
+                                      {emp.matchDecision && (
+                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">
+                                          {emp.matchDecision}
+                                        </div>
+                                      )}
                                     </td>
                                     <td className="p-3">
                                       <div className="flex items-center justify-center gap-1.5">
@@ -4644,20 +4804,6 @@ export default function AdminDashboard() {
                             <Download className="w-3.5 h-3.5" />
                           )}
                           {isExportingPortal ? "Exporting..." : "Export to Excel"}
-                        </Button>
-                        <Button
-                          onClick={() => handleRefresh("employees")}
-                          disabled={refreshingType !== null}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 sm:flex-none rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-xs"
-                        >
-                          {isEmployeesLoading ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <RefreshCcw className="w-3.5 h-3.5" />
-                          )}
-                          Scan & Refresh Portal
                         </Button>
                       </div>
                     </div>
@@ -5527,6 +5673,18 @@ export default function AdminDashboard() {
                     </div>
                   ) ) : (
                     <div className="space-y-4">
+                      {jdIsActiveForScoring && (
+                        <div className="rounded-xl border border-border bg-slate-50/60 dark:bg-slate-950/40 px-3 py-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          Graded against{" "}
+                          <span className="font-black text-slate-800 dark:text-slate-100">
+                            {extractJobTitleFromJd(
+                              jdSavedText,
+                              jds.find((j) => j.id === selectedJdId)?.fileName || "selected requirement"
+                            )}
+                          </span>
+                          {" "}with the same recruiter fit used in Corp Pool. Suitable = {QUALIFIED_COVERAGE_PERCENT}%+.
+                        </div>
+                      )}
                       {/* Candidate Search Bar */}
                       {(suitableCandidates.length > 0 || unsuitableCandidates.length > 0 || candidateSearch) && (
                         <div className="relative shrink-0">
@@ -5669,22 +5827,24 @@ export default function AdminDashboard() {
 
                                 {/* Dynamic skills match list */}
                                 {(() => {
-                                  if (selectedJdId && selectedJdId !== "all" && jdSavedText) {
-                                    const matchInfo = calculateCandidateMatch(row, jdSavedText);
-                                    if (matchInfo.matchingSkills.length > 0) {
-                                      return (
-                                        <div className="flex flex-wrap gap-1 mt-2">
-                                          {matchInfo.matchingSkills.slice(0, 5).map((s, i) => (
-                                            <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0 font-bold">
-                                              {s}
-                                            </Badge>
-                                          ))}
-                                          {matchInfo.matchingSkills.length > 5 && (
-                                            <span className="text-[9px] text-slate-400 font-bold">+{matchInfo.matchingSkills.length - 5} more</span>
-                                          )}
-                                        </div>
-                                      );
-                                    }
+                                  const skills = row.matchingSkills || (
+                                    selectedJdId && selectedJdId !== "all" && jdSavedText
+                                      ? calculateCandidateMatch(row, jdSavedText).matchingSkills
+                                      : []
+                                  );
+                                  if (skills.length > 0) {
+                                    return (
+                                      <div className="flex flex-wrap gap-1 mt-2">
+                                        {skills.slice(0, 5).map((s: string, i: number) => (
+                                          <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0 font-bold">
+                                            {s}
+                                          </Badge>
+                                        ))}
+                                        {skills.length > 5 && (
+                                          <span className="text-[9px] text-slate-400 font-bold">+{skills.length - 5} more</span>
+                                        )}
+                                      </div>
+                                    );
                                   }
                                   return null;
                                 })()}
@@ -5696,8 +5856,14 @@ export default function AdminDashboard() {
                                   JD Match
                                 </span>
                                 {(() => {
-                                  const matchInfo = selectedJdId && selectedJdId !== "all" && jdSavedText
-                                    ? calculateCandidateMatch(row, jdSavedText)
+                                  const matchInfo = jdIsActiveForScoring
+                                    ? {
+                                        score: Number(row.score) || 0,
+                                        rationale: row.matchRationale,
+                                        requiredCount: row.requiredCount,
+                                        matchedCount: row.matchedCount,
+                                        decision: row.matchDecision,
+                                      }
                                     : null;
                                   const score = matchInfo?.score ?? getScore(row);
                                   const colorClass =
@@ -5707,16 +5873,24 @@ export default function AdminDashboard() {
                                         ? "bg-amber-100 dark:bg-amber-950/35 text-amber-800 dark:text-amber-300"
                                         : "bg-rose-100 dark:bg-rose-950/35 text-rose-800 dark:text-rose-300";
                                   return (
-                                    <Badge
-                                      className={`border-0 font-extrabold text-xs px-3 py-1 ${colorClass}`}
-                                      title={
-                                        matchInfo?.requiredCount
-                                          ? `${matchInfo.matchedCount}/${matchInfo.requiredCount} required JD skills`
-                                          : undefined
-                                      }
-                                    >
-                                      {score}%
-                                    </Badge>
+                                    <>
+                                      <Badge
+                                        className={`border-0 font-extrabold text-xs px-3 py-1 ${colorClass}`}
+                                        title={
+                                          matchInfo?.rationale
+                                            || (matchInfo?.requiredCount
+                                            ? `${matchInfo.matchedCount}/${matchInfo.requiredCount} required JD skills`
+                                            : undefined)
+                                        }
+                                      >
+                                        {score}%
+                                      </Badge>
+                                      {matchInfo?.decision && (
+                                        <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+                                          {matchInfo.decision}
+                                        </span>
+                                      )}
+                                    </>
                                   );
                                 })()}
                               </div>
@@ -5725,12 +5899,10 @@ export default function AdminDashboard() {
                             {/* Middle Row: Rationale Quote */}
                             <div className="bg-muted/50 border border-indigo-50/50 dark:border-slate-800/80 rounded-2xl p-4 text-xs text-muted-foreground font-medium leading-relaxed">
                               <strong className="text-slate-800 dark:text-slate-200">Rationale:</strong> {
-                                selectedJdId && selectedJdId !== "all" && jdSavedText
-                                  ? (() => {
-                                      const matchInfo = calculateCandidateMatch(row, jdSavedText);
-                                      if (!matchInfo.requiredCount) return "No required JD skills to score against.";
-                                      return `Matched ${matchInfo.matchedCount}/${matchInfo.requiredCount} required JD skills (${matchInfo.score}% coverage).`;
-                                    })()
+                                jdIsActiveForScoring
+                                  ? (row.matchRationale || (row.requiredCount
+                                      ? `Matched ${row.matchedCount}/${row.requiredCount} required JD skills (${row.score}% recruiter fit).`
+                                      : "No required JD skills to score against."))
                                   : (row.report?.jdMatchRationale || "Matches profile requirements.")
                               }
                             </div>
@@ -5882,37 +6054,27 @@ export default function AdminDashboard() {
                   <p className="text-[10px] text-slate-400 font-semibold mt-1">Folder-driven automation panel</p>
                 </div>
               </div>
-              <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
-                  pipelineStatus.includes("Error") ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400" :
-                  pipelineStatus.includes("Idle") ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                  "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
-                }`}>
-                  {pipelineStatus.includes("Idle") ? "Active" : "Processing"}
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <Badge
+                  className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 ${
+                    pipelineStatus.includes("Error")
+                      ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400"
+                      : pipelineStatus.includes("Idle")
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
+                  }`}
+                  title={pipelineStatus}
+                >
+                  {pipelineStatus.includes("Error")
+                    ? "Error"
+                    : pipelineStatus.includes("Idle")
+                      ? "Idle"
+                      : "Scanning"}
                 </Badge>
+              </div>
             </div>
 
             <div className="space-y-4 flex-1 flex flex-col">
-              <div className="rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950/40 px-3 py-2.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="relative flex h-2 w-2 shrink-0">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                      pipelineStatus.includes("Error") ? "bg-rose-450" :
-                      pipelineStatus.includes("Idle") ? "bg-emerald-450" :
-                      "bg-amber-450"
-                    }`} />
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                      pipelineStatus.includes("Error") ? "bg-rose-500" :
-                      pipelineStatus.includes("Idle") ? "bg-emerald-500" :
-                      "bg-amber-500"
-                    }`} />
-                  </div>
-                  <span className="text-[11px] font-bold text-muted-foreground truncate">{pipelineStatus}</span>
-                </div>
-                {activityLogs.length > 0 && (
-                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider shrink-0">Auto-Syncing</span>
-                )}
-              </div>
-
               {jds.length > 0 && (
                 <div className="space-y-1.5">
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
@@ -5993,7 +6155,7 @@ export default function AdminDashboard() {
                     </Badge>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <Button
                     variant="outline"
                     disabled={refreshingType !== null}
@@ -6050,6 +6212,34 @@ export default function AdminDashboard() {
                     <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Sync & Refresh Interviews</span>
                     <span className="text-[7px] text-slate-400 font-semibold uppercase">Database & CSV</span>
                   </Button>
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("employees")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "employees" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <RefreshCcw className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Portal</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">Mapping & live tests</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("all")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "all" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <Layers className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh All</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">All sources + outbox</span>
+                  </Button>
                 </div>
               </div>
 
@@ -6077,8 +6267,8 @@ export default function AdminDashboard() {
                   <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click to select file for upload</span>
                   <span className="text-[9px] text-slate-400 font-semibold leading-snug">
                     {uploadCategory === 'resume' && "Saves to /docs/Resumes & auto-screens"}
-                    {uploadCategory === 'jd' && "Saves to /docs/JD & parses details"}
-                    {uploadCategory === 'br' && "Saves to /docs/BR as excel template row"}
+                    {uploadCategory === 'jd' && "Converts JD → BR row in BR_RawData 3.xlsx & saves to backend"}
+                    {uploadCategory === 'br' && "Appends BR rows into BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'employee' && "Saves to /docs/Corp Pool & updates match scores"}
                     {uploadCategory === 'interview' && "Syncs and parses candidate_interview_data.csv"}
                   </span>

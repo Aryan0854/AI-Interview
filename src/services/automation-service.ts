@@ -14,7 +14,7 @@ import {
   writeDocFile,
 } from '@/lib/docs-storage';
 import { writePersistedJson } from '@/lib/runtime-data';
-import { calculateSkillMatch } from '@/lib/skill-match';
+import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -115,6 +115,304 @@ function isBrDataSheet(name: string): boolean {
   if (!n.trim()) return false;
   if (n.includes("pivot") || n.includes("summary")) return false;
   return true;
+}
+
+const MASTER_BR_FILENAME = "BR_RawData 3.xlsx";
+
+function headerKey(name: string): string {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function getGradeFromExperience(expStr: string | undefined | null): string {
+  if (!expStr) return "E2";
+  const numbers = expStr.match(/\d+(\.\d+)?/g);
+  if (!numbers || numbers.length === 0) return "E2";
+  const years = parseFloat(numbers[0]);
+  if (years >= 0 && years < 1) return "E0";
+  if (years >= 1 && years < 3) return "E1";
+  if (years >= 3 && years < 6) return "E2";
+  if (years >= 6 && years < 9) return "E3";
+  if (years >= 9 && years < 12) return "E4";
+  if (years >= 12) return "E5/E6";
+  return "E2";
+}
+
+function readSheetHeaders(sheet: ExcelJS.Worksheet): Map<string, number> {
+  const byKey = new Map<string, number>();
+  sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => {
+    const name = cellText(cell.value);
+    if (name) byKey.set(headerKey(name), col);
+  });
+  return byKey;
+}
+
+function headerCol(byKey: Map<string, number>, ...aliases: string[]): number | undefined {
+  for (const alias of aliases) {
+    const col = byKey.get(headerKey(alias));
+    if (col) return col;
+  }
+  return undefined;
+}
+
+function lastUsedRow(sheet: ExcelJS.Worksheet): number {
+  let last = 1;
+  sheet.eachRow((row, n) => {
+    let has = false;
+    row.eachCell({ includeEmpty: false }, () => {
+      has = true;
+    });
+    if (has) last = Math.max(last, n);
+  });
+  return last;
+}
+
+function collectSheetAutoReqIds(sheet: ExcelJS.Worksheet, idCol?: number): Set<string> {
+  const ids = new Set<string>();
+  if (!idCol) return ids;
+  sheet.eachRow((row, n) => {
+    if (n === 1) return;
+    const id = normalizeBrId(cellText(row.getCell(idCol).value));
+    if (id) ids.add(id);
+  });
+  return ids;
+}
+
+function nextAutoReqId(existing: Set<string>): string {
+  let max = 40000;
+  for (const id of existing) {
+    const match = id.match(/(\d+)/);
+    if (!match) continue;
+    const num = parseInt(match[1], 10);
+    if (Number.isFinite(num) && num > max) max = num;
+  }
+  return `${max + 1}BR`;
+}
+
+function copyRowStyle(fromRow: ExcelJS.Row, toRow: ExcelJS.Row, colCount: number) {
+  for (let c = 1; c <= colCount; c++) {
+    const templateCell = fromRow.getCell(c);
+    const newCell = toRow.getCell(c);
+    if (!templateCell) continue;
+    try {
+      newCell.font = templateCell.font ? JSON.parse(JSON.stringify(templateCell.font)) : undefined;
+      newCell.fill = templateCell.fill ? JSON.parse(JSON.stringify(templateCell.fill)) : undefined;
+      newCell.border = templateCell.border ? JSON.parse(JSON.stringify(templateCell.border)) : undefined;
+      newCell.alignment = templateCell.alignment ? JSON.parse(JSON.stringify(templateCell.alignment)) : undefined;
+      newCell.numFmt = templateCell.numFmt;
+    } catch {
+      // style copy is best-effort
+    }
+  }
+}
+
+function writeMappedRow(
+  sheet: ExcelJS.Worksheet,
+  byKey: Map<string, number>,
+  values: Record<string, unknown>,
+  existingRow?: ExcelJS.Row
+): ExcelJS.Row {
+  const colCount = Math.max(sheet.columnCount || 25, 25);
+  const row =
+    existingRow ||
+    sheet.getRow(lastUsedRow(sheet) + 1);
+  const templateRow = sheet.getRow(Math.max(2, lastUsedRow(sheet)));
+  if (!existingRow) copyRowStyle(templateRow, row, colCount);
+
+  for (const [header, value] of Object.entries(values)) {
+    const col = headerCol(byKey, header);
+    if (!col) continue;
+    row.getCell(col).value = value as ExcelJS.CellValue;
+  }
+  row.commit();
+  return row;
+}
+
+function jdExtractedFieldMap(opts: {
+  autoReqId: string;
+  details: any;
+  jdText: string;
+  rmName?: string;
+}): Record<string, unknown> {
+  const { autoReqId, details, jdText, rmName } = opts;
+  const allSkills = [
+    ...(details.skills || []),
+    ...(details.monitoring_tools || []),
+    ...(details.cloud_platforms || []),
+    ...(details.tools || []),
+  ];
+  const uniqueSkills = [...new Set(allSkills.filter(Boolean))].join(", ");
+  return {
+    "Auto req ID": autoReqId,
+    "Current Req Status": "Open",
+    Grade: getGradeFromExperience(details.experience),
+    Designation: details.job_title || "Technical Role",
+    Recruiter: details.recruiter || "",
+    "Department Type": details.department || "Technical",
+    BU: "ITS - TMH - Delivery",
+    "Client Interview?": "Yes",
+    "Mandatory Skills": uniqueSkills,
+    Entity: "OFFSHORE",
+    "Client Name": "IRON MOUNTAIN",
+    "Billing Type": "Billable",
+    Project: "IM DXP-IDP 2025",
+    "Requester ID": "1026374",
+    "TAG Manager": "Antony, Nithin (1027544)",
+    "RM Name": rmName || "Hippargi, Anil (1017237)",
+    "Job description": String(jdText || "").substring(0, 5000),
+    "Joining Location": "Bangalore - Global Axis",
+    "Date Approved": new Date().toISOString().split("T")[0],
+    "No. of Positions": 1,
+    "Positions Remaining": 1,
+    "Sourcing Type": "External - India",
+    "Requirement Type": "New",
+    "ST (Bill Rate) Enter only numeric value and 0 for Non-Billable": 5.5,
+  };
+}
+
+function findMasterBrSheet(workbook: ExcelJS.Workbook): ExcelJS.Worksheet {
+  const preferred = ["BR _Raw Data", "BR_Raw Data", "Global TMH Demand"];
+  for (const name of preferred) {
+    const sheet = workbook.getWorksheet(name);
+    if (sheet) return sheet;
+  }
+  for (const sheet of workbook.worksheets) {
+    if (isBrDataSheet(sheet.name) && readSheetHeaders(sheet).has(headerKey("Auto req ID"))) {
+      return sheet;
+    }
+  }
+  return workbook.worksheets[0] || workbook.addWorksheet("BR _Raw Data");
+}
+
+async function loadMasterBrWorkbook(): Promise<{ workbook: ExcelJS.Workbook; filename: string }> {
+  const files = await listDocFiles("BR");
+  const filename =
+    files.find((f) => f.toLowerCase() === MASTER_BR_FILENAME.toLowerCase()) ||
+    files.find((f) => /br_rawdata/i.test(f.replace(/\s+/g, "_"))) ||
+    MASTER_BR_FILENAME;
+
+  const workbook = new ExcelJS.Workbook();
+  try {
+    const buffer = await readDocFileBuffer("BR", filename);
+    await workbook.xlsx.load(buffer as any);
+    if (workbook.worksheets.length === 0) {
+      return { workbook: await loadTemplateWorkbook(), filename: MASTER_BR_FILENAME };
+    }
+    return { workbook, filename: MASTER_BR_FILENAME };
+  } catch {
+    return { workbook: await loadTemplateWorkbook(), filename: MASTER_BR_FILENAME };
+  }
+}
+
+async function saveMasterBrWorkbook(workbook: ExcelJS.Workbook, filename = MASTER_BR_FILENAME): Promise<void> {
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  await writeDocFile("BR", filename, buffer);
+}
+
+function appendBrWorkbookRows(
+  source: ExcelJS.Workbook,
+  masterSheet: ExcelJS.Worksheet,
+  masterHeaders: Map<string, number>,
+  existingIds: Set<string>
+): number {
+  let added = 0;
+  const masterColCount = Math.max(masterSheet.columnCount || 25, 25);
+  const templateRow = masterSheet.getRow(Math.max(2, lastUsedRow(masterSheet)));
+
+  for (const sheet of source.worksheets) {
+    if (!isBrDataSheet(sheet.name)) continue;
+    const sourceHeaders = readSheetHeaders(sheet);
+    const idCol = headerCol(sourceHeaders, "auto req id", "br id", "id");
+    if (!idCol) continue;
+
+    sheet.eachRow((row, n) => {
+      if (n === 1) return;
+      const autoReqId = normalizeBrId(cellText(row.getCell(idCol).value));
+      if (!autoReqId || existingIds.has(autoReqId)) return;
+
+      const newRow = masterSheet.getRow(lastUsedRow(masterSheet) + 1);
+      copyRowStyle(templateRow, newRow, masterColCount);
+
+      sourceHeaders.forEach((srcCol, key) => {
+        const destCol = masterHeaders.get(key);
+        if (!destCol) return;
+        const value = row.getCell(srcCol).value;
+        if (value !== undefined && value !== null && value !== "") {
+          newRow.getCell(destCol).value = value as ExcelJS.CellValue;
+        }
+      });
+
+      const destIdCol = headerCol(masterHeaders, "auto req id", "br id", "id");
+      if (destIdCol) newRow.getCell(destIdCol).value = autoReqId;
+      newRow.commit();
+      existingIds.add(autoReqId);
+      added++;
+    });
+  }
+  return added;
+}
+
+function findRowByAutoReqId(sheet: ExcelJS.Worksheet, idCol: number, autoReqId: string): ExcelJS.Row | undefined {
+  let found: ExcelJS.Row | undefined;
+  sheet.eachRow((row, n) => {
+    if (n === 1 || found) return;
+    if (normalizeBrId(cellText(row.getCell(idCol).value)) === autoReqId) found = row;
+  });
+  return found;
+}
+
+function autoReqIdFromLabel(fileName?: string): string {
+  return normalizeBrId(String(fileName || "").split("|")[0] || "");
+}
+
+async function persistMasterRequirements(
+  workbook: ExcelJS.Workbook,
+  filename: string,
+  localJds: any[]
+): Promise<number> {
+  const merged = mergeBrRequirements(parseBrWorkbook(workbook, filename));
+  const upsertRows = merged.map((row) => {
+    const jdUuid = brIdToUuid(row.autoReqId);
+    const newLocalJd = {
+      id: jdUuid,
+      jdText: row.composedText,
+      rmEmail: row.rmEmail,
+      fileName: `${row.autoReqId} | ${filename}`,
+      createdAt: new Date().toISOString(),
+    };
+    const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
+    if (existingIdx !== -1) {
+      localJds[existingIdx] = {
+        ...localJds[existingIdx],
+        ...newLocalJd,
+        createdAt: localJds[existingIdx].createdAt || newLocalJd.createdAt,
+      };
+    } else {
+      localJds.push(newLocalJd);
+    }
+    return {
+      id: jdUuid,
+      jd_text: newLocalJd.jdText,
+      rm_email: newLocalJd.rmEmail,
+      file_name: newLocalJd.fileName,
+      created_at: localJds.find((j: any) => j.id === jdUuid)?.createdAt || newLocalJd.createdAt,
+    };
+  });
+
+  let processed = 0;
+  for (let i = 0; i < upsertRows.length; i += 50) {
+    const chunk = upsertRows.slice(i, i + 50);
+    const { error } = await supabase.from("job_descriptions").upsert(chunk);
+    if (error) {
+      await writeLog("requirements", "UPSERT_BR_ERROR", "failed", `Error saving BR batch ${i}: ${error.message}`);
+    } else {
+      processed += chunk.length;
+    }
+  }
+  return processed;
 }
 
 function composeRequirementText(designation: string, skills: string, jdBody: string): string {
@@ -243,13 +541,15 @@ function mergeBrRequirements(rows: ParsedBrRequirement[]): ParsedBrRequirement[]
 
 /**
  * 1. Requirements Refresh: Scans /docs/BR and /docs/JD
+ * JD uploads are converted and appended into the master BR workbook.
+ * Other BR workbooks are merged into that same master file, then saved to storage + DB.
  */
 export async function refreshRequirements(): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
   await ensureDocsStorage();
-  
+
   const brFiles = await listDocFiles("BR");
   const jdFiles = await listDocFiles("JD");
-  
+
   let processedBRs = 0;
   let convertedJDs = 0;
 
@@ -258,162 +558,80 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
   try {
     const raw = await readFile(localJdPath, "utf8");
     localJds = JSON.parse(raw);
-  } catch (e) {}
-  
-  const xlsxBrFiles = brFiles.filter(f => f.endsWith(".xlsx") || f.endsWith(".xls"));
-  const actualJdFiles = jdFiles.filter(f => f.endsWith(".pdf") || f.endsWith(".docx") || f.endsWith(".doc") || f.endsWith(".txt"));
+  } catch {}
 
-  const parsedFromFiles: ParsedBrRequirement[] = [];
-
-  // Scenario A & C: Parse every BR workbook (demand sheet + BR _Raw Data) and merge unique Auto Req IDs.
-  for (const file of xlsxBrFiles) {
-    try {
-      const workbook = new ExcelJS.Workbook();
-      const buffer = await readDocFileBuffer("BR", file);
-      await workbook.xlsx.load(buffer as any);
-      parsedFromFiles.push(...parseBrWorkbook(workbook, file));
-    } catch (err: any) {
-      await writeLog('requirements', 'PARSE_BR_FILE_FAILED', 'failed', `Failed parsing BR file ${file}: ${err.message}`);
-    }
-  }
-
-  const mergedBrs = mergeBrRequirements(parsedFromFiles);
-  await writeLog(
-    'requirements',
-    'MERGED_BR_FILES',
-    'success',
-    `Merged ${parsedFromFiles.length} BR rows from ${xlsxBrFiles.length} files into ${mergedBrs.length} unique Auto Req IDs`
+  const xlsxBrFiles = brFiles.filter((f) => f.endsWith(".xlsx") || f.endsWith(".xls"));
+  const actualJdFiles = jdFiles.filter(
+    (f) => f.endsWith(".pdf") || f.endsWith(".docx") || f.endsWith(".doc") || f.endsWith(".txt")
   );
 
-  const upsertRows = mergedBrs.map((row) => {
-    const jdUuid = brIdToUuid(row.autoReqId);
-    const newLocalJd = {
-      id: jdUuid,
-      jdText: row.composedText,
-      rmEmail: row.rmEmail,
-      fileName: `${row.autoReqId} | ${row.sourceFile}`,
-      createdAt: new Date().toISOString()
-    };
-    const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
-    if (existingIdx !== -1) {
-      localJds[existingIdx] = { ...localJds[existingIdx], ...newLocalJd, createdAt: localJds[existingIdx].createdAt || newLocalJd.createdAt };
-    } else {
-      localJds.push(newLocalJd);
-    }
-    return {
-      id: jdUuid,
-      jd_text: newLocalJd.jdText,
-      rm_email: newLocalJd.rmEmail,
-      file_name: newLocalJd.fileName,
-      created_at: newLocalJd.createdAt
-    };
-  });
+  const { workbook: masterWorkbook, filename: masterFilename } = await loadMasterBrWorkbook();
+  const masterSheet = findMasterBrSheet(masterWorkbook);
+  const masterHeaders = readSheetHeaders(masterSheet);
+  const idCol = headerCol(masterHeaders, "auto req id", "br id", "id");
+  const existingIds = collectSheetAutoReqIds(masterSheet, idCol);
 
-  for (let i = 0; i < upsertRows.length; i += 50) {
-    const chunk = upsertRows.slice(i, i + 50);
-    const { error } = await supabase.from('job_descriptions').upsert(chunk);
-    if (error) {
-      await writeLog('requirements', 'UPSERT_BR_ERROR', 'failed', `Error saving BR batch ${i}: ${error.message}`);
-    } else {
-      processedBRs += chunk.length;
+  for (const file of xlsxBrFiles) {
+    if (file.toLowerCase() === masterFilename.toLowerCase()) continue;
+    try {
+      const source = new ExcelJS.Workbook();
+      const buffer = await readDocFileBuffer("BR", file);
+      await source.xlsx.load(buffer as any);
+      const added = appendBrWorkbookRows(source, masterSheet, masterHeaders, existingIds);
+      if (added > 0) {
+        await writeLog(
+          "requirements",
+          "MERGED_BR_INTO_MASTER",
+          "success",
+          `Appended ${added} BR row(s) from ${file} into ${masterFilename}`
+        );
+      }
+    } catch (err: any) {
+      await writeLog("requirements", "PARSE_BR_FILE_FAILED", "failed", `Failed parsing BR file ${file}: ${err.message}`);
     }
   }
-  
-  // Scenario B: If only JD exists in docs/JD, convert to BR and save to docs/BR
+
   for (const file of actualJdFiles) {
-    // Check if BR already exists in docs/BR (same name ending with _BR.xlsx or same base name)
-    const base = file.replace(/\.[^/.]+$/, "");
-    const matchingBr = xlsxBrFiles.find(bf => bf.toLowerCase().startsWith(base.toLowerCase()) || bf.includes(base));
-    if (matchingBr) {
-      // Prioritize BR, skip JD conversion
-      continue;
-    }
-    
     try {
+      const alreadyLinked = localJds.some(
+        (j: any) => String(j.fileName || "").toLowerCase().includes(file.toLowerCase())
+      );
       const buffer = await readDocFileBuffer("JD", file);
       const jdText = await resumeService.extractTextFromBuffer(buffer);
-      
       if (!jdText.trim()) continue;
-      
-      // Call JD to BR extraction
-      const details = await extractJdDetails(jdText, file);
-      
-      const newAutoReqId = details.auto_req_id || `${Math.floor(40000 + Math.random() * 9999)}BR`;
-      const allSkills = [
-        ...(details.skills || []),
-        ...(details.monitoring_tools || []),
-        ...(details.cloud_platforms || [])
-      ];
-      const uniqueSkills = [...new Set(allSkills)].join(', ');
-      
-      // Load spreadsheet template and append row
-      const workbook = await loadTemplateWorkbook();
-      const sheet = workbook.getWorksheet("BR _Raw Data") || workbook.worksheets[0];
-      
-      // Find last row
-      let lastRow = 1;
-      sheet.eachRow((row, rowNumber) => {
-        lastRow = Math.max(lastRow, rowNumber);
-      });
-      const newRowIdx = lastRow + 1;
-      const newRow = sheet.getRow(newRowIdx);
-      
-      // Standard BR Columns: ID, Status, Grade, Title, Recruiter, Dept, BU, Interview, Skills, Entity, Client, Billing, Project, Requester, TAG, RM, JD, Location
-      newRow.getCell(1).value = newAutoReqId;
-      newRow.getCell(2).value = "Open";
-      newRow.getCell(3).value = details.experience?.includes("5") ? "E2" : "E1";
-      newRow.getCell(4).value = details.job_title || "Technical Role";
-      newRow.getCell(6).value = "Technical";
-      newRow.getCell(7).value = "ITS - TMH - Delivery";
-      newRow.getCell(8).value = "Yes";
-      newRow.getCell(9).value = uniqueSkills;
-      newRow.getCell(10).value = "OFFSHORE";
-      newRow.getCell(11).value = "IRON MOUNTAIN";
-      newRow.getCell(12).value = "Billable";
-      newRow.getCell(13).value = "IM DXP-IDP 2025";
-      newRow.getCell(16).value = "Hippargi, Anil (1017237)";
-      newRow.getCell(17).value = jdText.substring(0, 5000);
-      newRow.getCell(18).value = "Bangalore - Global Axis";
-      newRow.commit();
-      
-      // Save converted BR spreadsheet back to BR folder
-      const outputBrName = `${base}_BR.xlsx`;
-      const finalBuffer = await workbook.xlsx.writeBuffer();
-      await writeDocFile("BR", outputBrName, Buffer.from(finalBuffer as ArrayBuffer));
-      
-      const jdUuid = brIdToUuid(newAutoReqId);
-      const newLocalJd = {
-        id: jdUuid,
-        jdText: jdText,
-        rmEmail: "admin@infinite.com",
-        fileName: `${newAutoReqId} | ${file}`,
-        createdAt: new Date().toISOString()
-      };
-      const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
-      if (existingIdx !== -1) {
-        localJds[existingIdx] = newLocalJd;
-      } else {
-        localJds.push(newLocalJd);
-      }
 
-      try {
-        await supabase.from('job_descriptions').upsert({
-          id: jdUuid,
-          jd_text: jdText,
-          rm_email: "admin@infinite.com",
-          file_name: `${newAutoReqId} | ${file}`,
-          created_at: newLocalJd.createdAt
-        });
-      } catch (dbErr) {
-        console.warn("Failed to save converted JD to Supabase:", dbErr);
-      }
-      
+      const details = await extractJdDetails(jdText, file);
+      const linkedId = autoReqIdFromLabel(
+        localJds.find((j: any) => String(j.fileName || "").toLowerCase().includes(file.toLowerCase()))?.fileName
+      );
+      const autoReqId =
+        (details.auto_req_id && normalizeBrId(details.auto_req_id)) ||
+        linkedId ||
+        (alreadyLinked ? "" : nextAutoReqId(existingIds));
+      if (!autoReqId) continue;
+
+      const existingRow = idCol ? findRowByAutoReqId(masterSheet, idCol, autoReqId) : undefined;
+      writeMappedRow(
+        masterSheet,
+        masterHeaders,
+        jdExtractedFieldMap({ autoReqId, details, jdText }),
+        existingRow
+      );
+      existingIds.add(autoReqId);
       convertedJDs++;
-      await writeLog('requirements', 'CONVERTED_JD_TO_BR', 'success', `Automatically converted JD ${file} to BR ${outputBrName}`);
+      await writeLog(
+        "requirements",
+        "CONVERTED_JD_TO_BR",
+        "success",
+        `Converted JD ${file} into ${masterFilename} as ${autoReqId}`
+      );
     } catch (err: any) {
-      await writeLog('requirements', 'CONVERT_JD_FAILED', 'failed', `Error converting JD ${file}: ${err.message}`);
+      await writeLog("requirements", "CONVERT_JD_FAILED", "failed", `Error converting JD ${file}: ${err.message}`);
     }
   }
+
+  await saveMasterBrWorkbook(masterWorkbook, masterFilename);
+  processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds);
 
   try {
     const serialized = JSON.stringify(localJds, null, 2);
@@ -424,8 +642,81 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
   } catch (writeErr) {
     console.error("Failed to write local backup for requirements refresh:", writeErr);
   }
-  
+
   return { success: true, processedBRs, convertedJDs };
+}
+
+/**
+ * When an admin selects a requirement, append it into the master BR workbook if missing,
+ * then persist the workbook and job_descriptions row.
+ */
+export async function syncSelectedRequirementToMaster(jdId: string): Promise<{
+  success: boolean;
+  appended: boolean;
+  autoReqId: string;
+}> {
+  if (!jdId || jdId === "all" || jdId.includes("@")) {
+    return { success: true, appended: false, autoReqId: "" };
+  }
+
+  await ensureDocsStorage();
+  const { data: dbJd, error } = await supabase
+    .from("job_descriptions")
+    .select("id, jd_text, file_name, rm_email")
+    .eq("id", jdId)
+    .maybeSingle();
+  if (error || !dbJd) {
+    throw new Error(error?.message || "Requirement not found");
+  }
+
+  const jdText = String(dbJd.jd_text || "").trim();
+  if (!jdText) return { success: true, appended: false, autoReqId: "" };
+
+  const { workbook, filename } = await loadMasterBrWorkbook();
+  const sheet = findMasterBrSheet(workbook);
+  const headers = readSheetHeaders(sheet);
+  const idCol = headerCol(headers, "auto req id", "br id", "id");
+  const existingIds = collectSheetAutoReqIds(sheet, idCol);
+
+  let autoReqId = autoReqIdFromLabel(dbJd.file_name);
+  if (autoReqId && existingIds.has(autoReqId)) {
+    return { success: true, appended: false, autoReqId };
+  }
+
+  const details = await extractJdDetails(jdText, dbJd.file_name || "");
+  if (!autoReqId) autoReqId = nextAutoReqId(existingIds);
+
+  writeMappedRow(
+    sheet,
+    headers,
+    jdExtractedFieldMap({
+      autoReqId,
+      details,
+      jdText,
+      rmName: dbJd.rm_email,
+    })
+  );
+  await saveMasterBrWorkbook(workbook, filename);
+
+  let localJds: any[] = [];
+  const localJdPath = join(getUploadsRoot(), "job_descriptions.json");
+  try {
+    localJds = JSON.parse(await readFile(localJdPath, "utf8"));
+  } catch {}
+  await persistMasterRequirements(workbook, filename, localJds);
+  try {
+    const serialized = JSON.stringify(localJds, null, 2);
+    await writeFile(localJdPath, serialized, "utf8");
+    await writePersistedJson("job_descriptions.json", serialized).catch(() => {});
+  } catch {}
+
+  await writeLog(
+    "requirements",
+    "SYNC_SELECTED_BR_TO_MASTER",
+    "success",
+    `Appended selected requirement ${autoReqId} into ${filename}`
+  );
+  return { success: true, appended: true, autoReqId };
 }
 
 /**
@@ -637,7 +928,10 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
         const email = mailIdx !== -1 && row[mailIdx] ? String(row[mailIdx]).trim() : "";
         const designation = roleIdx !== -1 && row[roleIdx] ? String(row[roleIdx]).trim() : "Support Engineer";
         
-        const matchResult = calculateSkillMatch(skills, jdSkills);
+        const matchResult = calculateSkillMatch(
+          employeeMatchText({ skills, designation, grade }),
+          jdSkills
+        );
         
         const record: EmployeeRecord = {
           employee_id: empNo,
@@ -710,7 +1004,10 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
         const email = mailIdx !== -1 && cells[mailIdx] ? cells[mailIdx] : "";
         const designation = roleIdx !== -1 && cells[roleIdx] ? cells[roleIdx] : "Support Engineer";
         
-        const matchResult = calculateSkillMatch(skills, jdSkills);
+        const matchResult = calculateSkillMatch(
+          employeeMatchText({ skills, designation, grade }),
+          jdSkills
+        );
         
         const record: EmployeeRecord = {
           employee_id: empNo,

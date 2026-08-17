@@ -182,6 +182,13 @@ export async function writeDocFile(
 
   await ensureLocalDir(category);
   await writeFile(join(localDir(category), filename), buffer);
+  try {
+    const cached = cachePath(category, filename);
+    await mkdir(dirname(cached), { recursive: true });
+    await writeFile(cached, buffer);
+  } catch {
+    // cache optional
+  }
 }
 
 export async function deleteDocFile(

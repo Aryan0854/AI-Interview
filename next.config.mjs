@@ -68,6 +68,8 @@ const nextConfig = {
   },
   webpack(config, { dev }) {
     if (dev) {
+      // PackFileCacheStrategy cannot serialize Map snapshots (common on Windows / OneDrive).
+      config.cache = { type: "memory" };
       config.watchOptions = {
         ...config.watchOptions,
         ignored: /node_modules|\.git|\.next|uploads/,

@@ -1,6 +1,7 @@
 /**
- * Local BR/JD vs employee matching. No API keys.
- * Score = % of the job's required skills found on the employee (true coverage).
+ * Recruiter-style BR/JD vs profile matching.
+ * Score is not raw chip coverage: job family, stack sides, evidence strength,
+ * and table-stakes skills (Git, HTML, …) decide rank and the 60% qualified line.
  */
 
 const CANONICAL_ALIASES: Record<string, string> = {
@@ -75,6 +76,9 @@ const CANONICAL_ALIASES: Record<string, string> = {
   "service now": "servicenow",
   jira: "jira",
   selenium: "selenium",
+  playwright: "playwright",
+  cypress: "cypress",
+  cyress: "cypress",
   postman: "postman",
   kafka: "kafka",
   rest: "rest",
@@ -106,6 +110,16 @@ const WEAK_BODY_SKILLS = new Set([
   "api", "testing", "automation", "architecture", "git", "html", "css", "rest",
 ]);
 
+/** Skills that must not move rank or the 60% line (table stakes / noise). */
+const TABLE_STAKES_SKILLS = new Set([
+  "git", "github", "gitlab", "html", "css", "rest", "api",
+]);
+
+const FE_FRAMEWORKS = new Set(["react", "angular", "vue", "next.js"]);
+const BE_LANGUAGES = new Set([
+  "java", "python", "node.js", "c#", "go", "spring", "django", "flask", "express",
+]);
+
 const STOP_WORDS = new Set([
   "to", "and", "the", "for", "in", "of", "on", "with", "at", "by", "from", "an", "is", "as",
   "end", "be", "or", "exp", "year", "years", "total", "skills", "skill", "basics", "basic",
@@ -117,13 +131,70 @@ const PHRASE_CANONICALS = Object.keys(CANONICAL_ALIASES)
   .filter((k) => k.includes(" ") || k.includes(".") || k.includes("/") || k.length > 3)
   .sort((a, b) => b.length - a.length);
 
+export type JobFamily =
+  | "qa"
+  | "support"
+  | "manager"
+  | "frontend"
+  | "backend"
+  | "fullstack"
+  | "ai"
+  | "devops"
+  | "engineering"
+  | "other";
+
+export type FamilyRelation = "match" | "adjacent" | "mismatch";
+
+export type MatchDecision = "interview" | "screen" | "hold" | "reject";
+
+export type SkillMatchResult = {
+  score: number;
+  matchingSkills: string[];
+  matchedCount: number;
+  requiredCount: number;
+  decision: MatchDecision;
+  rationale: string;
+  familyRelation: FamilyRelation;
+  personFamily: JobFamily;
+  jdFamily: JobFamily;
+};
+
+function emptyMatch(rationale = "No skills or requirement text to score."): SkillMatchResult {
+  return {
+    score: 0,
+    matchingSkills: [],
+    matchedCount: 0,
+    requiredCount: 0,
+    decision: "reject",
+    rationale,
+    familyRelation: "mismatch",
+    personFamily: "other",
+    jdFamily: "other",
+  };
+}
+
 function escapeRe(s: string): string {
   return s.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+}
+
+/** Collapse "Java script" / "java-script" so it cannot also count as Java. */
+function normalizeProfileText(text: string): string {
+  return String(text || "")
+    .replace(/\bjava[\s_-]*scripts?\b/gi, "javascript")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function hasPhrase(haystack: string, needle: string): boolean {
   if (!needle) return false;
   const escaped = escapeRe(needle.toLowerCase());
+  if (needle.toLowerCase() === "java") {
+    return new RegExp(`(^|[^a-zA-Z0-9_#+])java(?![\\s_-]*script)([^a-zA-Z0-9_#+]|$)`, "i").test(haystack);
+  }
+  if (needle.toLowerCase() === "react") {
+    return new RegExp(`(^|[^a-zA-Z0-9_#+])react(?!\\s*native)([^a-zA-Z0-9_#+]|$)`, "i").test(haystack);
+  }
   const re = new RegExp(`(^|[^a-zA-Z0-9_#+])${escaped}([^a-zA-Z0-9_#+]|$)`, "i");
   return re.test(haystack);
 }
@@ -151,6 +222,14 @@ function acronymsFrom(phrase: string): string[] {
   return found;
 }
 
+function aliasesForSkill(skill: string, minLen = 1): string[] {
+  const canon = canonicalizeToken(skill) || skill.toLowerCase();
+  const aliases = Object.entries(CANONICAL_ALIASES)
+    .filter(([, v]) => v === canon)
+    .map(([k]) => k);
+  return Array.from(new Set([canon, skill.toLowerCase(), ...aliases])).filter((a) => a.length >= minLen);
+}
+
 export function parseJdRequirements(jdText: string): {
   title: string;
   mandatoryRaw: string[];
@@ -160,8 +239,17 @@ export function parseJdRequirements(jdText: string): {
   const titleMatch = text.match(/Job Title:\s*(.+?)(?:\n|Mandatory Skills:|$)/i);
   const title = titleMatch?.[1]?.replace(/\s+/g, " ").trim() || "";
 
-  const mandMatch = text.match(/Mandatory Skills:\s*([^\n]+)/i);
-  const mandatoryRaw = mandMatch?.[1] ? splitSkillList(mandMatch[1].split("\n")[0]) : [];
+  const mandLines = [...text.matchAll(/Mandatory Skills:\s*([^\n]+)/gi)].map((m) =>
+    splitSkillList(m[1].split("\n")[0])
+  );
+  const mandatoryRaw =
+    mandLines.length === 0
+      ? []
+      : mandLines.reduce((best, line) => {
+          if (line.length < 3) return best;
+          if (best.length === 0) return line;
+          return line.length <= best.length ? line : best;
+        }, mandLines[mandLines.length - 1]);
 
   const requiredSet: string[] = [];
   const pushReq = (raw: string) => {
@@ -178,11 +266,11 @@ export function parseJdRequirements(jdText: string): {
   if (mandatoryRaw.length > 0) {
     for (const item of mandatoryRaw) pushReq(item);
   } else {
-    const lower = text.toLowerCase();
+    const lower = normalizeProfileText(text);
     for (const phrase of PHRASE_CANONICALS) {
       if (hasPhrase(lower, phrase)) pushReq(CANONICAL_ALIASES[phrase] || phrase);
     }
-    const filtered = requiredSet.filter((s) => !WEAK_BODY_SKILLS.has(s));
+    const filtered = requiredSet.filter((s) => !WEAK_BODY_SKILLS.has(s) && !TABLE_STAKES_SKILLS.has(s));
     if (filtered.length >= 2) {
       return { title, mandatoryRaw, required: filtered };
     }
@@ -192,7 +280,7 @@ export function parseJdRequirements(jdText: string): {
 }
 
 function collectEmployeeSkills(employeeText: string): { canonical: Set<string>; raw: string } {
-  const raw = String(employeeText || "").toLowerCase();
+  const raw = normalizeProfileText(employeeText);
   const canonical = new Set<string>();
   for (const phrase of PHRASE_CANONICALS) {
     if (hasPhrase(raw, phrase)) canonical.add(CANONICAL_ALIASES[phrase] || phrase);
@@ -219,6 +307,40 @@ function employeeHasSkill(emp: { canonical: Set<string>; raw: string }, required
   if (related.some((r) => emp.canonical.has(r))) return true;
   if (hasPhrase(emp.raw, required) || (canon && hasPhrase(emp.raw, canon))) return true;
   return false;
+}
+
+function isWeakMention(raw: string, skill: string): boolean {
+  const hedge = "basic|basics|beginner|familiar|exposure|learning|elementary";
+  for (const alias of aliasesForSkill(skill, 3)) {
+    const a = escapeRe(alias);
+    const after = new RegExp(`\\b${a}\\b.{0,20}\\b(${hedge})\\b`, "i");
+    const before = new RegExp(`\\b(${hedge})\\b.{0,24}\\b${a}\\b`, "i");
+    const dashed = new RegExp(`\\b${a}\\s*[-–]\\s*(${hedge})\\b`, "i");
+    if (after.test(raw) || before.test(raw) || dashed.test(raw)) return true;
+  }
+  return false;
+}
+
+function skillCredit(emp: { canonical: Set<string>; raw: string }, required: string): number {
+  if (!employeeHasSkill(emp, required)) return 0;
+  if (isWeakMention(emp.raw, required)) return 0.25;
+  const yearsNear = skillYearsHint(emp.raw, required);
+  if (yearsNear >= 4) return 1;
+  if (yearsNear >= 2) return 0.9;
+  return 0.75;
+}
+
+function skillYearsHint(raw: string, skill: string): number {
+  for (const alias of aliasesForSkill(skill, 3)) {
+    const a = escapeRe(alias);
+    const m = raw.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*\\+?\\s*years?[^.]{0,40}\\b${a}\\b`, "i"))
+      || raw.match(new RegExp(`\\b${a}\\b[^.]{0,40}(\\d+(?:\\.\\d+)?)\\s*\\+?\\s*years?`, "i"));
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return 0;
 }
 
 function prettySkill(s: string): string {
@@ -265,7 +387,7 @@ export function extractJdDisplaySkills(jdText: string): string[] {
   return unique;
 }
 
-/** Coverage % at or above this is treated as qualified / suitable. */
+/** Recruiter fit at or above this is treated as qualified / suitable. */
 export const QUALIFIED_COVERAGE_PERCENT = 60;
 
 export function employeeMatchText(emp: {
@@ -274,17 +396,20 @@ export function employeeMatchText(emp: {
   designation?: string | null;
   department?: string | null;
   role?: string | null;
+  grade?: string | null;
 }): string {
   const skip = new Set(["", "general", "employee", "beginner"]);
-  return [emp.skills, emp.product, emp.designation, emp.role]
+  return [emp.skills, emp.product, emp.designation, emp.role, emp.grade]
     .map((v) => String(v || "").trim())
     .filter((v) => v && !skip.has(v.toLowerCase()))
     .join(", ");
 }
 
 export function candidateMatchText(row: {
+  filename?: string | null;
+  originalText?: string | null;
   parsed?: {
-    personal?: { title?: string | null };
+    personal?: { title?: string | null; fullName?: string | null };
     summary?: string | null;
     skills?: {
       technical?: string[];
@@ -294,20 +419,39 @@ export function candidateMatchText(row: {
     };
     experience?: Array<{
       position?: string | null;
+      company?: string | null;
+      description?: string | null;
       technologies?: string[];
+      bulletPoints?: Array<{ text?: string | null }>;
+    }>;
+    projects?: Array<{
+      name?: string | null;
+      technologies?: string[];
+      description?: string | null;
     }>;
   };
 }): string {
   const skills = row?.parsed?.skills;
   const experience = row?.parsed?.experience || [];
+  const projects = row?.parsed?.projects || [];
   const parts = [
+    row?.parsed?.personal?.fullName,
+    row?.parsed?.personal?.title,
+    row?.filename,
+    row?.parsed?.summary,
     ...(skills?.technical || []),
     ...(skills?.tools || []),
     ...(skills?.languages || []),
     ...(skills?.other || []),
-    row?.parsed?.personal?.title,
-    row?.parsed?.summary,
-    ...experience.flatMap((job) => [job.position, ...(job.technologies || [])]),
+    ...experience.flatMap((job) => [
+      job.position,
+      job.company,
+      job.description,
+      ...(job.technologies || []),
+      ...(job.bulletPoints || []).map((b) => b.text),
+    ]),
+    ...projects.flatMap((p) => [p.name, p.description, ...(p.technologies || [])]),
+    String(row?.originalText || "").slice(0, 4000),
   ];
   return parts
     .map((v) => String(v || "").trim())
@@ -315,41 +459,274 @@ export function candidateMatchText(row: {
     .join(", ");
 }
 
+function inferJobFamily(text: string, title = ""): JobFamily {
+  const blob = `${title} ${text}`.toLowerCase();
+
+  if (
+    /\b(technical manager|engineering manager|program manager|delivery manager|director|vice president|\bvp\b|head of|e6|e7|e8|e9)\b/.test(blob)
+    && !/\b(tech(?:nical)? lead|team lead)\b/.test(title.toLowerCase())
+  ) {
+    if (/\b(manager|director|head of|\bvp\b)\b/.test(blob)) return "manager";
+  }
+  if (/\b(technical manager|engineering manager)\b/.test(blob)) return "manager";
+
+  if (
+    /\b(technical architect|solution architect|java architect|senior technical architect|associate principal|principal consultant)\b/.test(blob)
+  ) {
+    return "manager";
+  }
+
+  if (
+    /\b(test lead|test engineer|qa\b|sdet|quality analyst|software test|qa automation|playwright|selenium|cypress|manual testing)\b/.test(blob)
+  ) {
+    return "qa";
+  }
+
+  if (
+    /\b(production support|application support|\bl1\b|\bl2\b|\bl3\b|service desk|incident manager|major incident|noc\b)\b/.test(blob)
+  ) {
+    return "support";
+  }
+
+  const hasFe = [...FE_FRAMEWORKS].some((s) => hasPhrase(blob, s));
+  const hasBeLang = [...BE_LANGUAGES].some((s) => hasPhrase(blob, s));
+  const hasBeBeyondNode = [...BE_LANGUAGES]
+    .filter((s) => s !== "node.js" && s !== "express")
+    .some((s) => hasPhrase(blob, s));
+  const hasBe = hasBeLang && hasBeBeyondNode;
+  const nodeOnlyBe = hasBeLang && !hasBeBeyondNode;
+  const fullstackPhrase = /\bfull[\s-]*stack\b/.test(blob);
+  const frontendPhrase = /\b(frontend|front-end|ui developer|react developer)\b/.test(blob);
+  const backendPhrase = /\b(backend|back-end|java developer|spring boot)\b/.test(blob);
+  const aiPhrase = /\b(agentic|genai|gen ai|generative ai|langchain|langgraph|llm|machine learning)\b/.test(blob);
+  const devopsPhrase = /\b(devops|sre\b|kubernetes|site reliability)\b/.test(blob);
+
+  const icBuilder =
+    /\b(software engineer|full[\s-]*stack|frontend|front-end|backend|developer)\b/.test(blob)
+    && !/\b(architect|principal consultant|associate principal|technical manager|jbpm|pega)\b/.test(blob);
+
+  if (fullstackPhrase) return "fullstack";
+  if (hasFe && hasBe && icBuilder) return "fullstack";
+  if (hasFe && hasBe) return "engineering";
+  if (aiPhrase && !hasFe && !backendPhrase && !fullstackPhrase) return "ai";
+  if (frontendPhrase || (hasFe && !hasBe) || (hasFe && nodeOnlyBe)) return "frontend";
+  if (backendPhrase || (hasBe && !hasFe)) return "backend";
+  if (aiPhrase) return "ai";
+  if (devopsPhrase && !hasFe) return "devops";
+  if (/\b(software engineer|developer|technical lead|tech lead)\b/.test(blob)) return "engineering";
+  return "other";
+}
+
+function familyAlignment(jdFamily: JobFamily, personFamily: JobFamily): { score: number; relation: FamilyRelation } {
+  if (jdFamily === personFamily) return { score: 100, relation: "match" };
+
+  const adjacent: Record<string, JobFamily[]> = {
+    fullstack: ["engineering", "frontend", "backend", "devops"],
+    engineering: ["fullstack", "frontend", "backend", "devops", "ai"],
+    frontend: ["fullstack", "engineering"],
+    backend: ["fullstack", "engineering", "devops", "ai"],
+    devops: ["backend", "engineering", "fullstack"],
+    ai: ["backend", "engineering"],
+    qa: [],
+    support: [],
+    manager: [],
+    other: ["engineering", "fullstack"],
+  };
+
+  const mismatchPairs: Array<[JobFamily, JobFamily]> = [
+    ["qa", "fullstack"], ["qa", "engineering"], ["qa", "frontend"], ["qa", "backend"],
+    ["support", "fullstack"], ["support", "engineering"], ["support", "frontend"], ["support", "backend"],
+    ["manager", "fullstack"], ["manager", "engineering"], ["manager", "frontend"], ["manager", "backend"],
+    ["qa", "support"],
+  ];
+
+  if (
+    mismatchPairs.some(([a, b]) => (jdFamily === a && personFamily === b) || (jdFamily === b && personFamily === a))
+    || personFamily === "qa" && ["fullstack", "engineering", "frontend", "backend"].includes(jdFamily)
+    || personFamily === "manager" && ["fullstack", "engineering", "frontend", "backend", "qa", "support"].includes(jdFamily)
+    || personFamily === "support" && ["fullstack", "engineering", "frontend", "backend"].includes(jdFamily)
+  ) {
+    return { score: personFamily === "qa" ? 8 : personFamily === "manager" ? 15 : 12, relation: "mismatch" };
+  }
+
+  if ((adjacent[jdFamily] || []).includes(personFamily)) {
+    const score =
+      (jdFamily === "fullstack" && personFamily === "backend") ? 72
+      : (jdFamily === "fullstack" && personFamily === "frontend") ? 68
+      : (jdFamily === "fullstack" && personFamily === "engineering") ? 80
+      : 60;
+    return { score, relation: "adjacent" };
+  }
+
+  return { score: 35, relation: "adjacent" };
+}
+
+function parseYears(text: string): number | null {
+  const m = String(text || "").match(/(\d+(?:\.\d+)?)\s*\+?\s*years?\s+of\s+exp/i)
+    || String(text || "").match(/(\d+(?:\.\d+)?)\s*\+?\s*years?\b/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseGrade(text: string): number | null {
+  const m = String(text || "").match(/\be([1-9])\b/i);
+  return m ? Number(m[1]) : null;
+}
+
+function jdIsIcBuilder(title: string): boolean {
+  const t = title.toLowerCase();
+  if (/\b(manager|director|head|vp)\b/.test(t)) return false;
+  return /\b(engineer|developer|programmer|analyst)\b/.test(t) && !/\b(test engineer|support engineer)\b/.test(t)
+    || /\bfull[\s-]*stack\b/.test(t);
+}
+
+function levelFit(profileText: string, jdTitle: string, personFamily: JobFamily): number {
+  const grade = parseGrade(profileText);
+  const years = parseYears(profileText);
+  const ic = jdIsIcBuilder(jdTitle);
+
+  if (personFamily === "manager" && ic) return 20;
+  if (personFamily === "qa" && ic) return 25;
+
+  let score = 80;
+  if (ic) {
+    if (grade != null) {
+      if (grade <= 3) score = 95;
+      else if (grade === 4) score = 78;
+      else if (grade === 5) score = 70;
+      else score = 25;
+    }
+    if (/\b(senior technical lead|technical lead|tech lead)\b/.test(profileText) && !/\blead\b/.test(jdTitle.toLowerCase())) {
+      score = Math.min(score, 72);
+    }
+  }
+
+  if (years != null && years < 3 && ic) score = Math.min(score, 45);
+  if (years != null && years >= 12 && ic && !/\b(lead|senior|principal|staff)\b/.test(jdTitle.toLowerCase())) {
+    score = Math.min(score, 60);
+  }
+  return score;
+}
+
+function stackFit(
+  jdFamily: JobFamily,
+  required: string[],
+  credits: Map<string, number>,
+): number {
+  if (jdFamily !== "fullstack") return 70;
+  const reqFe = required.filter((s) => FE_FRAMEWORKS.has(s));
+  const reqBe = required.filter((s) => BE_LANGUAGES.has(s));
+  const hasFe = reqFe.length === 0 || reqFe.some((s) => (credits.get(s) || 0) >= 0.7);
+  const hasBe = reqBe.length === 0 || reqBe.some((s) => (credits.get(s) || 0) >= 0.7);
+  if (hasFe && hasBe) return 100;
+  if (hasFe || hasBe) return 50;
+  return 15;
+}
+
+function decide(score: number, relation: FamilyRelation, coveragePct: number, stack: number, jdFamily: JobFamily): MatchDecision {
+  if (relation === "mismatch") return "reject";
+  const fullstackComplete = jdFamily !== "fullstack" || stack === 100;
+  if (score >= 70 && relation === "match" && coveragePct >= 70 && fullstackComplete) return "interview";
+  if (score >= QUALIFIED_COVERAGE_PERCENT && coveragePct >= 50 && fullstackComplete) return "screen";
+  if (score >= 40) return "hold";
+  return "reject";
+}
+
 export function calculateSkillMatch(
   employeeSkills: string,
   jdSkills: string
-): { score: number; matchingSkills: string[]; matchedCount: number; requiredCount: number } {
+): SkillMatchResult {
   if (!employeeSkills?.trim() || !jdSkills?.trim()) {
-    return { score: 0, matchingSkills: [], matchedCount: 0, requiredCount: 0 };
+    return emptyMatch();
   }
 
   const parsed = parseJdRequirements(jdSkills);
   const required = parsed.required;
   if (required.length === 0) {
-    return { score: 0, matchingSkills: [], matchedCount: 0, requiredCount: 0 };
+    return emptyMatch("No required JD skills to score against.");
   }
+
+  const scoringRequired = required.filter((s) => !TABLE_STAKES_SKILLS.has(s));
+  const scoredSkills = scoringRequired.length > 0 ? scoringRequired : required;
 
   const emp = collectEmployeeSkills(employeeSkills);
-  const matched: string[] = [];
-  for (const req of required) {
-    if (employeeHasSkill(emp, req)) matched.push(req);
+  const jdFamily = inferJobFamily(jdSkills, parsed.title);
+  const personFamily = inferJobFamily(employeeSkills);
+  const alignment = familyAlignment(jdFamily, personFamily);
+
+  const credits = new Map<string, number>();
+  const matchedFull: string[] = [];
+  for (const req of scoredSkills) {
+    const credit = skillCredit(emp, req);
+    credits.set(req, credit);
+    if (credit >= 0.7) matchedFull.push(req);
   }
 
-  const coverage = matched.length / required.length;
-  const score = Math.round(coverage * 100);
+  const coverage = scoredSkills.reduce((sum, s) => sum + (credits.get(s) || 0), 0) / scoredSkills.length;
+  const coveragePct = coverage * 100;
+  const stack = stackFit(jdFamily, scoredSkills, credits);
+  const level = levelFit(emp.raw, parsed.title, personFamily);
+
+  let score = Math.round(
+    0.45 * coveragePct +
+    0.30 * alignment.score +
+    0.15 * stack +
+    0.10 * level
+  );
+
+  const years = parseYears(emp.raw);
+  if (alignment.relation === "mismatch") {
+    score = Math.min(score, 28);
+  } else if (jdFamily === "fullstack" && stack < 100) {
+    score = Math.min(score, 58);
+    if (years != null && years < 3) score = Math.min(score, 38);
+  }
+  if (jdFamily === "fullstack" && personFamily === "ai") {
+    score = Math.min(score, 36);
+  }
+  if (coveragePct < 50) {
+    score = Math.min(score, 58);
+  }
+  if (coveragePct < 35) {
+    score = Math.min(score, 48);
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
   const matchingSkills: string[] = [];
   const seenMatch = new Set<string>();
-  for (const label of matched.map(prettySkill)) {
+  for (const label of matchedFull.map(prettySkill)) {
     const key = label.toLowerCase();
     if (!key || seenMatch.has(key)) continue;
     seenMatch.add(key);
     matchingSkills.push(label);
   }
 
+  const decision = decide(score, alignment.relation, coveragePct, stack, jdFamily);
+  const missingCore = scoredSkills.filter((s) => (credits.get(s) || 0) < 0.7).map(prettySkill);
+  const rationaleParts = [
+    `${decision === "screen" ? "Screen" : decision === "interview" ? "Interview" : decision === "hold" ? "Hold" : "Reject"} as ${personFamily} for a ${jdFamily} req`,
+    matchingSkills.length
+      ? `solid hits: ${matchingSkills.join(", ")}`
+      : "no solid required-skill hits",
+  ];
+  if (missingCore.length) rationaleParts.push(`missing or weak: ${missingCore.join(", ")}`);
+  if (alignment.relation === "mismatch") {
+    rationaleParts.push("job family does not match this requirement");
+  } else if (jdFamily === "fullstack" && stack <= 50) {
+    rationaleParts.push("only one side of the stack");
+  }
+
   return {
     score,
     matchingSkills,
-    matchedCount: matched.length,
-    requiredCount: required.length,
+    matchedCount: matchedFull.length,
+    requiredCount: scoredSkills.length,
+    decision,
+    rationale: `${rationaleParts.join(". ")}.`,
+    familyRelation: alignment.relation,
+    personFamily,
+    jdFamily,
   };
 }
