@@ -2853,7 +2853,7 @@
       "completed_at": null,
       "in_progress": null,
       "created_at": "2026-07-27T19:26:05.869851+00:00",
-      "topic_title": "CMG",
+      "topic_title": "CMM",
       "subject_title": "Product Assessment"
     },
     {
@@ -79663,456 +79663,6 @@
       "created_at": "2026-07-27T19:26:05.869851+00:00"
     },
     {
-      "id": "c163103d-bfd8-4c95-a089-4b3ab65f3cdc",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 0,
-      "question_text": "Which symptom during ATP most likely indicates a control-plane integration problem?",
-      "options": [
-        "UE registration fails at signaling stage.",
-        "Video playback is slow after attach.",
-        "Battery drains too fast.",
-        "SIM tray is loose."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "094e52db-84ab-4303-b005-edf5d551fec6",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 1,
-      "question_text": "What is the primary role of Nokia Cloud Mobile Gateway (CMG) in packet core?",
-      "options": [
-        "Radio resource management.",
-        "Gateway and mobility-related packet core functions.",
-        "IMS application hosting.",
-        "Subscriber handset provisioning."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "21e9a234-299c-4d37-98a3-9382995fbb35",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 2,
-      "question_text": "Which statement best reflects CMG architecture?",
-      "options": [
-        "It is designed bottom-up for cloud evolution.",
-        "It is a circuit-switched voice switch.",
-        "It is a passive monitoring probe.",
-        "It is limited to 2G only."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "1b35b28b-ada5-47bc-a87c-b71ce5f44636",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 3,
-      "question_text": "Which deployment characteristic is strongly associated with CMG?",
-      "options": [
-        "No scaling support.",
-        "Elastic scale.",
-        "Manual-only provisioning.",
-        "Single-site restriction."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "2936348a-8345-430d-af5f-8146fc76a6dd",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 4,
-      "question_text": "What is a major functional benefit of CMG in packet core?",
-      "options": [
-        "It reduces all radio interference.",
-        "It converges multiple mobile packet core gateway functions.",
-        "It replaces transport routers.",
-        "It eliminates subscriber authentication."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "4bb47186-2cb4-489a-a2b7-877d82f32218",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 5,
-      "question_text": "Which is a common integration point for CMG in EPC?",
-      "options": [
-        "OSS/NMS and neighboring packet core nodes.",
-        "Customer email servers.",
-        "Printer spoolers.",
-        "Office LAN switches only."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "71b2efa5-dc20-4ad9-9d2a-619535a4cd5c",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 6,
-      "question_text": "If attach succeeds but data service fails, which CMG area should be checked first?",
-      "options": [
-        "User-plane / bearer path and gateway forwarding behavior.",
-        "SIM manufacturing batch.",
-        "Office switch VLANs only.",
-        "Display brightness on the UE."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "50844f76-3848-4242-bc2a-3fa98cb52765",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 7,
-      "question_text": "Which is most likely to be verified in CMG acceptance for 4G?",
-      "options": [
-        "APN connectivity and bearer QoS behavior.",
-        "SIM plastic finish.",
-        "eNodeB tower paint condition.",
-        "Office printer accessibility."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "a7a2b067-10f1-484c-9f52-2ea236315d03",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 8,
-      "question_text": "CMG is best described as:",
-      "options": [
-        "A fixed hardware-only gateway.",
-        "A multi-functional packet core mobile gateway.",
-        "A radio optimization tool.",
-        "A Wi-Fi controller."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "e755d2d0-2198-4f8a-aa29-aa77754a997e",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 9,
-      "question_text": "In a 4G ATP scenario, what does successful bearer establishment mainly confirm?",
-      "options": [
-        "The gateway can support session creation and traffic anchoring.",
-        "The eNodeB antenna is aligned.",
-        "The handset is rooted.",
-        "DNS is disabled."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "7b4793e3-f3ec-44ae-b950-473335c8b379",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 10,
-      "question_text": "What is the key purpose of ATP testing for CMG?",
-      "options": [
-        "To confirm cosmetic installation quality.",
-        "To validate end-to-end feature behavior before acceptance.",
-        "To test office internet speed.",
-        "To benchmark laptop performance."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "58ff1aeb-e359-4a09-9b11-e0d3d76ee3cb",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 11,
-      "question_text": "Why is CMG considered operationally flexible?",
-      "options": [
-        "It supports diverse deployment models and cloud environments.",
-        "It requires proprietary one-site appliances only.",
-        "It has no management interface.",
-        "It cannot scale horizontally."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "65fa1c88-360f-4531-8f54-03c5230d56f8",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 12,
-      "question_text": "CMG supports evolution toward which major core direction?",
-      "options": [
-        "5G Core.",
-        "PSTN expansion.",
-        "Analog radio access.",
-        "WiMAX-only networks."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "d5eb5f71-6555-4b3a-9efa-0b7020df5411",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 13,
-      "question_text": "Which ATP check best confirms attach-related functionality?",
-      "options": [
-        "UE attach, authentication, and default bearer establishment.",
-        "Wi-Fi password reset.",
-        "Browser cache clear.",
-        "SIM card printing."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "845f750f-cd5c-4523-8d9d-b68df32b8642",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 14,
-      "question_text": "Which ATP case is useful for validating CMG resilience?",
-      "options": [
-        "Repeated attach-detach and session re-establishment under load.",
-        "One-time manual login to the OAM UI.",
-        "Changing wallpaper on the test phone.",
-        "Rebooting a laptop."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "119f0124-56f1-4771-8438-99e67c832e78",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 15,
-      "question_text": "In 4G EPC, CMG is most closely associated with which gateway role?",
-      "options": [
-        "SGW/PGW-type packet gateway functions.",
-        "HLR voice routing.",
-        "eNodeB scheduling.",
-        "UICC authentication."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "d0788c6f-af40-4cc2-a79f-8538627aae7d",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 16,
-      "question_text": "Which aspect is most important during CMG onboarding?",
-      "options": [
-        "Random APN selection.",
-        "Correct parameterization of interfaces, services, and subscriber mappings.",
-        "Changing SIM IMSIs.",
-        "Increasing handset battery power."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "7192324c-6550-41ac-8916-4e7bd78b754d",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 17,
-      "question_text": "CMG can support which access evolution model?",
-      "options": [
-        "Only 4G.",
-        "Multiple access types across mobile packet core evolution.",
-        "Only fixed broadband.",
-        "Only private APNs without mobility."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "31eebc82-2e26-4bcd-9e10-cd6b75380160",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 18,
-      "question_text": "Which outcome indicates a successful CMG onboarding and integration cycle?",
-      "options": [
-        "Services come up, interfaces are reachable, and end-to-end UE flows pass.",
-        "Only the CLI login works.",
-        "Only the node powers on.",
-        "Only alarms are generated."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "ecec7078-be7e-4176-903c-812626d038c0",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 19,
-      "question_text": "Which scenario best tests CMG under mobility conditions?",
-      "options": [
-        "Handover or cell reselection while maintaining session continuity.",
-        "Static idle screen capture.",
-        "DNS lookup to a public website.",
-        "Changing device language."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "e6dc78d8-c59f-4f12-82ca-a2bbedc9e446",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 20,
-      "question_text": "What is a practical ATP objective for CMG interworking?",
-      "options": [
-        "Confirm correct behavior with neighboring EPC and OAM systems.",
-        "Verify office air-conditioning.",
-        "Reduce keyboard latency.",
-        "Check browser bookmarks."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "f64917e3-a2b1-463e-98ec-e7027096e125",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 21,
-      "question_text": "CMG is part of which Nokia family?",
-      "options": [
-        "Cloud Packet Core.",
-        "AirScale Radio.",
-        "IMS Voice Core.",
-        "OSS Analytics."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "f6010e88-0d7f-4851-9089-9d06b3c61ab0",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 22,
-      "question_text": "In onboarding, which item is usually validated first?",
-      "options": [
-        "Physical packaging color.",
-        "Management access and basic system connectivity.",
-        "Browser bookmarks.",
-        "User wallpaper."
-      ],
-      "correct_option_index": 1,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "32e63fa3-9ba9-4825-abe3-32a295abf25f",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 23,
-      "question_text": "In a CMG ATP plan, which test most directly verifies end-user data service?",
-      "options": [
-        "Successful IP address allocation and application data session.",
-        "Device alarm tone check.",
-        "SIM storage check.",
-        "Manual time sync only."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
-      "id": "1d2aaf32-d667-4963-9a74-346ece1572a4",
-      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
-      "question_index": 24,
-      "question_text": "Which protocol family is most relevant to CMG integration with EPC nodes?",
-      "options": [
-        "GTP and Diameter.",
-        "FTP and POP3.",
-        "HDMI and USB.",
-        "RIP and STP."
-      ],
-      "correct_option_index": 0,
-      "explanation": "Imported from Question Bank.",
-      "difficulty": "medium",
-      "topic_id": "resource-product-assessment",
-      "topic_title": "CMG",
-      "created_at": "2026-07-27T19:26:05.869851+00:00"
-    },
-    {
       "id": "e62a2055-02d0-4557-977a-143c370de74d",
       "test_id": "f7bc7eb2-f599-43f3-99f8-c899c5169ccd",
       "question_index": 0,
@@ -123757,6 +123307,456 @@
       "topic_id": "resource-product-assessment",
       "topic_title": "Deployment & Troubleshooting",
       "created_at": "2026-07-31T07:33:18.717863+00:00"
+    },
+    {
+      "id": "15b3a1cc-dd3b-403f-a23b-ef0ddc696a08",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 0,
+      "question_text": "What is critical to validate for mobility in ATP?",
+      "options": [
+        "Mobility management",
+        "Video transcoding",
+        "Web proxy",
+        "SIM manufacturing"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "e05c6d07-2ad1-4603-a72a-876279592f56",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 1,
+      "question_text": "Which CMM service handles 2G/3G mobility and session management?",
+      "options": [
+        "IPPS",
+        "PAPS",
+        "DBS",
+        "IPDS"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "131fb738-da1b-44f3-8361-9e75d47d7877",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 2,
+      "question_text": "Key onboarding activity for CMM?",
+      "options": [
+        "Configure system parameters",
+        "Replace SIM cards",
+        "Adjust RF",
+        "Deploy CDN"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "0940508d-73af-43a0-9e06-9f3b9757a556",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 3,
+      "question_text": "Which CMM service is associated with user-plane packet processing and data forwarding?",
+      "options": [
+        "IPPS",
+        "PAPS",
+        "NECC",
+        "CPPS"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "bae877ab-c283-460a-8a1d-7e81f04a3b1a",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 4,
+      "question_text": "CMM supports which management interfaces for operations and troubleshooting?",
+      "options": [
+        "NETCONF, SNMP, SSH, REST API, CLI",
+        "FTP, SMTP, POP3, IMAP",
+        "SIP, RTP, H.323, MGCP",
+        "SFTP, LDAP, NTP, TFTP"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "d82a2e6c-eaa8-4d34-afac-e3c27ad3cb55",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 5,
+      "question_text": "Which CMM service hosts the MME functions?",
+      "options": [
+        "CPPS",
+        "DBS",
+        "IPDS",
+        "PAPS"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "18f69f11-a89a-43e6-8d24-408cac4d0454",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 6,
+      "question_text": "First ATP validation step should be?",
+      "options": [
+        "Subscriber attach",
+        "Wi-Fi broadcast",
+        "CDN caching",
+        "Firewall logging"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "91036e9f-cdeb-42e1-a042-47588a7f5b98",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 7,
+      "question_text": "Attach fails after MME relocation. What is tested?",
+      "options": [
+        "Mobility and context transfer",
+        "User plane",
+        "SMS routing",
+        "Diameter only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "60f62e73-dfa2-48e5-be4d-dd639f98d547",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 8,
+      "question_text": "What is the primary role of Nokia Cloud Mobility Manager (CMM) in a 4G packet core?",
+      "options": [
+        "User plane forwarding",
+        "Mobility and session management",
+        "DNS resolution",
+        "Content caching"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "071aecb4-250b-470a-be6c-307145d6363e",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 9,
+      "question_text": "Which CMM component provides logical interface termination for GTP and Diameter?",
+      "options": [
+        "IPDS",
+        "DBS",
+        "NECC",
+        "CPPS"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "b86acfd7-4060-4813-b3ef-d233f1208ea9",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 10,
+      "question_text": "Attach fails for specific IMSI range. Cause?",
+      "options": [
+        "Subscriber data inconsistency",
+        "RF issue",
+        "Routing loop",
+        "Codec mismatch"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "c70cd353-ecda-4dd4-b44b-45b40023bbee",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 11,
+      "question_text": "Purpose of S1-AP on S1-MME?",
+      "options": [
+        "User plane traffic",
+        "Control signaling eNB-MME",
+        "Encrypt NAS",
+        "Replace RRC"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "64983457-b5dd-42ff-bbe2-236ea9a816f0",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 12,
+      "question_text": "Attach succeeds but bearer fails. Likely issue?",
+      "options": [
+        "S1-AP signaling issue",
+        "Encryption disabled",
+        "DNS issue",
+        "IMS failure"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "c66f65a2-cee1-4bf8-bbf2-af9139966596",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 13,
+      "question_text": "Which CMM component is responsible for OAM functions and northbound interfaces?",
+      "options": [
+        "CPPS",
+        "NECC",
+        "IPPS",
+        "PAPS"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "c0e54d3c-4bb8-4b9f-9674-c47407d496f0",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 14,
+      "question_text": "Attach ok but PDN fails. Check?",
+      "options": [
+        "S11 / S5-S8",
+        "SMS only",
+        "RRC only",
+        "Wi-Fi auth"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "803df741-b620-4643-aea1-208ad47249ed",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 15,
+      "question_text": "Which Nokia platform is commonly used for CMM management?",
+      "options": [
+        "NetAct",
+        "OSS-RC",
+        "SONATA",
+        "3GPP NMS"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "8b8fb1b2-de88-4491-b7ab-fda8980bd7f9",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 16,
+      "question_text": "In 4G LTE, CMM most commonly provides which network function?",
+      "options": [
+        "AMF",
+        "MME",
+        "UPF",
+        "NRF"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "ddcbf5b6-f9b6-4f76-874c-0dfbacef5a57",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 17,
+      "question_text": "Which technology is highlighted in CMM for performance optimization on x86 platforms?",
+      "options": [
+        "SDH",
+        "DPDK",
+        "MPLS-TE",
+        "DOCSIS"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "a0533732-3cb9-47e9-90d5-697239a17ae1",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 18,
+      "question_text": "Which interface is key for LTE access during ATP?",
+      "options": [
+        "S1-MME",
+        "N2",
+        "N6",
+        "SBI"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "561ae6f6-7d77-4605-905c-f23f4b3a60ed",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 19,
+      "question_text": "What does NECC stand for in Nokia CMM architecture?",
+      "options": [
+        "Network Element Cluster Controller",
+        "Node Event Control Core",
+        "Network Edge Cloud Connector",
+        "Native EPC Control Center"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "40169fbe-ea4c-49b5-9286-b03566c64767",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 20,
+      "question_text": "Best failover ATP test?",
+      "options": [
+        "Attach during switchover",
+        "Increase RF",
+        "Change APN",
+        "Disable SIM PIN"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "1126d61a-62e8-4109-a832-04dea610c91f",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 21,
+      "question_text": "Which protocols relate to CMM control plane?",
+      "options": [
+        "GTP, Diameter, S1AP",
+        "HTTP, DNS",
+        "FTP, SMTP",
+        "OSPF, BGP"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "7d1eb451-5bba-4fe0-9f64-570b970b2a58",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 22,
+      "question_text": "Successful ATP indication?",
+      "options": [
+        "UE attach + bearer + mobility works",
+        "DNS only works",
+        "Web works without attach",
+        "RF improves only"
+      ],
+      "correct_option_index": 0,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "c821653a-00fb-46d8-846f-5a276508093a",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 23,
+      "question_text": "CMM is described by Nokia as having what kind of architecture?",
+      "options": [
+        "Monolithic bare-metal only",
+        "Cloud-native architecture",
+        "Fixed hardware-only architecture",
+        "Satellite-based architecture"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
+    },
+    {
+      "id": "4e48fb16-ae3f-423a-a02c-5810347e7519",
+      "test_id": "27bbc974-daaa-48b0-9f21-131b701e2568",
+      "question_index": 24,
+      "question_text": "What enables scaling in CMM?",
+      "options": [
+        "Fixed capacity",
+        "Elastic scalability",
+        "Manual reboot",
+        "Single thread"
+      ],
+      "correct_option_index": 1,
+      "explanation": "Imported from QB-new.xlsx.",
+      "difficulty": "medium",
+      "topic_id": "resource-product-assessment",
+      "topic_title": "CMM",
+      "created_at": "2026-08-17T06:27:49.337303+00:00"
     }
   ],
   "test_attempts": []

@@ -7,7 +7,7 @@ import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
 import { allowLocalTestsFallback, allowLocalDataFallback } from '@/lib/db-mode';
-import { formatTopicTitleForDisplay } from '@/lib/product-display-name';
+import { formatProductDisplayName, formatTopicTitleForDisplay } from '@/lib/product-display-name';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -572,6 +572,23 @@ export async function GET(request: NextRequest) {
     let resourcePortalEmployees: any[] = [];
     try {
       resourcePortalEmployees = await buildResourcePortalEmployees(allTestResults, manifest);
+      const liveProductById = new Map(
+        employeesFromDb
+          .filter((emp) => emp.employee_id && emp.skills)
+          .map((emp) => [
+            String(emp.employee_id).trim().toUpperCase(),
+            String(emp.skills).trim(),
+          ])
+      );
+      if (liveProductById.size > 0) {
+        resourcePortalEmployees = resourcePortalEmployees.map((row) => {
+          const liveProduct = liveProductById.get(
+            String(row.employee_id || "").trim().toUpperCase()
+          );
+          if (!liveProduct) return row;
+          return { ...row, product: formatProductDisplayName(liveProduct) };
+        });
+      }
     } catch (mappingErr) {
       console.warn("Failed to load employee portal mapping:", mappingErr);
     }
