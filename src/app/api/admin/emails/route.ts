@@ -20,8 +20,9 @@ async function readLocalEmails(): Promise<any[]> {
   try {
     const path = getEmailsPath();
     const raw = await readFile(path, "utf8");
-    return JSON.parse(raw);
-  } catch (e: any) {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
     return [];
   }
 }
@@ -35,6 +36,38 @@ async function writeLocalEmails(emails: any[]): Promise<void> {
   }
 }
 
+function mapDbEmail(row: any) {
+  return {
+    id: row.id,
+    to: row.candidate_email,
+    fullName: row.full_name || '',
+    subject: row.subject || '',
+    htmlBody: row.body || '',
+    dispatchedAt: row.created_at || new Date().toISOString(),
+    status: row.status || 'simulated',
+    rmEmail: row.rm_email,
+  };
+}
+
+function sortEmails(emails: any[]) {
+  return [...emails].sort(
+    (a, b) => new Date(b.dispatchedAt).getTime() - new Date(a.dispatchedAt).getTime()
+  );
+}
+
+function filterByRm(emails: any[], email: string | null) {
+  if (!email || email === "admin@infinite.com") return emails;
+  return emails.filter((item) => item.rmEmail?.toLowerCase().trim() === email);
+}
+
+async function fetchDbEmails(): Promise<{ rows: any[]; error: string | null }> {
+  const { data, error } = await supabase.from('simulated_emails').select('*');
+  if (error) {
+    return { rows: [], error: error.message };
+  }
+  return { rows: (data || []).map(mapDbEmail), error: null };
+}
+
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -42,84 +75,21 @@ export async function GET(request: NextRequest) {
 
   try {
     const url = new URL(request.url);
-    const email = url.searchParams.get("email")?.toLowerCase().trim();
+    const email = url.searchParams.get("email")?.toLowerCase().trim() || null;
 
-    // 1. Fetch from database (gracefully swallowing errors/RLS blocks)
-    let dbEmails: any[] = [];
-    let dbErrorOccurred = false;
-    try {
-      const { data, error } = await supabase
-        .from('simulated_emails')
-        .select('*');
-      if (error) {
-        console.error("Supabase simulated_emails query error:", error);
-        dbErrorOccurred = true;
-      } else {
-        dbEmails = data || [];
-      }
-    } catch (dbErr) {
-      console.error("Failed to query DB for emails:", dbErr);
-      dbErrorOccurred = true;
+    const { rows: dbEmails, error: dbError } = await fetchDbEmails();
+    if (dbError) {
+      console.error("Supabase simulated_emails query error:", dbError);
     }
 
-    // Map database rows
-    const dbMapped = dbEmails.map((row: any) => ({
-      id: row.id,
-      to: row.candidate_email,
-      fullName: row.full_name || '',
-      subject: row.subject || '',
-      htmlBody: row.body || '',
-      dispatchedAt: row.created_at || new Date().toISOString(),
-      status: row.status || 'simulated',
-      rmEmail: row.rm_email,
-    }));
-
-    // 2. Local JSON only when offline fallback is allowed
-    const localEmails = allowLocalDataFallback() ? await readLocalEmails() : [];
-
-    // 3. Merge (Supabase preferred; local only fills gaps when fallback enabled)
-    const emailMap = new Map<string, any>();
-    localEmails.forEach((item) => emailMap.set(item.id, item));
-    dbMapped.forEach((item) => emailMap.set(item.id, item));
-
-    let combined = Array.from(emailMap.values());
-
-    // 4. Persist local backup only when fallback mode is on
-    if (allowLocalDataFallback()) {
-      await writeLocalEmails(combined);
+    // Local JSON is offline backup only. Never re-insert local rows into Supabase
+    // on GET — that is what made deleted outbox items reappear.
+    let combined = dbEmails;
+    if (dbError && allowLocalDataFallback()) {
+      combined = await readLocalEmails();
     }
 
-    // 5. Two-way sync: Upload local-only emails to Supabase if database is online
-    if (!dbErrorOccurred && allowLocalDataFallback()) {
-      const dbIds = new Set(dbMapped.map(item => item.id));
-      const missingInDb = localEmails.filter(item => !dbIds.has(item.id));
-      
-      for (const item of missingInDb) {
-        try {
-          await supabase.from('simulated_emails').insert({
-            id: item.id,
-            candidate_email: item.to,
-            full_name: item.fullName,
-            subject: item.subject,
-            body: item.htmlBody,
-            status: item.status,
-            rm_email: item.rmEmail,
-            created_at: item.dispatchedAt
-          });
-        } catch (dbInsertErr) {
-          console.error("Failed to sync missing email to Supabase:", dbInsertErr);
-        }
-      }
-    }
-
-    // 6. Apply filtering by rm_email
-    if (email && email !== "admin@infinite.com") {
-      combined = combined.filter((item) => item.rmEmail?.toLowerCase().trim() === email);
-    }
-
-    // 7. Order by dispatchedAt descending
-    combined.sort((a, b) => new Date(b.dispatchedAt).getTime() - new Date(a.dispatchedAt).getTime());
-
+    combined = sortEmails(filterByRm(combined, email));
     return NextResponse.json({ emails: combined });
   } catch (error: any) {
     console.error("Failed to read emails outbox:", error);
@@ -132,43 +102,71 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let ids: any = null;
   try {
+    const url = new URL(request.url);
     const body = await request.json().catch(() => ({}));
-    ids = body.ids;
+    const queryIds = url.searchParams.get("ids");
+    const rawIds = Array.isArray(body.ids)
+      ? body.ids
+      : queryIds
+        ? queryIds.split(",").map((id) => id.trim()).filter(Boolean)
+        : null;
+    const ids = rawIds
+      ? [...new Set(rawIds.map((id: unknown) => String(id || "").trim()).filter(Boolean))]
+      : null;
+    const clearAll = !ids || ids.length === 0;
 
-    // 1. Delete from database
-    try {
-      if (ids && Array.isArray(ids)) {
-        await supabase
-          .from('simulated_emails')
-          .delete()
-          .in('id', ids);
-      } else {
-        await supabase
-          .from('simulated_emails')
-          .delete()
-          .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (clearAll) {
+      const { error } = await supabase
+        .from('simulated_emails')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) {
+        throw new Error(error.message);
       }
-    } catch (dbErr) {
-      console.error("Failed to delete emails from DB:", dbErr);
-    }
-
-    // 2. Delete from local JSON backup
-    if (ids && Array.isArray(ids)) {
-      const localEmails = await readLocalEmails();
-      const filtered = localEmails.filter((item) => !ids.includes(item.id));
-      await writeLocalEmails(filtered);
-      await writeLog('email', 'DELETE_EMAIL_LOGS', 'success', `Deleted email logs for IDs: ${ids.join(', ')}`);
-    } else {
       await writeLocalEmails([]);
       await writeLog('email', 'CLEAR_EMAIL_LOGS', 'success', 'Cleared all email outbox logs');
+      return NextResponse.json({ success: true, emails: [], deletedCount: null });
     }
 
-    return NextResponse.json({ success: true, emails: [] });
+    const { error } = await supabase
+      .from('simulated_emails')
+      .delete()
+      .in('id', ids);
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const { data: stillThere, error: verifyError } = await supabase
+      .from('simulated_emails')
+      .select('id')
+      .in('id', ids);
+    if (verifyError) {
+      throw new Error(verifyError.message);
+    }
+    if (stillThere && stillThere.length > 0) {
+      throw new Error(
+        `Failed to delete ${stillThere.length} outbox log(s) from the database. They were restored on refresh.`
+      );
+    }
+
+    const localEmails = await readLocalEmails();
+    if (localEmails.length > 0) {
+      await writeLocalEmails(localEmails.filter((item) => !ids.includes(String(item.id))));
+    }
+
+    await writeLog('email', 'DELETE_EMAIL_LOGS', 'success', `Deleted email logs for IDs: ${ids.join(', ')}`);
+
+    const { rows: remaining } = await fetchDbEmails();
+    const email = url.searchParams.get("email")?.toLowerCase().trim() || null;
+    return NextResponse.json({
+      success: true,
+      emails: sortEmails(filterByRm(remaining, email)),
+      deletedCount: ids.length,
+    });
   } catch (error: any) {
     console.error("Failed to clear outbox logs:", error);
     await writeLog('email', 'DELETE_EMAIL_LOGS_FAILED', 'failed', `Failed to delete/clear email outbox logs: ${error.message}`);
-    return NextResponse.json({ error: "Failed to clear Outbox Logs" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to clear Outbox Logs" }, { status: 500 });
   }
 }

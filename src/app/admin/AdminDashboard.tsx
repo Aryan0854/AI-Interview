@@ -31,7 +31,8 @@ import {
   ShieldAlert,
   ChevronDown,
   ChevronUp,
-  Edit2
+  Edit2,
+  Pin
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { formatPortalTimestamp } from "@/lib/portal-format";
@@ -61,7 +62,7 @@ import {
 } from "@/lib/portal-test-status";
 import { formatProductDisplayName } from "@/lib/product-display-name";
 import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
-import { calculateSkillMatch, employeeMatchText } from "@/lib/skill-match";
+import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT } from "@/lib/skill-match";
 
 function formatSyncAge(date: Date): string {
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -404,66 +405,47 @@ function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respo
 const fetch = adminFetch;
 
 function extractSkillsFromText(text: string): string[] {
-  if (!text) return [];
-  const COMMON_TECH_SKILLS = [
-    "javascript", "typescript", "python", "java", "c++", "c#", "c", "ruby", "golang", "php", "rust", "swift", "kotlin", "perl", "r", "scala",
-    "react", "angular", "vue", "next.js", "nextjs", "nuxt", "node.js", "nodejs", "express", "django", "flask", "spring", "springboot", "asp.net", "laravel", "rails",
-    "sql", "postgresql", "postgres", "oracle", "mysql", "sql server", "sqlite", "mongodb", "mongo", "redis", "cassandra", "dynamodb", "mariadb", "couchdb", "neo4j",
-    "aws", "amazon web services", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s", "jenkins", "ansible", "terraform", "ci/cd", "cicd", "git", "github", "gitlab",
-    "linux", "windows", "unix", "ubuntu", "centos", "redhat", "red hat", "debian", "macos", "shell", "bash", "powershell",
-    "splunk", "datadog", "dynatrace", "appdynamics", "new relic", "prometheus", "grafana", "elk", "elasticsearch", "logstash", "kibana", "service now", "servicenow", "jira", "confluence",
-    "manual testing", "manual", "automation", "selenium", "postman", "jmeter", "cucumber", "testing",
-    "microservices", "api", "apis", "rest", "graphql", "soap", "kafka", "rabbitmq", "mq", "activemq", "architecture", "architect", "estimation", "rca", "incident management", "problem management", "change management"
-  ];
-  
-  const lower = text.toLowerCase();
-  const found = new Set<string>();
-  for (const skill of COMMON_TECH_SKILLS) {
-    const escaped = skill.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-    const regex = new RegExp(`(^|[^a-zA-Z0-9_#+])(${escaped})([^a-zA-Z0-9_#+]|$)`, 'i');
-    if (regex.test(lower)) {
-      if (skill === "postgres") found.add("PostgreSQL");
-      else if (skill === "nodejs") found.add("Node.js");
-      else if (skill === "nextjs") found.add("Next.js");
-      else if (skill === "amazon web services") found.add("AWS");
-      else if (skill === "google cloud") found.add("GCP");
-      else if (skill === "servicenow") found.add("ServiceNow");
-      else if (skill === "red hat") found.add("RedHat");
-      else if (skill === "apis") found.add("API");
-      else {
-        const pretty = skill.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-        found.add(pretty);
-      }
-    }
-  }
-  return Array.from(found);
+  return extractJdDisplaySkills(text);
 }
 
-function calculateCandidateMatch(row: any, jdText: string): { score: number; matchingSkills: string[] } {
+function extractJobTitleFromJd(text: string, fallback = "Untitled requirement"): string {
+  const raw = String(text || "").trim();
+  if (!raw) return fallback;
+  const labeled = raw.match(/Job Title:\s*(.+?)(?:\n|Mandatory Skills:|$)/i);
+  if (labeled?.[1]) {
+    return labeled[1].replace(/\s+/g, " ").trim() || fallback;
+  }
+  const firstLine = raw.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || "";
+  if (firstLine && !firstLine.toLowerCase().startsWith("mandatory skills:")) {
+    return firstLine.replace(/\s+/g, " ").slice(0, 120);
+  }
+  return fallback;
+}
+
+function requirementDuplicateKey(jd: { id?: string; jdText?: string }): string {
+  const title = extractJobTitleFromJd(jd.jdText || "", "").toLowerCase();
+  const skillsMatch = String(jd.jdText || "").match(/Mandatory Skills:\s*(.+?)(?:\n|$)/i);
+  const skills = (skillsMatch?.[1] || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const genericTitle = !title || title === "technical role" || title === "untitled requirement";
+  if (genericTitle) {
+    const text = String(jd.jdText || "").trim().toLowerCase();
+    return text.length < 40 ? `id:${jd.id}` : text;
+  }
+  if (skills) return `${title}::${skills}`;
+  const text = String(jd.jdText || "").trim().toLowerCase();
+  return text.length < 80 ? `id:${jd.id}` : `${title}::${text.slice(0, 240)}`;
+}
+
+function calculateCandidateMatch(row: any, jdText: string): {
+  score: number;
+  matchingSkills: string[];
+  matchedCount: number;
+  requiredCount: number;
+} {
   if (!row || !jdText) {
-    return { score: 0, matchingSkills: [] };
+    return { score: 0, matchingSkills: [], matchedCount: 0, requiredCount: 0 };
   }
-  
-  const candSkills = [
-    ...(row.parsed?.skills?.technical || []),
-    ...(row.parsed?.skills?.tools || [])
-  ];
-  
-  const jdSkillsList = extractSkillsFromText(jdText);
-  if (candSkills.length === 0 || jdSkillsList.length === 0) {
-    return { score: 0, matchingSkills: [] };
-  }
-  
-  const candSkillsLower = candSkills.map((s: string) => s.toLowerCase());
-  const jdSkillsLower = jdSkillsList.map((s: string) => s.toLowerCase());
-  
-  const matchingLower = candSkillsLower.filter((s: string) => jdSkillsLower.includes(s));
-  const matchingSkills = candSkills.filter((s: string) => matchingLower.includes(s.toLowerCase()));
-  
-  const divisor = Math.min(8, jdSkillsLower.length);
-  const score = Math.min(100, Math.round((matchingLower.length / divisor) * 100));
-  
-  return { score, matchingSkills };
+  return calculateSkillMatch(candidateMatchText(row), jdText);
 }
 
 
@@ -489,9 +471,32 @@ function resolveJdId(jdId: string): string {
   return jdId || "";
 }
 
+const PINNED_JD_STORAGE_KEY = "hr-console-pinned-jd-id";
+
+function readPinnedJdId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return localStorage.getItem(PINNED_JD_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function isNamedPinnedJd(jd: { fileName?: string; jdText?: string }): boolean {
+  const file = (jd.fileName || "").toLowerCase();
+  const text = (jd.jdText || "").toLowerCase();
+  return file.includes("pinned") || text.includes("[pinned]");
+}
+
 function pickDefaultJd(jdsList: any[]): any | undefined {
   if (!jdsList?.length) return undefined;
-  // Prefer most recently created from Supabase ordering (already newest-first when loaded).
+  const pinnedId = readPinnedJdId();
+  if (pinnedId) {
+    const pinned = jdsList.find((j) => j.id === pinnedId);
+    if (pinned) return pinned;
+  }
+  const named = jdsList.find((j) => isNamedPinnedJd(j));
+  if (named) return named;
   return jdsList[0];
 }
 
@@ -529,6 +534,7 @@ export default function AdminDashboard() {
   // Job Description states
   const [jds, setJds] = useState<any[]>([]);
   const [selectedJdId, setSelectedJdId] = useState<string>("");
+  const [pinnedJdId, setPinnedJdId] = useState<string>("");
   const [editingJdId, setEditingJdId] = useState<string | null>(null);
   const [editingRmEmail, setEditingRmEmail] = useState<string>("");
   const [editingBrId, setEditingBrId] = useState<string | null>(null);
@@ -547,6 +553,8 @@ export default function AdminDashboard() {
   const [syncAgeTick, setSyncAgeTick] = useState(0);
   const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
   const employeeSyncInFlightRef = useRef(false);
+  const emailsFetchSeqRef = useRef(0);
+  const deletedEmailIdsRef = useRef<Set<string>>(new Set());
   const [isJdDragging, setIsJdDragging] = useState(false);
 
   // Invite Configuration Modal states
@@ -714,6 +722,7 @@ export default function AdminDashboard() {
         setAdminEmail(storedEmail);
         setAuthenticated(true);
       }
+      setPinnedJdId(readPinnedJdId());
     }
     setAuthInitialized(true);
   }, []);
@@ -915,21 +924,36 @@ export default function AdminDashboard() {
     }
   };
 
+  const applyEmails = (incoming: any[]) => {
+    const hidden = deletedEmailIdsRef.current;
+    if (hidden.size === 0) {
+      setEmails(incoming);
+      return;
+    }
+    const incomingIds = new Set(incoming.map((item) => String(item.id)));
+    for (const id of Array.from(hidden)) {
+      if (!incomingIds.has(id)) hidden.delete(id);
+    }
+    setEmails(incoming.filter((item) => !hidden.has(String(item.id))));
+  };
+
   const loadEmails = async (emailToUse?: string, opts?: { silent?: boolean }) => {
     const email = emailToUse || adminEmail;
+    const seq = ++emailsFetchSeqRef.current;
     if (!opts?.silent) setIsEmailsLoading(true);
     try {
       const res = await fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`);
       const data = await res.json();
+      if (seq !== emailsFetchSeqRef.current) return;
       if (Array.isArray(data.emails)) {
-        setEmails(data.emails);
+        applyEmails(data.emails);
       } else {
         console.warn("[admin] emails payload missing emails[]; keeping prior state");
       }
     } catch (err) {
       console.error("Failed to fetch emails", err);
     } finally {
-      if (!opts?.silent) setIsEmailsLoading(false);
+      if (!opts?.silent && seq === emailsFetchSeqRef.current) setIsEmailsLoading(false);
     }
   };
 
@@ -1822,6 +1846,13 @@ export default function AdminDashboard() {
         let initialJdId = "all";
         let initialJdText = "";
         if (fetchedJds.length > 0) {
+          const namedPinned = fetchedJds.find((j: any) => isNamedPinnedJd(j));
+          if (namedPinned && !readPinnedJdId()) {
+            try {
+              localStorage.setItem(PINNED_JD_STORAGE_KEY, namedPinned.id);
+            } catch {}
+            setPinnedJdId(namedPinned.id);
+          }
           const defaultJd = pickDefaultJd(fetchedJds);
           if (defaultJd) {
             initialJdId = defaultJd.id;
@@ -1849,7 +1880,7 @@ export default function AdminDashboard() {
       }
 
       if (Array.isArray(emailsData.emails)) {
-        setEmails(emailsData.emails);
+        applyEmails(emailsData.emails);
       } else if (emailsRes) {
         console.warn("[admin] emails payload missing emails[]; keeping prior state");
       } else {
@@ -2756,6 +2787,7 @@ export default function AdminDashboard() {
               report: {
                 ...r.report,
                 suitability: nextSuitability,
+                suitabilityOverridden: true,
                 ...(activeJdIdToSend ? { jdId: activeJdIdToSend } : {})
               },
             };
@@ -2983,18 +3015,25 @@ export default function AdminDashboard() {
       setActionLoading("bulk-emails");
       setActionError(null);
       try {
+        const idsToDelete = [...selectedEmailIds];
         const response = await fetch("/api/admin/emails", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: selectedEmailIds })
+          body: JSON.stringify({ ids: idsToDelete })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to delete emails");
 
-        setActionSuccess(`${selectedEmailIds.length} outbox log(s) deleted successfully.`);
+        emailsFetchSeqRef.current += 1;
+        idsToDelete.forEach((id) => deletedEmailIdsRef.current.add(String(id)));
+        if (Array.isArray(data.emails)) {
+          applyEmails(data.emails);
+        } else {
+          setEmails((prev) => prev.filter((item) => !idsToDelete.includes(item.id)));
+        }
+        setActionSuccess(`${idsToDelete.length} outbox log(s) deleted successfully.`);
         setSelectedEmailIds([]);
         setTimeout(() => setActionSuccess(null), 3000);
-        await loadEmails(adminEmail);
       } catch (error: any) {
         setActionError(error.message || "Failed to delete email logs.");
       } finally {
@@ -3045,11 +3084,16 @@ export default function AdminDashboard() {
       try {
         const response = await fetch("/api/admin/emails", {
           method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: [] }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to clear outbox");
 
+        emailsFetchSeqRef.current += 1;
+        deletedEmailIdsRef.current = new Set();
         setEmails([]);
+        setSelectedEmailIds([]);
         setActionSuccess("Outbox logs cleared successfully.");
         setTimeout(() => setActionSuccess(null), 3000);
       } catch (error: any) {
@@ -3060,8 +3104,8 @@ export default function AdminDashboard() {
       return;
     }
 
-    if (targetId.startsWith("email-")) {
-      const emailId = targetId.substring(6); // remove "email-" prefix
+    if (targetId.startsWith("outbox-log:")) {
+      const emailId = targetId.slice("outbox-log:".length);
       setActionLoading(targetId);
       setActionError(null);
       try {
@@ -3073,7 +3117,13 @@ export default function AdminDashboard() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to delete email log");
 
-        setEmails((prev) => prev.filter((item) => item.id !== emailId));
+        emailsFetchSeqRef.current += 1;
+        deletedEmailIdsRef.current.add(String(emailId));
+        if (Array.isArray(data.emails)) {
+          applyEmails(data.emails);
+        } else {
+          setEmails((prev) => prev.filter((item) => item.id !== emailId));
+        }
         setActionSuccess("Simulated invitation email log deleted successfully.");
         setTimeout(() => setActionSuccess(null), 3000);
       } catch (error: any) {
@@ -3357,18 +3407,20 @@ export default function AdminDashboard() {
   };
 
   const getSuitability = (r: any) => {
-    if (selectedJdId && selectedJdId !== "all" && jdSavedText) {
-      const currentJd = jds.find(j => j.id === selectedJdId);
-      const candidateJdId = resolveJdId(r.report?.jdId);
-      const isOriginallyForActiveJd = currentJd && (
-        candidateJdId === selectedJdId || 
-        (Array.isArray(currentJd.duplicateIds) && currentJd.duplicateIds.map(resolveJdId).includes(candidateJdId))
-      );
-      if (isOriginallyForActiveJd) {
-        return r.report?.suitability ?? "suitable";
-      }
-      const score = getScore(r);
-      return score >= 40 ? "suitable" : "unsuitable";
+    const jdIsActive =
+      Boolean(selectedJdId) &&
+      selectedJdId !== "all" &&
+      !selectedJdId.includes("@") &&
+      Boolean(jdSavedText);
+    if (
+      r.report?.suitabilityOverridden &&
+      r.report?.suitability &&
+      (!jdIsActive || !r.report?.jdId || r.report.jdId === selectedJdId)
+    ) {
+      return r.report.suitability;
+    }
+    if (jdIsActive) {
+      return getScore(r) >= QUALIFIED_COVERAGE_PERCENT ? "suitable" : "unsuitable";
     }
     return r.report?.suitability ?? "suitable";
   };
@@ -3408,13 +3460,21 @@ export default function AdminDashboard() {
     if (!jdIsActive) return employees;
     return employees.map((emp) => {
       const result = calculateSkillMatch(employeeMatchText(emp), jdText);
+      const score = Number(result.score) || 0;
       return {
         ...emp,
-        score: result.score,
+        score,
         matchingSkills: result.matchingSkills,
+        matchedCount: result.matchedCount,
+        requiredCount: result.requiredCount,
       };
     });
   }, [employees, jdSavedText, selectedJdId]);
+
+  const jdCoverageQualifiedCount = scoredEmployees.filter((e) => {
+    const score = Number(e.score);
+    return Number.isFinite(score) && score >= QUALIFIED_COVERAGE_PERCENT;
+  }).length;
 
   const filteredEmployees = scoredEmployees
     .filter(emp => {
@@ -3426,7 +3486,13 @@ export default function AdminDashboard() {
         emp.skills?.toLowerCase().includes(term)
       );
     })
-    .sort((a, b) => (b.score || 0) - (a.score || 0));
+    .sort((a, b) => {
+      const scoreDelta = (b.score || 0) - (a.score || 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const matchDelta = (b.matchingSkills?.length || 0) - (a.matchingSkills?.length || 0);
+      if (matchDelta !== 0) return matchDelta;
+      return String(a.full_name || "").localeCompare(String(b.full_name || ""));
+    });
 
   const bestMatch = scoredEmployees.length > 0
     ? scoredEmployees.reduce((best, current) => (current.score || 0) > (best.score || 0) ? current : best, scoredEmployees[0])
@@ -3560,7 +3626,7 @@ export default function AdminDashboard() {
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
                   }`}
                 >
-                  Employee Data
+                  Corp Pool
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
                     {isDashboardBootstrapping || isEmployeeDataPending ? "…" : employees.length}
                   </Badge>
@@ -3634,7 +3700,7 @@ export default function AdminDashboard() {
                         : activeTab === "employee-portal"
                           ? "Loading employee portal data…"
                           : activeTab === "employee"
-                            ? "Loading employee pool…"
+                            ? "Loading Corp Pool…"
                             : activeTab === "requirements"
                               ? "Loading requirements…"
                               : activeTab === "outbox"
@@ -3686,14 +3752,14 @@ export default function AdminDashboard() {
                                 );
                               });
 
-                              // Group JDs by text to identify duplicates
+                              // Group JDs by text to identify duplicates (keep short/empty texts unique)
                               const textGroups: { [key: string]: any[] } = {};
                               baseJds.forEach((j) => {
-                                const normalizedText = (j.jdText || "").trim().toLowerCase();
-                                if (!textGroups[normalizedText]) {
-                                  textGroups[normalizedText] = [];
+                                const groupKey = requirementDuplicateKey(j);
+                                if (!textGroups[groupKey]) {
+                                  textGroups[groupKey] = [];
                                 }
-                                textGroups[normalizedText].push(j);
+                                textGroups[groupKey].push(j);
                               });
 
                               // For each group, sort by createdAt ascending (oldest is OG)
@@ -3704,12 +3770,16 @@ export default function AdminDashboard() {
                                 const og = group[0];
                                 ogJds.push(og);
                                 if (group.length > 1) {
-                                  duplicatesMap.set(og.id, group.slice(1));
+                                  duplicatesMap.set(og.id, group.slice(1, 2));
                                 }
                               });
 
                               // Sort OG JDs: newest first, then by extracted skill count
                               ogJds.sort((a, b) => {
+                                const aPinned = a.id === pinnedJdId || isNamedPinnedJd(a) ? 1 : 0;
+                                const bPinned = b.id === pinnedJdId || isNamedPinnedJd(b) ? 1 : 0;
+                                if (bPinned !== aPinned) return bPinned - aPinned;
+
                                 const aTime = new Date(a.createdAt || 0).getTime();
                                 const bTime = new Date(b.createdAt || 0).getTime();
                                 if (bTime !== aTime) return bTime - aTime;
@@ -3743,6 +3813,7 @@ export default function AdminDashboard() {
                                 } else if (filename.match(/^\d+BR$/i)) {
                                   brNo = filename;
                                 }
+                                const jobTitle = extractJobTitleFromJd(j.jdText, filename);
                                 const isActive = activeJdIdForHighlight === j.id;
                                 const isExpanded = expandedJdId === j.id;
                                 const skills = extractSkillsFromText(j.jdText);
@@ -3832,11 +3903,11 @@ export default function AdminDashboard() {
                                         </div>
                                       </td>
                                       <td className={`p-3 ${isDuplicate ? "pl-6" : ""}`}>
-                                        <div className="font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate" title={filename}>
-                                          {filename}
+                                        <div className="font-bold text-slate-800 dark:text-slate-200 max-w-[220px] truncate" title={jobTitle}>
+                                          {jobTitle}
                                         </div>
-                                        <div className="text-[10px] text-slate-400 font-semibold max-w-[200px] truncate">
-                                          {j.jdText ? j.jdText.substring(0, 85) + "..." : ""}
+                                        <div className="text-[10px] text-slate-400 font-semibold max-w-[220px] truncate" title={filename}>
+                                          {filename}
                                         </div>
                                         {isDuplicate && (
                                           <div className="mt-1.5">
@@ -3877,8 +3948,8 @@ export default function AdminDashboard() {
                                           <div className="flex items-center gap-1 group">
                                             <div className="flex flex-wrap gap-1 max-w-[200px]">
                                               {skills.length > 0 ? (
-                                                skills.slice(0, 4).map((s) => (
-                                                  <Badge key={s} className="bg-secondary border-0 text-muted-foreground text-[9px] px-1.5 py-0 font-bold">
+                                                skills.slice(0, 4).map((s, i) => (
+                                                  <Badge key={`${s}-${i}`} className="bg-secondary border-0 text-muted-foreground text-[9px] px-1.5 py-0 font-bold">
                                                     {s}
                                                   </Badge>
                                                 ))
@@ -3960,6 +4031,7 @@ export default function AdminDashboard() {
                                               setSelectedJdId(j.id);
                                               setJdSavedText(j.jdText);
                                               setJdText(j.jdText);
+                                              setEmployeeSearch("");
                                               setActiveTab("employee");
                                             }}
                                             className={`h-7 px-2.5 rounded-lg text-[10px] font-extrabold transition duration-200 ${
@@ -3970,6 +4042,30 @@ export default function AdminDashboard() {
                                           >
                                             {isActive ? "Viewing Candidates" : "Select & Screen"}
                                           </Button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const next = pinnedJdId === j.id ? "" : j.id;
+                                              try {
+                                                if (next) localStorage.setItem(PINNED_JD_STORAGE_KEY, next);
+                                                else localStorage.removeItem(PINNED_JD_STORAGE_KEY);
+                                              } catch {}
+                                              setPinnedJdId(next);
+                                              if (next) {
+                                                setSelectedJdId(j.id);
+                                                setJdSavedText(j.jdText);
+                                                setJdText(j.jdText);
+                                              }
+                                            }}
+                                            className={`h-7 w-7 rounded-lg flex items-center justify-center border ${
+                                              pinnedJdId === j.id || isNamedPinnedJd(j)
+                                                ? "bg-amber-50 border-amber-200 text-amber-600"
+                                                : "border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-200"
+                                            }`}
+                                            title={pinnedJdId === j.id ? "Unpin job" : "Pin job to top"}
+                                          >
+                                            <Pin className="w-3.5 h-3.5" />
+                                          </button>
                                           <Button
                                             variant="ghost"
                                             onClick={() => handleDeleteJd(j.id)}
@@ -3995,8 +4091,8 @@ export default function AdminDashboard() {
                                               <div>
                                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">All Detected Technical Skills ({skills.length})</h4>
                                                 <div className="flex flex-wrap gap-1.5">
-                                                  {skills.map((s) => (
-                                                    <Badge key={s} className="bg-secondary border-0 text-indigo-700 dark:text-indigo-300 text-[10px] px-2.5 py-0.5 font-bold">
+                                                  {skills.map((s, i) => (
+                                                    <Badge key={`${s}-${i}`} className="bg-secondary border-0 text-indigo-700 dark:text-indigo-300 text-[10px] px-2.5 py-0.5 font-bold">
                                                       {s}
                                                     </Badge>
                                                   ))}
@@ -4028,15 +4124,15 @@ export default function AdminDashboard() {
                       {/* Summary Metrics */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total Employees</span>
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total in Corp Pool</span>
                           <span className="text-xl md:text-2xl font-black text-primary">{scoredEmployees.length}</span>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center flex flex-col items-center justify-center min-h-[70px]">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Matches &gt;60% (JD)</span>
-                          {selectedJdId && selectedJdId !== "all" ? (
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Coverage &gt;60% of JD skills</span>
+                          {selectedJdId && selectedJdId !== "all" && jdSavedText.trim() ? (
                             <div className="w-full">
                               <span className="text-xl md:text-2xl font-black text-emerald-600 dark:text-emerald-400 block leading-none">
-                                {scoredEmployees.filter(e => (e.score || 0) > 60).length}
+                                {jdCoverageQualifiedCount}
                               </span>
                               <span className="text-[10px] font-bold text-muted-foreground block mt-1.5 leading-none">
                                 Qualified Profiles
@@ -4055,7 +4151,7 @@ export default function AdminDashboard() {
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Avg Match Score</span>
                           <span className="text-xl md:text-2xl font-black text-primary">
-                            {scoredEmployees.length > 0 ? Math.round(scoredEmployees.reduce((acc, curr) => acc + (curr.score || 0), 0) / scoredEmployees.length) : 0}%
+                            {scoredEmployees.length > 0 ? Math.round(scoredEmployees.reduce((acc, curr) => acc + (Number(curr.score) || 0), 0) / scoredEmployees.length) : 0}%
                           </span>
                         </div>
                       </div>
@@ -4065,7 +4161,7 @@ export default function AdminDashboard() {
                         <div className="w-full sm:w-72 relative">
                           <input
                             type="text"
-                            placeholder="Search employees..."
+                            placeholder="Search Corp Pool..."
                             value={employeeSearch}
                             onChange={(e) => setEmployeeSearch(e.target.value)}
                             className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
@@ -4196,8 +4292,8 @@ export default function AdminDashboard() {
                                     <td className="p-3">
                                       <div className="flex flex-wrap gap-1 max-w-[180px]">
                                         {emp.matchingSkills && emp.matchingSkills.length > 0 ? (
-                                          emp.matchingSkills.slice(0, 3).map((s: string) => (
-                                            <Badge key={s} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0">
+                                          emp.matchingSkills.slice(0, 3).map((s: string, i: number) => (
+                                            <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0">
                                               {s}
                                             </Badge>
                                           ))
@@ -4210,9 +4306,16 @@ export default function AdminDashboard() {
                                       </div>
                                     </td>
                                     <td className="p-3">
-                                      <span className={`font-black text-sm ${
-                                        emp.score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : (emp.score >= 40 ? 'text-amber-500' : 'text-rose-500')
-                                      }`}>
+                                      <span
+                                        className={`font-black text-sm ${
+                                          Number(emp.score) >= QUALIFIED_COVERAGE_PERCENT ? 'text-emerald-600 dark:text-emerald-400' : (Number(emp.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
+                                        }`}
+                                        title={
+                                          emp.requiredCount
+                                            ? `${emp.matchedCount}/${emp.requiredCount} required JD skills`
+                                            : undefined
+                                        }
+                                      >
                                         {emp.score}%
                                       </span>
                                     </td>
@@ -5403,9 +5506,9 @@ export default function AdminDashboard() {
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  disabled={actionLoading === `email-${email.id}`}
+                                  disabled={actionLoading === `outbox-log:${email.id}`}
                                   onClick={() => {
-                                    setDeleteTargetId(`email-${email.id}`);
+                                    setDeleteTargetId(`outbox-log:${email.id}`);
                                     setDeletePasswordInput("");
                                     setDeleteModalError(null);
                                   }}
@@ -5571,8 +5674,8 @@ export default function AdminDashboard() {
                                     if (matchInfo.matchingSkills.length > 0) {
                                       return (
                                         <div className="flex flex-wrap gap-1 mt-2">
-                                          {matchInfo.matchingSkills.slice(0, 5).map(s => (
-                                            <Badge key={s} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0 font-bold">
+                                          {matchInfo.matchingSkills.slice(0, 5).map((s, i) => (
+                                            <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0 font-bold">
                                               {s}
                                             </Badge>
                                           ))}
@@ -5593,13 +5696,25 @@ export default function AdminDashboard() {
                                   JD Match
                                 </span>
                                 {(() => {
-                                  const score = getScore(row);
+                                  const matchInfo = selectedJdId && selectedJdId !== "all" && jdSavedText
+                                    ? calculateCandidateMatch(row, jdSavedText)
+                                    : null;
+                                  const score = matchInfo?.score ?? getScore(row);
+                                  const colorClass =
+                                    score >= QUALIFIED_COVERAGE_PERCENT
+                                      ? "bg-emerald-100 dark:bg-emerald-950/35 text-emerald-800 dark:text-emerald-300"
+                                      : score >= 40
+                                        ? "bg-amber-100 dark:bg-amber-950/35 text-amber-800 dark:text-amber-300"
+                                        : "bg-rose-100 dark:bg-rose-950/35 text-rose-800 dark:text-rose-300";
                                   return (
-                                    <Badge className={`border-0 font-extrabold text-xs px-3 py-1 ${
-                                      score >= 40
-                                        ? "bg-emerald-100 dark:bg-emerald-950/35 text-emerald-800 dark:text-emerald-300"
-                                        : "bg-amber-100 dark:bg-amber-955/35 text-amber-855 dark:text-amber-300"
-                                    }`}>
+                                    <Badge
+                                      className={`border-0 font-extrabold text-xs px-3 py-1 ${colorClass}`}
+                                      title={
+                                        matchInfo?.requiredCount
+                                          ? `${matchInfo.matchedCount}/${matchInfo.requiredCount} required JD skills`
+                                          : undefined
+                                      }
+                                    >
                                       {score}%
                                     </Badge>
                                   );
@@ -5611,7 +5726,11 @@ export default function AdminDashboard() {
                             <div className="bg-muted/50 border border-indigo-50/50 dark:border-slate-800/80 rounded-2xl p-4 text-xs text-muted-foreground font-medium leading-relaxed">
                               <strong className="text-slate-800 dark:text-slate-200">Rationale:</strong> {
                                 selectedJdId && selectedJdId !== "all" && jdSavedText
-                                  ? `Matches profile requirements. Found ${calculateCandidateMatch(row, jdSavedText).matchingSkills.length} overlapping technical skills.`
+                                  ? (() => {
+                                      const matchInfo = calculateCandidateMatch(row, jdSavedText);
+                                      if (!matchInfo.requiredCount) return "No required JD skills to score against.";
+                                      return `Matched ${matchInfo.matchedCount}/${matchInfo.requiredCount} required JD skills (${matchInfo.score}% coverage).`;
+                                    })()
                                   : (row.report?.jdMatchRationale || "Matches profile requirements.")
                               }
                             </div>
@@ -6365,7 +6484,7 @@ export default function AdminDashboard() {
                    deleteTargetId === "bulk-employees-pool" ? "Delete Selected Employees" :
                    deleteTargetId === "bulk-portal-videos" ? "Delete Selected Proctoring Videos" :
                    deleteTargetId === "clear-outbox" ? "Clear Email Outbox" :
-                   deleteTargetId.startsWith("email-") ? "Delete Email Log" : 
+                   deleteTargetId.startsWith("outbox-log:") ? "Delete Email Log" : 
                    deleteTargetId.startsWith("emp-") ? "Delete Employee Record" : "Delete Candidate Record"}
                 </span>
               </div>
@@ -6390,7 +6509,7 @@ export default function AdminDashboard() {
                   ? `This will permanently delete proctoring videos for ${selectedPortalVideoTargets.length} selected employee(s). Test scores, answers, and status will NOT be changed.`
                   : deleteTargetId === "clear-outbox"
                   ? "This action is permanent and will clear all simulated invitation email logs from the outbox."
-                  : deleteTargetId.startsWith("email-")
+                  : deleteTargetId.startsWith("outbox-log:")
                   ? "This action is permanent and will delete this simulated invitation email log."
                   : deleteTargetId.startsWith("emp-")
                   ? "This action is permanent and will delete the employee record from the corporate pool database."
@@ -6706,7 +6825,7 @@ export default function AdminDashboard() {
                 <div>
                   <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Skill Match Score</span>
                   <span className={`font-black text-sm ${
-                    activeEmployee.score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : (activeEmployee.score >= 40 ? 'text-amber-500' : 'text-rose-500')
+                    Number(activeEmployee.score) >= 60 ? 'text-emerald-600 dark:text-emerald-400' : (Number(activeEmployee.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
                   }`}>
                     {activeEmployee.score || 0}%
                   </span>
@@ -6724,8 +6843,8 @@ export default function AdminDashboard() {
                 <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Matching Skills against JD</span>
                 <div className="flex flex-wrap gap-1">
                   {activeEmployee.matchingSkills && activeEmployee.matchingSkills.length > 0 ? (
-                    activeEmployee.matchingSkills.map((s: string) => (
-                      <Badge key={s} className="bg-indigo-50 border-0 text-indigo-700 text-[10px] px-2 py-0.5">
+                    activeEmployee.matchingSkills.map((s: string, i: number) => (
+                      <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[10px] px-2 py-0.5">
                         {s}
                       </Badge>
                     ))
