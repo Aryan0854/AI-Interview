@@ -34,6 +34,7 @@ import {
   Edit2,
   Pin,
   Layers,
+  KeyRound,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { formatPortalTimestamp } from "@/lib/portal-format";
@@ -64,7 +65,7 @@ import {
 import { formatProductDisplayName } from "@/lib/product-display-name";
 import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
 import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT } from "@/lib/skill-match";
-import { adminCanViewEmployeePortal } from "@/lib/admin-accounts";
+import { adminCanChangePassword, adminCanViewEmployeePortal } from "@/lib/admin-accounts";
 
 function formatSyncAge(date: Date): string {
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -548,6 +549,13 @@ export default function AdminDashboard() {
   const [authInitialized, setAuthInitialized] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
   const canViewEmployeePortal = adminCanViewEmployeePortal(adminEmail);
+  const canChangePassword = adminCanChangePassword(adminEmail);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
+  const [passwordModalError, setPasswordModalError] = useState("");
+  const [passwordModalSaving, setPasswordModalSaving] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [authError, setAuthError] = useState("");
 
@@ -787,6 +795,65 @@ export default function AdminDashboard() {
     setSelectedResumeIds(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
+  };
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setCurrentPasswordInput("");
+    setNewPasswordInput("");
+    setConfirmPasswordInput("");
+    setPasswordModalError("");
+    setPasswordModalSaving(false);
+  };
+
+  const handleChangeAdminPassword = async () => {
+    if (!canChangePassword) return;
+    const currentPassword = currentPasswordInput.trim();
+    const newPassword = newPasswordInput.trim();
+    const confirmPassword = confirmPasswordInput.trim();
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordModalError("Fill in current password, new password, and confirm password.");
+      return;
+    }
+    if (newPassword.length < 5) {
+      setPasswordModalError("New password must be at least 5 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordModalError("New password and confirmation do not match.");
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setPasswordModalError("New password must be different from the current password.");
+      return;
+    }
+
+    setPasswordModalSaving(true);
+    setPasswordModalError("");
+    try {
+      const res = await adminFetch("/api/admin/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: adminEmail,
+          currentPassword,
+          newPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPasswordModalError(data.error || "Failed to change password.");
+        return;
+      }
+      closePasswordModal();
+      setActionError(null);
+      setActionSuccess("Password updated. Use the new password the next time you sign in.");
+    } catch {
+      setPasswordModalError("Failed to change password. Please try again.");
+    } finally {
+      setPasswordModalSaving(false);
+    }
   };
 
   const handleToggleAllResumes = () => {
@@ -3663,6 +3730,21 @@ export default function AdminDashboard() {
             </span>
           </div>
           <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+            {canChangePassword && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
+                onClick={() => {
+                  setPasswordModalError("");
+                  setShowPasswordModal(true);
+                }}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Change password</span>
+                <span className="inline sm:hidden">Password</span>
+              </Button>
+            )}
             <ThemeToggle />
             <Link href="/">
               <Button variant="outline" size="sm" className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs">
@@ -7830,6 +7912,85 @@ export default function AdminDashboard() {
             </div>
 
           </div>
+        </div>
+      )}
+
+      {showPasswordModal && canChangePassword && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in text-foreground">
+          <Card className="w-full max-w-md bg-card border border-indigo-150 dark:border-slate-800 shadow-2xl rounded-3xl overflow-hidden animate-scale-up">
+            <div className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-white" />
+                <span className="font-bold text-sm tracking-wide">Change password</span>
+              </div>
+              <button
+                type="button"
+                onClick={closePasswordModal}
+                className="text-white/80 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-muted-foreground font-semibold leading-relaxed">
+                Update the admin password for {adminEmail}. You will use the new password the next time you sign in.
+              </p>
+              <div className="space-y-3">
+                <input
+                  type="password"
+                  value={currentPasswordInput}
+                  onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                  placeholder="Current password"
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-3 text-xs font-bold text-slate-850 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-400/50"
+                  autoFocus
+                />
+                <input
+                  type="password"
+                  value={newPasswordInput}
+                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  placeholder="New password (min 5 characters)"
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-3 text-xs font-bold text-slate-850 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-400/50"
+                />
+                <input
+                  type="password"
+                  value={confirmPasswordInput}
+                  onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                  placeholder="Confirm new password"
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-3 text-xs font-bold text-slate-850 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-400/50"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !passwordModalSaving) {
+                      handleChangeAdminPassword();
+                    }
+                  }}
+                />
+                {passwordModalError && (
+                  <p className="text-[10px] text-red-500 font-bold mt-1.5 flex items-center gap-1">
+                    ⚠️ {passwordModalError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-950/20 border-t border-slate-100 dark:border-slate-800 px-6 py-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={closePasswordModal}
+                disabled={passwordModalSaving}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleChangeAdminPassword}
+                disabled={passwordModalSaving}
+                className="bg-primary hover:from-indigo-700 hover:to-violet-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/20 text-xs gap-2"
+              >
+                {passwordModalSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Save password
+              </Button>
+            </div>
+          </Card>
         </div>
       )}
     </div>

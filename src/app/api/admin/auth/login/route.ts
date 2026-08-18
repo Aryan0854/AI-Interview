@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { signToken } from "@/lib/employee-auth";
 import { isRateLimited, getClientIp } from "@/lib/security";
 import { auditLogService } from "@/services/audit-log-service";
-import { authenticateAdminCredentials } from "@/lib/admin-accounts";
+import { authenticateAdminCredentials } from "@/lib/admin-accounts-server";
 
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request);
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const access = authenticateAdminCredentials(email, password);
+    const access = await authenticateAdminCredentials(email, password);
     if (access) {
       // 1 hour session time-bound token
       const token = signToken("admin", 1 * 60 * 60 * 1000);
