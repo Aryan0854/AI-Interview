@@ -29,6 +29,11 @@ export function adminCanChangePassword(email: string): boolean {
   return PASSWORD_CHANGE_EMAILS.has(cleanEmail(email));
 }
 
+export function adminCanViewOrgScreeningData(email: string): boolean {
+  const user = cleanEmail(email);
+  return user === "admin@infinite.com" || TAG_STYLE_EMAILS.has(user);
+}
+
 export function getAdminAccess(email: string): AdminAccess {
   const user = cleanEmail(email);
   return {

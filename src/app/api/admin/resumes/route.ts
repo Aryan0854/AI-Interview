@@ -11,6 +11,7 @@ import { auditLogService } from "@/services/audit-log-service";
 import { writeLog } from "@/lib/structured-logger";
 
 import { cacheStore } from "@/lib/cache-store";
+import { adminCanViewOrgScreeningData } from "@/lib/admin-accounts";
 
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -28,9 +29,9 @@ export async function GET(request: NextRequest) {
 
     const resumes = await resumeService.getAllResumes();
 
-    // Filter resumes based on logged in email (super-admin sees all)
+    // Filter resumes by RM unless this login is allowed to see org-wide screening data
     let filteredResumes = resumes;
-    if (email && email !== "admin@infinite.com") {
+    if (email && !adminCanViewOrgScreeningData(email)) {
       filteredResumes = resumes.filter(
         (resume) => resume.report?.rmEmail?.toLowerCase().trim() === email
       );

@@ -7,6 +7,7 @@ import { readFile, writeFile } from 'fs/promises';
 import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { writeLog } from '@/lib/structured-logger';
 import { allowLocalDataFallback } from '@/lib/db-mode';
+import { adminCanViewOrgScreeningData } from '@/lib/admin-accounts';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -56,7 +57,7 @@ function sortEmails(emails: any[]) {
 }
 
 function filterByRm(emails: any[], email: string | null) {
-  if (!email || email === "admin@infinite.com") return emails;
+  if (!email || adminCanViewOrgScreeningData(email)) return emails;
   return emails.filter((item) => item.rmEmail?.toLowerCase().trim() === email);
 }
 
