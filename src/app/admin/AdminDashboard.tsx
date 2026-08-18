@@ -8,12 +8,12 @@ import { Button } from "@/components/ui/button";
 import { 
   Loader2, 
   ArrowLeft, 
-  ArrowRight,
+  ArrowRight, 
   FileText, 
   ClipboardList, 
   Eye, 
-  Download,
-  Play,
+  Download, 
+  Play, 
   Sparkles, 
   Upload, 
   Trash2, 
@@ -21,17 +21,22 @@ import {
   XCircle, 
   RefreshCcw, 
   AlertCircle, 
-  HelpCircle,
-  Video,
-  Mail,
-  X,
-  Users,
-  Settings,
-  Activity,
-  ShieldAlert,
-  ChevronDown,
-  ChevronUp,
-  Edit2
+  HelpCircle, 
+  Video, 
+  Mail, 
+  X, 
+  Users, 
+  Settings, 
+  Activity, 
+  ShieldAlert, 
+  ChevronDown, 
+  ChevronUp, 
+  Edit2,
+  Power,
+  Maximize2,
+  Minimize2,
+  Minus,
+  Plus
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { formatPortalTimestamp } from "@/lib/portal-format";
@@ -494,9 +499,165 @@ function pickDefaultJd(jdsList: any[]): any | undefined {
   return jdsList[0];
 }
 
+interface ContainerHeaderControlsProps {
+  id: string;
+  isEnabled: boolean;
+  isCollapsed: boolean;
+  isMaximized: boolean;
+  onToggleEnabled: () => void;
+  onToggleCollapsed: () => void;
+  onToggleMaximized: () => void;
+}
+
+function ContainerHeaderControls({
+  isEnabled,
+  isCollapsed,
+  isMaximized,
+  onToggleEnabled,
+  onToggleCollapsed,
+  onToggleMaximized,
+}: ContainerHeaderControlsProps) {
+  return (
+    <div className="flex items-center gap-1.5 sm:gap-2 pl-2 sm:pl-3 border-l border-border/80 shrink-0">
+      {/* Power / Enable-Disable Toggle Button */}
+      <div className="relative group">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleEnabled();
+          }}
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center transition-all duration-300 shadow-sm ${
+            isEnabled
+              ? "bg-emerald-50 text-emerald-600 border-2 border-emerald-400 hover:bg-emerald-100 hover:border-emerald-500 hover:shadow-emerald-500/30 hover:scale-110 active:scale-95 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-500"
+              : "bg-rose-50 text-rose-600 border-2 border-rose-400 hover:bg-rose-100 hover:border-rose-500 hover:shadow-rose-500/30 hover:scale-110 active:scale-95 dark:bg-rose-950/50 dark:text-rose-400 dark:border-rose-600"
+          }`}
+          title={isEnabled ? "Click to Disable container" : "Click to Enable container"}
+          aria-label={isEnabled ? "Disable Container" : "Enable Container"}
+        >
+          <Power className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+        </button>
+        {/* Tooltip on hover */}
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center z-50 pointer-events-none">
+          <div className={`text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-xl whitespace-nowrap border ${
+            isEnabled ? "bg-slate-900 dark:bg-slate-800 border-slate-700" : "bg-rose-900 border-rose-700"
+          }`}>
+            {isEnabled ? "Click to Disable" : "Click to Enable"}
+          </div>
+          <div className={`w-2 h-2 rotate-45 -mt-1 ${isEnabled ? "bg-slate-900 dark:bg-slate-800" : "bg-rose-900"}`} />
+        </div>
+      </div>
+
+      {/* Maximize / Expand Button */}
+      <div className="relative group">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleMaximized();
+          }}
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center border transition-all duration-300 shadow-sm ${
+            isMaximized
+              ? "bg-indigo-100 text-indigo-700 border-indigo-400 hover:bg-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-500"
+              : "bg-card hover:bg-muted text-muted-foreground hover:text-foreground border-border hover:border-slate-400 hover:scale-110 active:scale-95 shadow-sm"
+          }`}
+          title={isMaximized ? "Restore container size" : "Maximize container"}
+          aria-label={isMaximized ? "Restore Container" : "Maximize Container"}
+        >
+          {isMaximized ? (
+            <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.2]" />
+          ) : (
+            <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.2]" />
+          )}
+        </button>
+        {/* Tooltip on hover */}
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center z-50 pointer-events-none">
+          <div className="bg-slate-900 dark:bg-slate-800 text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-xl whitespace-nowrap border border-slate-700">
+            {isMaximized ? "Restore Size" : "Maximize Container"}
+          </div>
+          <div className="w-2 h-2 bg-slate-900 dark:bg-slate-800 rotate-45 -mt-1" />
+        </div>
+      </div>
+
+      {/* Minimize / Collapse Button */}
+      <div className="relative group">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCollapsed();
+          }}
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center border transition-all duration-300 shadow-sm ${
+            isCollapsed
+              ? "bg-amber-100 text-amber-700 border-amber-400 hover:bg-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-500"
+              : "bg-card hover:bg-muted text-muted-foreground hover:text-foreground border-border hover:border-slate-400 hover:scale-110 active:scale-95 shadow-sm"
+          }`}
+          title={isCollapsed ? "Expand container" : "Minimize container"}
+          aria-label={isCollapsed ? "Expand Container" : "Minimize Container"}
+        >
+          {isCollapsed ? (
+            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+          ) : (
+            <Minus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+          )}
+        </button>
+        {/* Tooltip on hover */}
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex flex-col items-center z-50 pointer-events-none">
+          <div className="bg-slate-900 dark:bg-slate-800 text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-xl whitespace-nowrap border border-slate-700">
+            {isCollapsed ? "Expand Content" : "Minimize Content"}
+          </div>
+          <div className="w-2 h-2 bg-slate-900 dark:bg-slate-800 rotate-45 -mt-1" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContainerDisabledOverlay({ onEnable, title }: { onEnable: () => void; title?: string }) {
+  return (
+    <div className="p-8 my-4 rounded-2xl border-2 border-dashed border-border bg-slate-50/80 dark:bg-slate-950/60 backdrop-blur-sm flex flex-col items-center justify-center text-center gap-3 animate-fade-in">
+      <div className="w-12 h-12 rounded-full bg-rose-100 dark:bg-rose-950/60 flex items-center justify-center text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900 shadow-inner">
+        <Power className="w-6 h-6 stroke-[2.5]" />
+      </div>
+      <div className="space-y-1 max-w-sm">
+        <h4 className="text-sm font-black text-foreground">{title || "Container"} is Currently Disabled</h4>
+        <p className="text-[11px] font-semibold text-muted-foreground">
+          This panel is temporarily disabled. Click the button below or the power button in the top right to reactivate.
+        </p>
+      </div>
+      <Button
+        onClick={onEnable}
+        size="sm"
+        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-500/20 gap-2 h-8 px-4 mt-1"
+      >
+        <Power className="w-3.5 h-3.5" /> Enable Panel
+      </Button>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [resumes, setResumes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Container Visibility & Control States
+  const [containerStates, setContainerStates] = useState<Record<string, { enabled: boolean; collapsed: boolean; maximized: boolean }>>({
+    screening: { enabled: true, collapsed: false, maximized: false },
+    ingestion: { enabled: true, collapsed: false, maximized: false },
+    reset: { enabled: true, collapsed: false, maximized: false },
+    portalConfig: { enabled: true, collapsed: false, maximized: false },
+    logs: { enabled: true, collapsed: false, maximized: false },
+  });
+
+  const handleToggleContainer = (id: string, prop: "enabled" | "collapsed" | "maximized") => {
+    setContainerStates((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || { enabled: true, collapsed: false, maximized: false }),
+        [prop]: !prev[id]?.[prop],
+      },
+    }));
+  };
 
   // JD to BR Modal states
   const [showJdToBrModal, setShowJdToBrModal] = useState(false);
@@ -3491,9 +3652,75 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* Maximized Backdrop Overlay */}
+        {Object.values(containerStates).some((s) => s.maximized) && (
+          <div
+            onClick={() => {
+              setContainerStates((prev) => {
+                const next: Record<string, { enabled: boolean; collapsed: boolean; maximized: boolean }> = {};
+                Object.keys(prev).forEach((k) => {
+                  next[k] = { ...prev[k], maximized: false };
+                });
+                return next;
+              });
+            }}
+            className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-[85] animate-fade-in cursor-pointer"
+          />
+        )}
+
         {/* SCREENING RESULTS TAB CONTAINER */}
-        <Card className="border-border shadow-md bg-card rounded-3xl overflow-hidden flex flex-col">
-              
+        <Card className={`border-border shadow-md bg-card rounded-3xl overflow-hidden flex flex-col relative transition-all duration-300 ${
+          containerStates.screening?.maximized
+            ? "fixed inset-3 sm:inset-6 md:inset-8 z-[90] overflow-y-auto border-2 border-indigo-500/50 shadow-2xl"
+            : ""
+        }`}>
+          <div className="w-full h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 shrink-0" />
+
+          {/* Container Header with Title & Action Controls */}
+          <div className="p-4 sm:p-5 flex items-center justify-between gap-4 border-b border-border bg-card/90 shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 flex items-center justify-center shrink-0 shadow-sm text-primary">
+                <ClipboardList className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-base font-black text-foreground leading-none">
+                    Screening & Evaluation Matrix
+                  </h3>
+                  <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
+                    containerStates.screening?.enabled
+                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                      : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                  }`}>
+                    {containerStates.screening?.enabled ? "Active" : "Disabled"}
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-muted-foreground font-semibold mt-1 truncate">
+                  Candidate pool screening, requirements matching & employee matrix
+                </p>
+              </div>
+            </div>
+
+            <ContainerHeaderControls
+              id="screening"
+              isEnabled={containerStates.screening?.enabled ?? true}
+              isCollapsed={containerStates.screening?.collapsed ?? false}
+              isMaximized={containerStates.screening?.maximized ?? false}
+              onToggleEnabled={() => handleToggleContainer("screening", "enabled")}
+              onToggleCollapsed={() => handleToggleContainer("screening", "collapsed")}
+              onToggleMaximized={() => handleToggleContainer("screening", "maximized")}
+            />
+          </div>
+
+          {!containerStates.screening?.enabled ? (
+            <div className="p-6">
+              <ContainerDisabledOverlay
+                title="Screening & Evaluation Matrix"
+                onEnable={() => handleToggleContainer("screening", "enabled")}
+              />
+            </div>
+          ) : containerStates.screening?.collapsed ? null : (
+            <>
               {/* Tab Header Navigation */}
               <div className="flex overflow-x-auto scrollbar-none border-b border-border bg-muted/50 shrink-0 w-full px-1 sm:px-2">
                 <button
@@ -5137,24 +5364,25 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ) : activeTab === "outbox" ? (
-                  isEmailsLoading ? (
-                    <div className="flex-1 flex flex-col items-center justify-center py-24 gap-3">
-                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                      <p className="text-slate-500 font-bold text-sm">Loading outbox logs…</p>
-                    </div>
-                  ) : emails.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center py-24 text-center space-y-2">
-                      <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-500">
-                        <Mail className="w-6 h-6" />
+                  <div className="space-y-4">
+                    {isEmailsLoading ? (
+                      <div className="flex-1 flex flex-col items-center justify-center py-24 gap-3">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                        <p className="text-slate-500 font-bold text-sm">Loading outbox logs…</p>
                       </div>
-                      <h3 className="font-bold text-slate-800 text-sm">No Emails Sent</h3>
-                      <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
-                        No invitation emails have been simulated or dispatched to candidates yet. Mark a candidate suitable and click "Send Invite Mail" to simulate an invitation.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {/* Search Bar for Outbox */}
+                    ) : emails.length === 0 ? (
+                      <div className="flex-1 flex flex-col items-center justify-center py-24 text-center space-y-2">
+                        <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-500">
+                          <Mail className="w-6 h-6" />
+                        </div>
+                        <h3 className="font-bold text-slate-800 text-sm">No Emails Sent</h3>
+                        <p className="text-xs text-slate-500 max-w-sm leading-relaxed">
+                          No invitation emails have been simulated or dispatched to candidates yet. Mark a candidate suitable and click "Send Invite Mail" to simulate an invitation.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Search Bar for Outbox */}
                       <div className="relative shrink-0">
                         <input
                           type="text"
@@ -5291,9 +5519,11 @@ export default function AdminDashboard() {
                           })
                         )}
                       </div>
-                    </div>
-                  ) ) : (
-                    <div className="space-y-4">
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
                       {/* Candidate Search Bar */}
                       {(suitableCandidates.length > 0 || unsuitableCandidates.length > 0 || candidateSearch) && (
                         <div className="relative shrink-0">
@@ -5582,7 +5812,7 @@ export default function AdminDashboard() {
                                   className="h-8 px-2 border-indigo-100 text-indigo-600 hover:bg-indigo-50 rounded-xl"
                                   title="Download CV"
                                 >
-                                  <Download className="w-3.5 h-3.5" />
+                                   <Download className="w-3.5 h-3.5" />
                                 </Button>
 
                                 <Button
@@ -5596,7 +5826,6 @@ export default function AdminDashboard() {
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </Button>
                               </div>
-
                             </div>
                           </div>
                         </Card>
@@ -5608,43 +5837,67 @@ export default function AdminDashboard() {
               </div>
             )}
           </div>
-        </Card>
+        </>
+      )}
+    </Card>
 
-        {/* Admin Controls Section */}
-        <div className="mt-8 space-y-4">
-          <div className="flex items-center gap-3 px-1">
-            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Admin Controls</span>
-            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
-          {/* INGESTION PIPELINE CONTROL CARD */}
-          <Card className="p-5 border-indigo-150 dark:border-slate-800 shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col h-full">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
-            
-            <div className="flex justify-between items-start gap-3 pb-4 border-b border-border mb-4">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center shrink-0">
-                  <Settings className="w-4 h-4 text-primary" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Ingestion Pipeline</h3>
-                  <p className="text-[10px] text-slate-400 font-semibold mt-1">Folder-driven automation panel</p>
-                </div>
+        {/* INGESTION PIPELINE FULL-WIDTH CONTAINER */}
+        <Card className={`p-5 sm:p-6 border-indigo-150 dark:border-slate-800 shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col mt-8 transition-all duration-300 ${
+          containerStates.ingestion?.maximized
+            ? "fixed inset-3 sm:inset-6 md:inset-8 z-[90] overflow-y-auto border-2 border-indigo-500/50 shadow-2xl"
+            : ""
+        }`}>
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600" />
+          
+          <div className="flex justify-between items-start gap-3 pb-4 border-b border-border mb-5">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 flex items-center justify-center shrink-0 shadow-sm text-primary">
+                <Settings className="w-4 h-4" />
               </div>
-              <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
-                  pipelineStatus.includes("Error") ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400" :
-                  pipelineStatus.includes("Idle") ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                  "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
-                }`}>
-                  {pipelineStatus.includes("Idle") ? "Active" : "Processing"}
-                </Badge>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-base font-black text-slate-855 dark:text-slate-100 leading-none">
+                    Ingestion Pipeline
+                  </h3>
+                  <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
+                    !containerStates.ingestion?.enabled
+                      ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                      : pipelineStatus.includes("Error")
+                        ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400"
+                        : pipelineStatus.includes("Idle")
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
+                          : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
+                  }`}>
+                    {!containerStates.ingestion?.enabled ? "Disabled" : pipelineStatus.includes("Idle") ? "Active" : "Processing"}
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-slate-400 font-semibold mt-1">
+                  Folder-driven automation & unified document ingestion hub
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-4 flex-1 flex flex-col">
-              <div className="rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950/40 px-3 py-2.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
+            <ContainerHeaderControls
+              id="ingestion"
+              isEnabled={containerStates.ingestion?.enabled ?? true}
+              isCollapsed={containerStates.ingestion?.collapsed ?? false}
+              isMaximized={containerStates.ingestion?.maximized ?? false}
+              onToggleEnabled={() => handleToggleContainer("ingestion", "enabled")}
+              onToggleCollapsed={() => handleToggleContainer("ingestion", "collapsed")}
+              onToggleMaximized={() => handleToggleContainer("ingestion", "maximized")}
+            />
+          </div>
+
+          {!containerStates.ingestion?.enabled ? (
+            <ContainerDisabledOverlay
+              title="Ingestion Pipeline"
+              onEnable={() => handleToggleContainer("ingestion", "enabled")}
+            />
+          ) : containerStates.ingestion?.collapsed ? null : (
+            <div className="space-y-5">
+              {/* Status Banner */}
+              <div className="rounded-xl border border-border bg-slate-50/70 dark:bg-slate-950/40 px-3.5 py-2.5 flex items-center justify-between gap-3 shadow-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
                   <div className="relative flex h-2 w-2 shrink-0">
                     <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
                       pipelineStatus.includes("Error") ? "bg-rose-450" :
@@ -5660,16 +5913,24 @@ export default function AdminDashboard() {
                   <span className="text-[11px] font-bold text-muted-foreground truncate">{pipelineStatus}</span>
                 </div>
                 {activityLogs.length > 0 && (
-                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider shrink-0">Auto-Syncing</span>
+                  <span className="text-[9px] text-indigo-500 dark:text-indigo-400 font-bold uppercase tracking-wider shrink-0 bg-indigo-50 dark:bg-indigo-950/50 px-2 py-0.5 rounded-full border border-indigo-200/50">Auto-Syncing</span>
                 )}
               </div>
 
-              {jds.length > 0 && (
-                <div className="space-y-1.5">
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                    Active Requirement (JD / BR)
-                  </label>
-                  <div className="flex gap-2">
+              {/* 3-Column subgrid inside Ingestion Pipeline */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 items-stretch">
+                {/* 1. Active Requirement Selector */}
+                <div className="p-4 rounded-2xl border border-border bg-slate-50/40 dark:bg-slate-950/30 flex flex-col gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                      Active Requirement (JD / BR)
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground font-semibold">
+                    Select target requirement to filter candidates & calculate matching scores.
+                  </p>
+                  <div className="flex gap-2 mt-auto">
                     {adminEmail === "admin@infinite.com" ? (
                       <select
                         value={selectedSelectValue}
@@ -5690,7 +5951,7 @@ export default function AdminDashboard() {
                             }
                           }
                         }}
-                        className="w-0 flex-1 min-w-0 rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-[11px] font-bold text-slate-755 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 truncate"
+                        className="w-0 flex-1 min-w-0 rounded-xl border border-border bg-card p-2 text-[11px] font-bold text-foreground outline-none focus:ring-2 focus:ring-indigo-200 truncate shadow-sm"
                       >
                         <option value="all">📁 All Job Descriptions (View All Candidates)</option>
                         {(() => {
@@ -5710,7 +5971,7 @@ export default function AdminDashboard() {
                         })()}
                       </select>
                     ) : (
-                      <div className="flex-1 min-w-0 rounded-lg border border-border bg-slate-50/50 dark:bg-slate-950 px-2.5 py-2 text-[10px] font-bold text-slate-755 dark:text-slate-200 truncate select-none cursor-default">
+                      <div className="flex-1 min-w-0 rounded-xl border border-border bg-card px-2.5 py-2 text-[10px] font-bold text-foreground truncate select-none cursor-default shadow-sm">
                         {adminEmail}
                       </div>
                     )}
@@ -5718,7 +5979,7 @@ export default function AdminDashboard() {
                       <Button
                         variant="ghost"
                         onClick={() => handleDeleteJd(selectedJdId)}
-                        className="h-8 w-8 p-0 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-lg flex items-center justify-center border border-rose-100 dark:border-slate-800"
+                        className="h-8 w-8 p-0 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-xl flex items-center justify-center border border-rose-100 dark:border-slate-800"
                         title="Delete this Job Description"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -5726,415 +5987,529 @@ export default function AdminDashboard() {
                     )}
                   </div>
                 </div>
-              )}
 
-              <div className="space-y-2">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                    Automated Folder Scanning
-                  </label>
-                  <p className="text-[9px] text-slate-400 font-medium mt-0.5">
+                {/* 2. Automated Folder Scanning */}
+                <div className="p-4 rounded-2xl border border-border bg-slate-50/40 dark:bg-slate-950/30 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <RefreshCcw className="w-3.5 h-3.5 text-primary" />
+                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                        Automated Folder Scanning
+                      </label>
+                    </div>
+                    {isCloudDocsIngest && (
+                      <Badge className="border-0 text-[8px] px-1.5 py-0 font-bold bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
+                        Cloud Mode
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground font-semibold">
                     {isCloudDocsIngest
-                      ? "Scans Supabase docs-ingest storage and refreshes dashboard data"
-                      : "Scans local /docs folders and refreshes dashboard data"}
+                      ? "Scans Supabase docs-ingest storage & refreshes all data"
+                      : "Scans local /docs directory & refreshes data"}
                   </p>
-                  {isCloudDocsIngest && (
-                    <Badge className="mt-1 border-0 text-[8px] px-1.5 py-0 font-bold bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-                      Cloud storage mode
-                    </Badge>
-                  )}
+                  <div className="grid grid-cols-2 gap-2 mt-auto">
+                    <Button
+                      variant="outline"
+                      disabled={refreshingType !== null}
+                      onClick={() => handleRefresh("requirements")}
+                      className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border bg-card hover:bg-indigo-50/40 dark:hover:bg-slate-900/60 gap-0.5 text-center group transition-all duration-200 shadow-sm"
+                    >
+                      {refreshingType === "requirements" ? (
+                        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                      ) : (
+                        <ClipboardList className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                      )}
+                      <span className="text-[9px] font-extrabold text-foreground">Scan Requirements</span>
+                      <span className="text-[7px] text-muted-foreground font-semibold uppercase">/docs/BR & JD</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={refreshingType !== null}
+                      onClick={() => handleRefresh("candidates")}
+                      className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border bg-card hover:bg-indigo-50/40 dark:hover:bg-slate-900/60 gap-0.5 text-center group transition-all duration-200 shadow-sm"
+                    >
+                      {refreshingType === "candidates" ? (
+                        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                      )}
+                      <span className="text-[9px] font-extrabold text-foreground">Scan Candidates</span>
+                      <span className="text-[7px] text-muted-foreground font-semibold uppercase">/docs/Resumes</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={refreshingType !== null}
+                      onClick={() => handleRefresh("employees")}
+                      className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border bg-card hover:bg-indigo-50/40 dark:hover:bg-slate-900/60 gap-0.5 text-center group transition-all duration-200 shadow-sm"
+                    >
+                      {refreshingType === "employees" ? (
+                        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                      ) : (
+                        <Users className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                      )}
+                      <span className="text-[9px] font-extrabold text-foreground">Scan Employees</span>
+                      <span className="text-[7px] text-muted-foreground font-semibold uppercase">/docs/Corp Pool</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={refreshingType !== null}
+                      onClick={() => handleRefresh("interviews")}
+                      className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border bg-card hover:bg-indigo-50/40 dark:hover:bg-slate-900/60 gap-0.5 text-center group transition-all duration-200 shadow-sm"
+                    >
+                      {refreshingType === "interviews" ? (
+                        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                      ) : (
+                        <Video className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                      )}
+                      <span className="text-[9px] font-extrabold text-foreground">Sync Interviews</span>
+                      <span className="text-[7px] text-muted-foreground font-semibold uppercase">Database & CSV</span>
+                    </Button>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    disabled={refreshingType !== null}
-                    onClick={() => handleRefresh("requirements")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
-                  >
-                    {refreshingType === "requirements" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                    ) : (
-                      <ClipboardList className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    )}
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Requirements</span>
-                    <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/BR & JD</span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={refreshingType !== null}
-                    onClick={() => handleRefresh("candidates")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
-                  >
-                    {refreshingType === "candidates" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                    ) : (
-                      <FileText className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    )}
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Candidates</span>
-                    <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/Resumes</span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={refreshingType !== null}
-                    onClick={() => handleRefresh("employees")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
-                  >
-                    {refreshingType === "employees" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                    ) : (
-                      <Users className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    )}
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Employees</span>
-                    <span className="text-[7px] text-slate-400 font-semibold uppercase">/docs/Corp Pool</span>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={refreshingType !== null}
-                    onClick={() => handleRefresh("interviews")}
-                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
-                  >
-                    {refreshingType === "interviews" ? (
-                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                    ) : (
-                      <Video className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
-                    )}
-                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Sync & Refresh Interviews</span>
-                    <span className="text-[7px] text-slate-400 font-semibold uppercase">Database & CSV</span>
-                  </Button>
-                </div>
-              </div>
 
-              <div className="space-y-2 mt-auto pt-1">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                  Unified File Upload
-                </label>
-                <select
-                  value={uploadCategory}
-                  onChange={(e) => setUploadCategory(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-[11px] font-bold text-slate-755 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 truncate"
-                >
-                  <option value="resume">📄 Candidate Resume</option>
-                  <option value="jd">💼 Job Description (JD)</option>
-                  <option value="br">📊 Business Requirement (BR)</option>
-                  <option value="employee">👥 Employee Pool Data</option>
-                  <option value="interview">📝 Interview CSV Sync</option>
-                </select>
+                {/* 3. Unified File Upload */}
+                <div className="p-4 rounded-2xl border border-border bg-slate-50/40 dark:bg-slate-950/30 flex flex-col gap-2.5 md:col-span-2 xl:col-span-1">
+                  <div className="flex items-center gap-2">
+                    <Upload className="w-3.5 h-3.5 text-primary" />
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                      Unified File Upload
+                    </label>
+                  </div>
+                  <select
+                    value={uploadCategory}
+                    onChange={(e) => setUploadCategory(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-card p-2 text-[11px] font-bold text-foreground outline-none focus:ring-2 focus:ring-indigo-200 truncate shadow-sm"
+                  >
+                    <option value="resume">📄 Candidate Resume</option>
+                    <option value="jd">💼 Job Description (JD)</option>
+                    <option value="br">📊 Business Requirement (BR)</option>
+                    <option value="employee">👥 Employee Pool Data</option>
+                    <option value="interview">📝 Interview CSV Sync</option>
+                  </select>
 
-                <div
-                  onClick={() => unifiedFileInputRef.current?.click()}
-                  className="border-2 border-dashed border-border hover:border-indigo-400/50 dark:hover:border-slate-600 bg-slate-50/30 dark:bg-slate-950/30 hover:bg-indigo-50/10 dark:hover:bg-slate-900/20 rounded-xl p-4 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-1 group min-h-[88px]"
-                >
-                  <Upload className="w-5 h-5 text-primary group-hover:scale-110 transition-transform duration-200" />
-                  <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click to select file for upload</span>
-                  <span className="text-[9px] text-slate-400 font-semibold leading-snug">
-                    {uploadCategory === 'resume' && "Saves to /docs/Resumes & auto-screens"}
-                    {uploadCategory === 'jd' && "Saves to /docs/JD & parses details"}
-                    {uploadCategory === 'br' && "Saves to /docs/BR as excel template row"}
-                    {uploadCategory === 'employee' && "Saves to /docs/Corp Pool & updates match scores"}
-                    {uploadCategory === 'interview' && "Syncs and parses candidate_interview_data.csv"}
-                  </span>
-                  <input
-                    type="file"
-                    ref={unifiedFileInputRef}
-                    onChange={handleUnifiedUpload}
-                    className="hidden"
-                    accept={
-                      uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip' :
-                      uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt' :
-                      uploadCategory === 'br' ? '.xlsx,.csv' :
-                      uploadCategory === 'employee' ? '.csv,.xlsx,.pdf,.doc,.docx' :
-                      '.csv'
-                    }
-                  />
+                  <div
+                    onClick={() => unifiedFileInputRef.current?.click()}
+                    className="border-2 border-dashed border-indigo-200 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-400 bg-card hover:bg-indigo-50/30 dark:hover:bg-slate-900/40 rounded-xl p-3 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-1 group flex-1 min-h-[76px] shadow-sm"
+                  >
+                    <Upload className="w-4 h-4 text-primary group-hover:scale-110 transition-transform duration-200" />
+                    <span className="text-[10px] font-bold text-foreground">Click to select file for upload</span>
+                    <span className="text-[8.5px] text-muted-foreground font-semibold leading-tight">
+                      {uploadCategory === 'resume' && "Saves to /docs/Resumes & auto-screens"}
+                      {uploadCategory === 'jd' && "Saves to /docs/JD & parses details"}
+                      {uploadCategory === 'br' && "Saves to /docs/BR as excel template row"}
+                      {uploadCategory === 'employee' && "Saves to /docs/Corp Pool & updates match scores"}
+                      {uploadCategory === 'interview' && "Syncs candidate_interview_data.csv"}
+                    </span>
+                    <input
+                      type="file"
+                      ref={unifiedFileInputRef}
+                      onChange={handleUnifiedUpload}
+                      className="hidden"
+                      accept={
+                        uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip' :
+                        uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt' :
+                        uploadCategory === 'br' ? '.xlsx,.csv' :
+                        uploadCategory === 'employee' ? '.csv,.xlsx,.pdf,.doc,.docx' :
+                        '.csv'
+                      }
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </Card>
+          )}
+        </Card>
 
-          <div className="flex flex-col gap-6 h-full">
-          {/* RESET CANDIDATE SESSION CARD */}
-          <Card className="p-5 border-border shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col flex-1">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-500 to-orange-500" />
+        {/* Admin Controls Section - Adjacent Containers */}
+        <div className="mt-8 space-y-6">
+          <div className="flex items-center gap-3 px-1">
+            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Admin Controls & Operations</span>
+            <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+          </div>
 
-            <div className="flex items-center gap-2.5 pb-4 border-b border-border mb-4">
-              <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/40 flex items-center justify-center shrink-0">
-                <RefreshCcw className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Reset Candidate Session</h3>
-                <p className="text-[10px] text-slate-400 font-semibold mt-1">Clear interview progress for a candidate</p>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            {/* RESET CANDIDATE SESSION CARD */}
+            <Card className={`p-5 sm:p-6 border-border shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col transition-all duration-300 ${
+              containerStates.reset?.maximized
+                ? "fixed inset-3 sm:inset-6 md:inset-8 z-[90] overflow-y-auto border-2 border-amber-500/50 shadow-2xl"
+                : ""
+            }`}>
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500" />
 
-            <div className="space-y-4 flex-1 flex flex-col">
-              <div className="space-y-2">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                  Candidate Email Address
-                </label>
-                <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
-                  Enter the candidate&apos;s email to reset their interview progress and allow them to take the evaluation again.
-                </p>
-                <input
-                  type="email"
-                  placeholder="e.g. candidate@domain.com"
-                  value={resetEmailInput}
-                  onChange={(e) => setResetEmailInput(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-amber-200/50"
+              <div className="flex justify-between items-start gap-3 pb-4 border-b border-border mb-4">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/40 flex items-center justify-center shrink-0 shadow-sm">
+                    <RefreshCcw className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Reset Candidate Session</h3>
+                      <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
+                        containerStates.reset?.enabled ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                      }`}>
+                        {containerStates.reset?.enabled ? "Ready" : "Disabled"}
+                      </Badge>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">Clear interview progress & reactivate access</p>
+                  </div>
+                </div>
+
+                <ContainerHeaderControls
+                  id="reset"
+                  isEnabled={containerStates.reset?.enabled ?? true}
+                  isCollapsed={containerStates.reset?.collapsed ?? false}
+                  isMaximized={containerStates.reset?.maximized ?? false}
+                  onToggleEnabled={() => handleToggleContainer("reset", "enabled")}
+                  onToggleCollapsed={() => handleToggleContainer("reset", "collapsed")}
+                  onToggleMaximized={() => handleToggleContainer("reset", "maximized")}
                 />
               </div>
 
-              <Button
-                onClick={handleResetEmailSessionClick}
-                disabled={isResettingEmail || !resetEmailInput.trim()}
-                className="w-full h-10 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl font-bold shadow-md shadow-orange-500/20 flex items-center justify-center gap-2 text-xs mt-auto"
-              >
-                {isResettingEmail ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Resetting Session…
-                  </>
-                ) : (
-                  "Reset Test Session"
-                )}
-              </Button>
-            </div>
-          </Card>
-
-          {/* PORTAL TAB CONFIGURATION CARD */}
-          <Card className="p-5 border-border shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col flex-1">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-violet-500 to-indigo-500" />
-
-            <div className="flex items-center gap-2.5 pb-4 border-b border-border mb-4">
-              <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-indigo-950/50 flex items-center justify-center shrink-0">
-                <Settings className="w-4 h-4 text-violet-600 dark:text-violet-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Portal Configuration</h3>
-                <p className="text-[10px] text-slate-400 font-semibold mt-1">Employee portal feature toggles</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 flex-1 flex flex-col justify-center">
-              <div className="flex items-center justify-between gap-3 p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 rounded-xl">
-                <div className="space-y-0.5 min-w-0">
-                  <div className="text-xs font-bold text-foreground">System Logs Viewer</div>
-                  <div className="text-[9px] text-slate-400 font-medium leading-snug">Show logging panel at the bottom of this page</div>
-                </div>
-                <Button
-                  onClick={() => handleTogglePortalSetting("showSystemLogsViewer")}
-                  disabled={isUpdatingSettings}
-                  size="sm"
-                  className={`h-7 px-3 text-[10px] font-black rounded-lg border shrink-0 ${
-                    portalSettings.showSystemLogsViewer
-                      ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-500"
-                      : "bg-secondary hover:bg-slate-200 text-slate-500 border-slate-200 dark:border-slate-700"
-                  }`}
-                >
-                  {portalSettings.showSystemLogsViewer ? "ENABLED" : "DISABLED"}
-                </Button>
-              </div>
-            </div>
-          </Card>
-          </div>
-          </div>
-        </div>
-
-        {/* System Logs Section */}
-        {portalSettings.showSystemLogsViewer && (
-        <Card className="p-6 border-indigo-150 dark:border-slate-800 shadow-md bg-card rounded-3xl relative overflow-hidden mt-8">
-          <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500" />
-          
-          <div className="space-y-4">
-            {/* Header/Actions row */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-2 border-b border-border shrink-0">
-              <div>
-                <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">System Logs & Ingestion Pipeline Viewer</h3>
-                <p className="text-[10px] text-slate-400 font-semibold mt-1">Real-time automated logging and folder synchronization audits</p>
-              </div>
-              
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleDownloadSystemLogs}
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-[10px] h-8"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Download Logs
-                </Button>
-                <Button
-                  onClick={handleClearSystemLogs}
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl border-rose-100 dark:border-slate-800 text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-850 gap-1.5 font-bold text-[10px] h-8"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Clear Logs
-                </Button>
-              </div>
-            </div>
-
-            {/* Filters Row */}
-            <div className="flex flex-col sm:flex-row gap-3 items-center shrink-0">
-              <div className="w-full sm:flex-1 relative">
-                <input
-                  type="text"
-                  placeholder="Search log activity & details..."
-                  value={logsSearch}
-                  onChange={(e) => setLogsSearch(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+              {!containerStates.reset?.enabled ? (
+                <ContainerDisabledOverlay
+                  title="Reset Candidate Session"
+                  onEnable={() => handleToggleContainer("reset", "enabled")}
                 />
-              </div>
-              
-              <div className="flex gap-3 w-full sm:w-auto">
-                <select
-                  value={logsModuleFilter}
-                  onChange={(e) => setLogsModuleFilter(e.target.value)}
-                  className="flex-1 sm:flex-none rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
-                >
-                  <option value="all">📂 All Modules</option>
-                  <option value="candidate-processing">📄 Candidates</option>
-                  <option value="requirements">💼 Requirements</option>
-                  <option value="employee">👥 Employee Pool</option>
-                  <option value="interview">📝 Interviews Sync</option>
-                  <option value="email">✉️ Emails outbox</option>
-                  <option value="error">⚠️ System Errors</option>
-                </select>
+              ) : containerStates.reset?.collapsed ? null : (
+                <div className="space-y-4 flex-1 flex flex-col">
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                      Candidate Email Address
+                    </label>
+                    <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
+                      Enter the candidate&apos;s email to reset their interview progress and allow them to take the evaluation again.
+                    </p>
+                    <input
+                      type="email"
+                      placeholder="e.g. candidate@domain.com"
+                      value={resetEmailInput}
+                      onChange={(e) => setResetEmailInput(e.target.value)}
+                      className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-amber-200/50"
+                    />
+                  </div>
 
-                <select
-                  value={logsStatusFilter}
-                  onChange={(e) => setLogsStatusFilter(e.target.value)}
-                  className="flex-1 sm:flex-none rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
-                >
-                  <option value="all">🔄 All Statuses</option>
-                  <option value="success">✅ Success</option>
-                  <option value="failed">❌ Failed</option>
-                  <option value="warning">⚠️ Warning</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Log Terminal Screen */}
-            <div className="rounded-2xl border border-slate-900 bg-slate-950 text-slate-300 p-4 font-mono text-[10px] leading-relaxed shadow-inner flex flex-col">
-              {isSystemLogsLoading ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-3">
-                  <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
-                  <span className="text-slate-500 font-bold">Querying log stream...</span>
-                </div>
-              ) : systemLogs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-slate-500 font-semibold">
-                  <span>No pipeline log entries matching current criteria.</span>
-                </div>
-              ) : (
-                <div className="overflow-y-auto max-h-[350px] space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-                  {systemLogs.map((log, idx) => {
-                    const isError = log.status.toLowerCase() === 'failed' || log.status.toLowerCase() === 'error';
-                    const isWarning = log.status.toLowerCase() === 'warning';
-
-                    return (
-                      <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-900/60 pb-1.5 last:border-0 last:pb-0 gap-1.5 sm:gap-4 hover:bg-slate-900/20 px-1 py-0.5 rounded transition-all">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-slate-650 font-bold shrink-0">
-                            [{new Date(log.timestamp).toLocaleString()}]
-                          </span>
-                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shrink-0 ${
-                            isError ? "bg-red-955/65 text-red-400 border border-red-900/50" :
-                            isWarning ? "bg-amber-955/65 text-amber-400 border border-amber-900/50" :
-                            "bg-slate-900 text-slate-400 border border-slate-800/80"
-                          }`}>
-                            {log.module}
-                          </span>
-                          <span className="text-slate-200 font-black shrink-0">
-                            {log.action}
-                          </span>
-                          <span className={`shrink-0 ${
-                            isError ? "text-rose-500 font-extrabold" :
-                            isWarning ? "text-amber-500 font-extrabold" :
-                            "text-emerald-500"
-                          }`}>
-                            {isError ? "[FAILED]" : isWarning ? "[WARNING]" : "[SUCCESS]"}
-                          </span>
-                          <span className="text-slate-450 whitespace-pre-wrap break-all">
-                            {log.details}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  <Button
+                    onClick={handleResetEmailSessionClick}
+                    disabled={isResettingEmail || !resetEmailInput.trim()}
+                    className="w-full h-10 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white rounded-xl font-bold shadow-md shadow-orange-500/20 flex items-center justify-center gap-2 text-xs mt-auto"
+                  >
+                    {isResettingEmail ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Resetting Session…
+                      </>
+                    ) : (
+                      "Reset Test Session"
+                    )}
+                  </Button>
                 </div>
               )}
-            </div>
+            </Card>
 
-            {/* Reset Activity Log */}
-            <div className="pt-4 border-t border-border space-y-3">
-              <div className="flex justify-between items-center">
-                <div>
-                  <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-0 font-extrabold uppercase tracking-wider text-[9px] px-2.5 py-0.5">
-                    Reset Activity Log
-                  </Badge>
-                  <p className="text-[10px] text-slate-400 font-semibold mt-1">Candidate session reset history</p>
+            {/* PORTAL TAB CONFIGURATION CARD */}
+            <Card className={`p-5 sm:p-6 border-border shadow-md bg-card rounded-3xl relative overflow-hidden flex flex-col transition-all duration-300 ${
+              containerStates.portalConfig?.maximized
+                ? "fixed inset-3 sm:inset-6 md:inset-8 z-[90] overflow-y-auto border-2 border-violet-500/50 shadow-2xl"
+                : ""
+            }`}>
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-violet-500 via-purple-500 to-indigo-500" />
+
+              <div className="flex justify-between items-start gap-3 pb-4 border-b border-border mb-4">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-indigo-950/50 flex items-center justify-center shrink-0 shadow-sm">
+                    <Settings className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">Portal Configuration</h3>
+                      <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
+                        containerStates.portalConfig?.enabled ? "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300" : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                      }`}>
+                        {containerStates.portalConfig?.enabled ? "Active" : "Disabled"}
+                      </Badge>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-semibold mt-1">Employee portal feature toggles & display rules</p>
+                  </div>
                 </div>
-                {resetLogs.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    onClick={() => setShowClearLogsModal(true)}
-                    className="h-7 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-lg px-2 font-bold"
-                  >
-                    Clear History
-                  </Button>
-                )}
+
+                <ContainerHeaderControls
+                  id="portalConfig"
+                  isEnabled={containerStates.portalConfig?.enabled ?? true}
+                  isCollapsed={containerStates.portalConfig?.collapsed ?? false}
+                  isMaximized={containerStates.portalConfig?.maximized ?? false}
+                  onToggleEnabled={() => handleToggleContainer("portalConfig", "enabled")}
+                  onToggleCollapsed={() => handleToggleContainer("portalConfig", "collapsed")}
+                  onToggleMaximized={() => handleToggleContainer("portalConfig", "maximized")}
+                />
               </div>
 
-              {isLogsLoading ? (
-                <div className="flex justify-center items-center py-6">
-                  <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
-                </div>
-              ) : resetLogs.length === 0 ? (
-                <div className="text-center py-6 border border-dashed border-border rounded-2xl">
-                  <p className="text-xs text-slate-500 font-semibold">No reset activity logged yet.</p>
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
-                  {resetLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 rounded-xl space-y-1.5 hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"
+              {!containerStates.portalConfig?.enabled ? (
+                <ContainerDisabledOverlay
+                  title="Portal Configuration"
+                  onEnable={() => handleToggleContainer("portalConfig", "enabled")}
+                />
+              ) : containerStates.portalConfig?.collapsed ? null : (
+                <div className="space-y-3 flex-1 flex flex-col justify-center">
+                  <div className="flex items-center justify-between gap-3 p-3.5 border border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 rounded-2xl shadow-sm">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="text-xs font-bold text-foreground">System Logs Viewer</div>
+                      <div className="text-[9.5px] text-muted-foreground font-semibold leading-snug">Show real-time logging & pipeline audit panel below</div>
+                    </div>
+                    <Button
+                      onClick={() => handleTogglePortalSetting("showSystemLogsViewer")}
+                      disabled={isUpdatingSettings}
+                      size="sm"
+                      className={`h-8 px-3.5 text-[10px] font-black rounded-xl border shrink-0 transition-all shadow-sm ${
+                        portalSettings.showSystemLogsViewer
+                          ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-500 shadow-emerald-500/20"
+                          : "bg-secondary hover:bg-slate-200 text-slate-500 border-slate-200 dark:border-slate-700"
+                      }`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-xs font-bold text-foreground break-all select-all">
-                          {log.candidateEmail}
-                        </span>
-                        <Badge
-                          className={`border-0 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 flex-shrink-0 ${
-                            log.source === "Reset Form"
-                              ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                              : "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                          }`}
-                        >
-                          {log.source}
+                      {portalSettings.showSystemLogsViewer ? "ENABLED" : "DISABLED"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* System Logs Section */}
+          {portalSettings.showSystemLogsViewer && (
+            <Card className={`p-5 sm:p-6 border-indigo-150 dark:border-slate-800 shadow-md bg-card rounded-3xl relative overflow-hidden transition-all duration-300 ${
+              containerStates.logs?.maximized
+                ? "fixed inset-3 sm:inset-6 md:inset-8 z-[90] overflow-y-auto border-2 border-cyan-500/50 shadow-2xl"
+                : ""
+            }`}>
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600" />
+              
+              <div className="space-y-4">
+                {/* Header/Actions row */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-3 border-b border-border shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-cyan-100 dark:bg-cyan-950/40 flex items-center justify-center shrink-0 shadow-sm text-cyan-600 dark:text-cyan-400">
+                      <Activity className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-black text-slate-855 dark:text-slate-100 leading-none">
+                          System Logs & Ingestion Pipeline Viewer
+                        </h3>
+                        <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
+                          containerStates.logs?.enabled ? "bg-cyan-100 text-cyan-800 dark:bg-cyan-950/60 dark:text-cyan-300" : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                        }`}>
+                          {containerStates.logs?.enabled ? "Live" : "Disabled"}
                         </Badge>
                       </div>
+                      <p className="text-[10px] text-slate-400 font-semibold mt-1">
+                        Real-time automated logging and folder synchronization audits
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <Button
+                      onClick={handleDownloadSystemLogs}
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-[10px] h-8"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download Logs
+                    </Button>
+                    <Button
+                      onClick={handleClearSystemLogs}
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl border-rose-100 dark:border-slate-800 text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-850 gap-1.5 font-bold text-[10px] h-8"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Clear Logs
+                    </Button>
+                    <ContainerHeaderControls
+                      id="logs"
+                      isEnabled={containerStates.logs?.enabled ?? true}
+                      isCollapsed={containerStates.logs?.collapsed ?? false}
+                      isMaximized={containerStates.logs?.maximized ?? false}
+                      onToggleEnabled={() => handleToggleContainer("logs", "enabled")}
+                      onToggleCollapsed={() => handleToggleContainer("logs", "collapsed")}
+                      onToggleMaximized={() => handleToggleContainer("logs", "maximized")}
+                    />
+                  </div>
+                </div>
 
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground font-semibold">
-                        <span>
-                          By: <span className="text-primary">{log.resetBy}</span>
-                        </span>
-                        <span className="text-slate-400 dark:text-slate-550">
-                          {new Date(log.createdAt).toLocaleString([], {
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
+                {!containerStates.logs?.enabled ? (
+                  <ContainerDisabledOverlay
+                    title="System Logs & Pipeline Viewer"
+                    onEnable={() => handleToggleContainer("logs", "enabled")}
+                  />
+                ) : containerStates.logs?.collapsed ? null : (
+                  <>
+                    {/* Filters Row */}
+                    <div className="flex flex-col sm:flex-row gap-3 items-center shrink-0">
+                      <div className="w-full sm:flex-1 relative">
+                        <input
+                          type="text"
+                          placeholder="Search log activity & details..."
+                          value={logsSearch}
+                          onChange={(e) => setLogsSearch(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                        />
+                      </div>
+                      
+                      <div className="flex gap-3 w-full sm:w-auto">
+                        <select
+                          value={logsModuleFilter}
+                          onChange={(e) => setLogsModuleFilter(e.target.value)}
+                          className="flex-1 sm:flex-none rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                        >
+                          <option value="all">📂 All Modules</option>
+                          <option value="candidate-processing">📄 Candidates</option>
+                          <option value="requirements">💼 Requirements</option>
+                          <option value="employee">👥 Employee Pool</option>
+                          <option value="interview">📝 Interviews Sync</option>
+                          <option value="email">✉️ Emails outbox</option>
+                          <option value="error">⚠️ System Errors</option>
+                        </select>
+
+                        <select
+                          value={logsStatusFilter}
+                          onChange={(e) => setLogsStatusFilter(e.target.value)}
+                          className="flex-1 sm:flex-none rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                        >
+                          <option value="all">🔄 All Statuses</option>
+                          <option value="success">✅ Success</option>
+                          <option value="failed">❌ Failed</option>
+                          <option value="warning">⚠️ Warning</option>
+                        </select>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
-        )}
+
+                    {/* Log Terminal Screen */}
+                    <div className="rounded-2xl border border-slate-900 bg-slate-950 text-slate-300 p-4 font-mono text-[10px] leading-relaxed shadow-inner flex flex-col">
+                      {isSystemLogsLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-3">
+                          <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
+                          <span className="text-slate-500 font-bold">Querying log stream...</span>
+                        </div>
+                      ) : systemLogs.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-slate-500 font-semibold">
+                          <span>No pipeline log entries matching current criteria.</span>
+                        </div>
+                      ) : (
+                        <div className="overflow-y-auto max-h-[350px] space-y-2 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+                          {systemLogs.map((log, idx) => {
+                            const isError = log.status.toLowerCase() === 'failed' || log.status.toLowerCase() === 'error';
+                            const isWarning = log.status.toLowerCase() === 'warning';
+
+                            return (
+                              <div key={idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-900/60 pb-1.5 last:border-0 last:pb-0 gap-1.5 sm:gap-4 hover:bg-slate-900/20 px-1 py-0.5 rounded transition-all">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-slate-650 font-bold shrink-0">
+                                    [{new Date(log.timestamp).toLocaleString()}]
+                                  </span>
+                                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider shrink-0 ${
+                                    isError ? "bg-red-955/65 text-red-400 border border-red-900/50" :
+                                    isWarning ? "bg-amber-955/65 text-amber-400 border border-amber-900/50" :
+                                    "bg-slate-900 text-slate-400 border border-slate-800/80"
+                                  }`}>
+                                    {log.module}
+                                  </span>
+                                  <span className="text-slate-200 font-black shrink-0">
+                                    {log.action}
+                                  </span>
+                                  <span className={`shrink-0 ${
+                                    isError ? "text-rose-500 font-extrabold" :
+                                    isWarning ? "text-amber-500 font-extrabold" :
+                                    "text-emerald-500"
+                                  }`}>
+                                    {isError ? "[FAILED]" : isWarning ? "[WARNING]" : "[SUCCESS]"}
+                                  </span>
+                                  <span className="text-slate-450 whitespace-pre-wrap break-all">
+                                    {log.details}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Reset Activity Log */}
+                    <div className="pt-4 border-t border-border space-y-3">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <Badge className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-0 font-extrabold uppercase tracking-wider text-[9px] px-2.5 py-0.5">
+                            Reset Activity Log
+                          </Badge>
+                          <p className="text-[10px] text-slate-400 font-semibold mt-1">Candidate session reset history</p>
+                        </div>
+                        {resetLogs.length > 0 && (
+                          <Button
+                            variant="ghost"
+                            onClick={() => setShowClearLogsModal(true)}
+                            className="h-7 text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-955/20 rounded-lg px-2 font-bold"
+                          >
+                            Clear History
+                          </Button>
+                        )}
+                      </div>
+
+                      {isLogsLoading ? (
+                        <div className="flex justify-center items-center py-6">
+                          <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
+                        </div>
+                      ) : resetLogs.length === 0 ? (
+                        <div className="text-center py-6 border border-dashed border-border rounded-2xl">
+                          <p className="text-xs text-slate-500 font-semibold">No reset activity logged yet.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                          {resetLogs.map((log) => (
+                            <div
+                              key={log.id}
+                              className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 rounded-xl space-y-1.5 hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-200"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="text-xs font-bold text-foreground break-all select-all">
+                                  {log.candidateEmail}
+                                </span>
+                                <Badge
+                                  className={`border-0 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 flex-shrink-0 ${
+                                    log.source === "Reset Form"
+                                      ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                                      : "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                                  }`}
+                                >
+                                  {log.source}
+                                </Badge>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[10px] text-muted-foreground font-semibold">
+                                <span>
+                                  By: <span className="text-primary">{log.resetBy}</span>
+                                </span>
+                                <span className="text-slate-400 dark:text-slate-550">
+                                  {new Date(log.createdAt).toLocaleString([], {
+                                    month: "short",
+                                    day: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </Card>
+          )}
+        </div>
       </main>
 
       {showDetails && selectedResume && (
