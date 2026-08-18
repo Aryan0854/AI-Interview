@@ -12,7 +12,6 @@ type StoredSecret = { hash: string; salt: string };
 type SecretMap = Record<string, StoredSecret>;
 
 const NAMED_ADMIN_PASSWORDS: Record<string, string> = {
-  "tag@infinite.com": TAG_PASSWORD,
   "ramendras@infinite.com": TAG_PASSWORD,
   "nehalathar@infinite.com": TAG_PASSWORD,
   "shwethab@infinite.com": TAG_PASSWORD,

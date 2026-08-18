@@ -5,7 +5,6 @@ export type AdminAccess = {
 };
 
 const TAG_STYLE_EMAILS = new Set([
-  "tag@infinite.com",
   "ramendras@infinite.com",
   "nehalathar@infinite.com",
   "shwethab@infinite.com",
