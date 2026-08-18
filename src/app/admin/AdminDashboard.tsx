@@ -64,6 +64,7 @@ import {
 import { formatProductDisplayName } from "@/lib/product-display-name";
 import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
 import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT } from "@/lib/skill-match";
+import { adminCanViewEmployeePortal } from "@/lib/admin-accounts";
 
 function formatSyncAge(date: Date): string {
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -546,6 +547,7 @@ export default function AdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
+  const canViewEmployeePortal = adminCanViewEmployeePortal(adminEmail);
   const [adminPassword, setAdminPassword] = useState("");
   const [authError, setAuthError] = useState("");
 
@@ -765,6 +767,12 @@ export default function AdminDashboard() {
 
     loadInitialData(adminEmail);
   }, [authenticated, adminEmail]);
+
+  useEffect(() => {
+    if (!canViewEmployeePortal && activeTab === "employee-portal") {
+      setActiveTab("requirements");
+    }
+  }, [canViewEmployeePortal, activeTab]);
 
   useEffect(() => {
     if (authenticated && adminEmail) {
@@ -3770,6 +3778,7 @@ export default function AdminDashboard() {
                     {isDashboardBootstrapping || loading ? "…" : unsuitableCandidates.length}
                   </Badge>
                 </button>
+                {canViewEmployeePortal && (
                 <button
                   onClick={() => setActiveTab("employee-portal")}
                   className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
@@ -3786,6 +3795,7 @@ export default function AdminDashboard() {
                         Array.from(new Set(allTestResults.map((t) => t.employeeId))).length}
                   </Badge>
                 </button>
+                )}
                 <button
                   onClick={() => setActiveTab("outbox")}
                   className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
@@ -4524,7 +4534,7 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                     </div>
-                ) : activeTab === "employee-portal" ? (
+                ) : activeTab === "employee-portal" && canViewEmployeePortal ? (
                   <div className="space-y-4">
                     <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/60 dark:bg-indigo-950/20 px-4 py-3 text-xs text-indigo-800 dark:text-indigo-200">
                       Showing employee data from <span className="font-bold">Resource_Question_Mapping.xlsx</span> merged with live portal test results.

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { signToken } from "@/lib/employee-auth";
 import { isRateLimited, getClientIp } from "@/lib/security";
 import { auditLogService } from "@/services/audit-log-service";
+import { authenticateAdminCredentials } from "@/lib/admin-accounts";
 
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request);
@@ -34,20 +35,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const adminPassword = process.env.ADMIN_PASSWORD || "12345";
-    if (password === adminPassword) {
+    const access = authenticateAdminCredentials(email, password);
+    if (access) {
       // 1 hour session time-bound token
       const token = signToken("admin", 1 * 60 * 60 * 1000);
       
       await auditLogService.addLog({
-        actorEmail: email,
+        actorEmail: access.email,
         action: "ADMIN_LOGIN_SUCCESS",
         target: "Admin Console",
-        details: "Admin session generated successfully",
+        details: access.canViewEmployeePortal
+          ? "Admin session generated successfully"
+          : "Admin session generated without Employee Portal access",
         ipAddress: ip
       });
 
-      return NextResponse.json({ status: "ok", token });
+      return NextResponse.json({
+        status: "ok",
+        token,
+        canViewEmployeePortal: access.canViewEmployeePortal,
+      });
     } else {
       await auditLogService.addLog({
         actorEmail: email,
