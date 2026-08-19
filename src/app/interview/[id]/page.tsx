@@ -1074,6 +1074,41 @@ export default function CandidatePortal() {
       return;
     }
 
+    const selectedName = {
+      aadhar: "Aadhar",
+      driving_license: "Driving License",
+      pan_card: "PAN",
+      voter_id: "Voter ID",
+    }[selectedIdType] || "selected ID";
+
+    const { default: Tesseract } = await import('tesseract.js');
+    try {
+      const result = await Tesseract.recognize(idImageBase64, 'eng', {
+        logger: () => undefined,
+      });
+      const text = (result?.data?.text || '').toLowerCase();
+      const idTypeHints: Record<string, string[]> = {
+        aadhar: ["aadhar", "aadhaar", "uidai", "unique identification"],
+        driving_license: ["driving", "license", "dl", "licence"],
+        pan_card: ["pan", "permanent account number", "income tax"],
+        voter_id: ["voter", "electoral", "epic"],
+      };
+      const hints = idTypeHints[selectedIdType] || [];
+      const matchesSelectedType = hints.some((keyword) => text.includes(keyword));
+      const foundOtherId = Object.entries(idTypeHints).some(([key, keywords]) => {
+        if (key === selectedIdType) return false;
+        return keywords.some((keyword) => text.includes(keyword));
+      });
+
+      if (hints.length > 0 && !matchesSelectedType && foundOtherId) {
+        setVerificationError(`Please verify using the ${selectedName} ID you selected. The uploaded document appears to be a different ID type.`);
+        setIsVerifying(false);
+        return;
+      }
+    } catch (ocrError) {
+      console.warn("ID OCR mismatch check failed, continuing with biometric verification.", ocrError);
+    }
+
     setIsVerifying(true);
     setVerificationError(null);
     setVerificationResult(null);

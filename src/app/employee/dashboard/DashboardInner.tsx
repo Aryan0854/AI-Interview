@@ -293,6 +293,9 @@ export function DashboardInner() {
                   ID: {employeeProfile.employee_id}
                 </p>
               )}
+              <p className="mt-2 text-sm font-medium text-indigo-100/90">
+                ✨ Welcome to your Infinite journey — keep learning, keep growing, and step into your next big breakthrough.
+              </p>
               <p className="text-indigo-200 text-sm mt-1.5">
                 {productQbEligible
                   ? "Your learning topics and assigned product question bank."

@@ -82,6 +82,7 @@ export default function EmployeeLearnPage() {
                 Employee ID: {employeeProfile.employee_id}
               </p>
             )}
+            <p className="mt-2 text-sm font-medium text-primary">✨ Welcome to your Infinite journey — pick a path and take the next bold step forward.</p>
             <p className="mt-2 text-sm text-muted-foreground leading-relaxed">Choose a subject and start a personalized learning path.</p>
           </div>
           <div className="inline-flex items-center gap-2 rounded-2xl border border-indigo-100 dark:border-slate-850 bg-gradient-to-r from-indigo-50 to-violet-50 dark:from-indigo-900/10 dark:to-violet-900/10 px-5 py-3 text-primary shadow-soft">
@@ -136,7 +137,7 @@ export default function EmployeeLearnPage() {
                   href={subject.href ?? `/employee/learn/${subject.id}`}
                   className="text-sm font-bold text-primary hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors flex items-center gap-1 group-hover:gap-2"
                 >
-                  Take test <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                  Explore <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </div>
             </Card>

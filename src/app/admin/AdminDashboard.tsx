@@ -2283,7 +2283,10 @@ export default function AdminDashboard() {
       if (!response.ok) throw new Error(data.error || "Failed to dispatch invite email");
 
       await loadEmails();
-      setActionSuccess(`Invitation email simulated & dispatched to ${email}! Secure assessment access is unlocked.`);
+      const successMessage = inviteType === "both"
+        ? `Combined technical + non-technical invitation email simulated & dispatched to ${email}! Secure assessment access is unlocked.`
+        : `Invitation email simulated & dispatched to ${email}! Secure assessment access is unlocked.`;
+      setActionSuccess(successMessage);
       setTimeout(() => setActionSuccess(null), 5000);
     } catch (error: any) {
       setActionError(error.message || "Failed to dispatch invite email.");

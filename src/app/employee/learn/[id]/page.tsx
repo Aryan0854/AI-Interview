@@ -249,7 +249,7 @@ export default function SubjectDetailPage() {
                       className="w-full gap-1 bg-primary hover:from-indigo-700 hover:to-violet-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/35 transition-all"
                       onClick={handleTakeTest(topic.id)}
                     >
-                      <Sparkles className="w-3 h-3" /> Take test →
+                      <Sparkles className="w-3 h-3" /> Explore →
                     </Button>
                   </div>
                 </Card>
