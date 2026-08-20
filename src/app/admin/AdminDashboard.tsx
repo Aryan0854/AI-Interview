@@ -65,7 +65,7 @@ import {
 import { formatProductDisplayName } from "@/lib/product-display-name";
 import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
 import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT } from "@/lib/skill-match";
-import { adminCanChangePassword, adminCanViewEmployeePortal } from "@/lib/admin-accounts";
+import { clearAdminAccessFlags, readAdminAccessFlags, storeAdminAccessFlags } from "@/lib/admin-accounts";
 
 function formatSyncAge(date: Date): string {
   const sec = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -399,6 +399,7 @@ function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respo
       window.sessionStorage.removeItem("resume-admin-authenticated");
       window.sessionStorage.removeItem("admin-email");
       window.sessionStorage.removeItem("admin_token");
+      clearAdminAccessFlags();
       window.location.reload();
     }
     return res;
@@ -548,8 +549,8 @@ export default function AdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
-  const canViewEmployeePortal = adminCanViewEmployeePortal(adminEmail);
-  const canChangePassword = adminCanChangePassword(adminEmail);
+  const [canViewEmployeePortal, setCanViewEmployeePortal] = useState(true);
+  const [canChangePassword, setCanChangePassword] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
   const [newPasswordInput, setNewPasswordInput] = useState("");
@@ -684,6 +685,7 @@ export default function AdminDashboard() {
   const [selectedResumeIds, setSelectedResumeIds] = useState<string[]>([]);
   const [selectedEmailIds, setSelectedEmailIds] = useState<string[]>([]);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [selectedJdIds, setSelectedJdIds] = useState<string[]>([]);
   const [selectedPortalEmployeeIds, setSelectedPortalEmployeeIds] = useState<string[]>([]);
 
   const [employees, setEmployees] = useState<any[]>([]);
@@ -730,6 +732,7 @@ export default function AdminDashboard() {
     setSelectedResumeIds([]);
     setSelectedEmailIds([]);
     setSelectedEmployeeIds([]);
+    setSelectedJdIds([]);
   }, [activeTab]);
 
   // General Action Loading states
@@ -752,6 +755,9 @@ export default function AdminDashboard() {
         setAdminEmail(storedEmail);
         setAuthenticated(true);
       }
+      const flags = readAdminAccessFlags();
+      setCanViewEmployeePortal(flags.canViewEmployeePortal);
+      setCanChangePassword(flags.canChangePassword);
       setPinnedJdId(readPinnedJdId());
     }
     setAuthInitialized(true);
@@ -763,9 +769,30 @@ export default function AdminDashboard() {
         window.sessionStorage.removeItem("resume-admin-authenticated");
         window.sessionStorage.removeItem("admin-email");
         window.sessionStorage.removeItem("admin_token");
+        clearAdminAccessFlags();
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!adminEmail) return;
+    void (async () => {
+      try {
+        const res = await adminFetch(`/api/admin/auth/validate?email=${encodeURIComponent(adminEmail)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return;
+        const access = {
+          canViewEmployeePortal: data.canViewEmployeePortal !== false,
+          canChangePassword: Boolean(data.canChangePassword),
+        };
+        storeAdminAccessFlags(access);
+        setCanViewEmployeePortal(access.canViewEmployeePortal);
+        setCanChangePassword(access.canChangePassword);
+      } catch {
+        // Keep session flags if the access lookup fails.
+      }
+    })();
+  }, [adminEmail]);
 
   useEffect(() => {
     if (!authenticated || !adminEmail) {
@@ -3119,6 +3146,43 @@ export default function AdminDashboard() {
       return;
     }
 
+    if (targetId === "bulk-jds") {
+      setActionLoading("bulk-jds");
+      setActionError(null);
+      try {
+        const idsToDelete = [...selectedJdIds];
+        const response = await fetch("/api/admin/jd", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: idsToDelete }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to delete selected requirements");
+
+        if (selectedJdId && idsToDelete.includes(selectedJdId)) {
+          setSelectedJdId("all");
+          setJdSavedText("");
+          setJdText("");
+        }
+        if (pinnedJdId && idsToDelete.includes(pinnedJdId)) {
+          try {
+            localStorage.removeItem(PINNED_JD_STORAGE_KEY);
+          } catch {}
+          setPinnedJdId("");
+        }
+
+        setActionSuccess(`${idsToDelete.length} requirement(s) deleted successfully.`);
+        setSelectedJdIds([]);
+        setTimeout(() => setActionSuccess(null), 3000);
+        await loadJobDescriptions(adminEmail);
+      } catch (error: any) {
+        setActionError(error.message || "Failed to delete requirements.");
+      } finally {
+        setActionLoading(null);
+      }
+      return;
+    }
+
     if (targetId === "bulk-emails") {
       setActionLoading("bulk-emails");
       setActionError(null);
@@ -3535,6 +3599,106 @@ export default function AdminDashboard() {
     }
     return true;
   });
+
+  const visibleRequirementRows = useMemo(() => {
+    const baseJds = [...filteredJds].filter((j) => {
+      const searchLower = requirementSearch.toLowerCase();
+      const displayName = j.fileName || "";
+      const email = j.rmEmail || "";
+      const text = j.jdText || "";
+      const matchesSearch =
+        !searchLower ||
+        displayName.toLowerCase().includes(searchLower) ||
+        email.toLowerCase().includes(searchLower) ||
+        text.toLowerCase().includes(searchLower);
+      if (!matchesSearch) return false;
+
+      if (requirementDateFilter !== "all") {
+        if (requirementCreatedDayKey(j.createdAt) !== requirementDateFilter) return false;
+      }
+
+      if (requirementSkillFilter !== "all") {
+        const skills = extractSkillsFromText(j.jdText).map((s) => s.toLowerCase());
+        if (!skills.includes(requirementSkillFilter.toLowerCase())) return false;
+      }
+
+      return true;
+    });
+
+    const textGroups: { [key: string]: any[] } = {};
+    baseJds.forEach((j) => {
+      const groupKey = requirementDuplicateKey(j);
+      if (!textGroups[groupKey]) {
+        textGroups[groupKey] = [];
+      }
+      textGroups[groupKey].push(j);
+    });
+
+    const ogJds: any[] = [];
+    const duplicatesMap = new Map<string, any[]>();
+    Object.values(textGroups).forEach((group) => {
+      group.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const og = group[0];
+      ogJds.push(og);
+      if (group.length > 1) {
+        duplicatesMap.set(og.id, group.slice(1, 2));
+      }
+    });
+
+    ogJds.sort((a, b) => {
+      const aPinned = a.id === pinnedJdId || isNamedPinnedJd(a) ? 1 : 0;
+      const bPinned = b.id === pinnedJdId || isNamedPinnedJd(b) ? 1 : 0;
+      if (bPinned !== aPinned) return bPinned - aPinned;
+
+      const aTime = new Date(a.createdAt || 0).getTime();
+      const bTime = new Date(b.createdAt || 0).getTime();
+      if (bTime !== aTime) return bTime - aTime;
+
+      const aSkills = extractSkillsFromText(a.jdText).length;
+      const bSkills = extractSkillsFromText(b.jdText).length;
+      if (aSkills === 0 && bSkills > 0) return 1;
+      if (bSkills === 0 && aSkills > 0) return -1;
+      return bSkills - aSkills;
+    });
+
+    const orderedJds: { jd: any; isDuplicate: boolean; ogJd?: any }[] = [];
+    ogJds.forEach((og) => {
+      orderedJds.push({ jd: og, isDuplicate: false });
+      const dups = duplicatesMap.get(og.id);
+      if (dups) {
+        dups.forEach((dup) => {
+          orderedJds.push({ jd: dup, isDuplicate: true, ogJd: og });
+        });
+      }
+    });
+    return orderedJds;
+  }, [filteredJds, requirementSearch, requirementDateFilter, requirementSkillFilter, pinnedJdId]);
+
+  const visibleRequirementIds = visibleRequirementRows.map((row) => row.jd.id);
+
+  const handleToggleJdSelect = (id: string) => {
+    setSelectedJdIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleAllJds = () => {
+    const allSelected =
+      visibleRequirementIds.length > 0 &&
+      visibleRequirementIds.every((id) => selectedJdIds.includes(id));
+    if (allSelected) {
+      setSelectedJdIds((prev) => prev.filter((id) => !visibleRequirementIds.includes(id)));
+    } else {
+      setSelectedJdIds((prev) => Array.from(new Set([...prev, ...visibleRequirementIds])));
+    }
+  };
+
+  const handleBulkDeleteJds = () => {
+    if (selectedJdIds.length === 0) return;
+    setDeleteTargetId("bulk-jds");
+    setDeletePasswordInput("");
+    setDeleteModalError(null);
+  };
 
   const requirementFilterOptions = useMemo(() => {
     const dates = new Map<string, string>();
@@ -3956,12 +4120,48 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
+                    {selectedJdIds.length > 0 && (
+                      <div className="flex items-center justify-between p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
+                        <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                          {selectedJdIds.length} requirement{selectedJdIds.length > 1 ? "s" : ""} selected for bulk actions
+                        </span>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={actionLoading === "bulk-jds"}
+                          onClick={handleBulkDeleteJds}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-500/25"
+                        >
+                          {actionLoading === "bulk-jds" ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-3.5 h-3.5" /> Delete Selected
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+
                     {/* Requirements Table */}
                     <div className="border border-border rounded-2xl overflow-hidden">
                       <div className="overflow-auto max-h-[500px]">
                         <table className="w-full text-left border-collapse text-xs">
                           <thead>
                             <tr className="bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-border text-slate-500 font-extrabold uppercase tracking-wider text-[10px] sticky top-0 z-10">
+                              <th className="p-3 w-10 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    visibleRequirementIds.length > 0 &&
+                                    visibleRequirementIds.every((id) => selectedJdIds.includes(id))
+                                  }
+                                  onChange={handleToggleAllJds}
+                                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                />
+                              </th>
                               <th className="p-3 w-8"></th>
                               <th className="p-3 w-20">BR ID</th>
                               <th className="p-3 w-1/4">Requirement / File</th>
@@ -3972,83 +4172,7 @@ export default function AdminDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-800/50">
-                            {(() => {
-                              const baseJds = [...filteredJds].filter((j) => {
-                                const searchLower = requirementSearch.toLowerCase();
-                                const displayName = j.fileName || "";
-                                const email = j.rmEmail || "";
-                                const text = j.jdText || "";
-                                const matchesSearch =
-                                  !searchLower ||
-                                  displayName.toLowerCase().includes(searchLower) ||
-                                  email.toLowerCase().includes(searchLower) ||
-                                  text.toLowerCase().includes(searchLower);
-                                if (!matchesSearch) return false;
-
-                                if (requirementDateFilter !== "all") {
-                                  if (requirementCreatedDayKey(j.createdAt) !== requirementDateFilter) return false;
-                                }
-
-                                if (requirementSkillFilter !== "all") {
-                                  const skills = extractSkillsFromText(j.jdText).map((s) => s.toLowerCase());
-                                  if (!skills.includes(requirementSkillFilter.toLowerCase())) return false;
-                                }
-
-                                return true;
-                              });
-
-                              // Group JDs by text to identify duplicates (keep short/empty texts unique)
-                              const textGroups: { [key: string]: any[] } = {};
-                              baseJds.forEach((j) => {
-                                const groupKey = requirementDuplicateKey(j);
-                                if (!textGroups[groupKey]) {
-                                  textGroups[groupKey] = [];
-                                }
-                                textGroups[groupKey].push(j);
-                              });
-
-                              // For each group, sort by createdAt ascending (oldest is OG)
-                              const ogJds: any[] = [];
-                              const duplicatesMap = new Map<string, any[]>();
-                              Object.values(textGroups).forEach((group) => {
-                                group.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-                                const og = group[0];
-                                ogJds.push(og);
-                                if (group.length > 1) {
-                                  duplicatesMap.set(og.id, group.slice(1, 2));
-                                }
-                              });
-
-                              // Sort OG JDs: newest first, then by extracted skill count
-                              ogJds.sort((a, b) => {
-                                const aPinned = a.id === pinnedJdId || isNamedPinnedJd(a) ? 1 : 0;
-                                const bPinned = b.id === pinnedJdId || isNamedPinnedJd(b) ? 1 : 0;
-                                if (bPinned !== aPinned) return bPinned - aPinned;
-
-                                const aTime = new Date(a.createdAt || 0).getTime();
-                                const bTime = new Date(b.createdAt || 0).getTime();
-                                if (bTime !== aTime) return bTime - aTime;
-
-                                const aSkills = extractSkillsFromText(a.jdText).length;
-                                const bSkills = extractSkillsFromText(b.jdText).length;
-                                if (aSkills === 0 && bSkills > 0) return 1;
-                                if (bSkills === 0 && aSkills > 0) return -1;
-                                return bSkills - aSkills;
-                              });
-
-                              // Flatten into final rendering order: OG followed immediately by duplicates
-                              const orderedJds: { jd: any; isDuplicate: boolean; ogJd?: any }[] = [];
-                              ogJds.forEach((og) => {
-                                orderedJds.push({ jd: og, isDuplicate: false });
-                                const dups = duplicatesMap.get(og.id);
-                                if (dups) {
-                                  dups.forEach((dup) => {
-                                    orderedJds.push({ jd: dup, isDuplicate: true, ogJd: og });
-                                  });
-                                }
-                              });
-
-                              return orderedJds.map(({ jd: j, isDuplicate, ogJd }) => {
+                            {visibleRequirementRows.map(({ jd: j, isDuplicate, ogJd }) => {
                                 let brNo = "N/A";
                                 let filename = j.fileName || "Pasted Job Description";
                                 if (filename.includes(" | ")) {
@@ -4078,10 +4202,20 @@ export default function AdminDashboard() {
                                 return (
                                   <React.Fragment key={j.id}>
                                     <tr className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150 ${
+                                      selectedJdIds.includes(j.id) ? "bg-indigo-50/20 dark:bg-indigo-950/20" : ""
+                                    } ${
                                       isActive ? "bg-indigo-50/10 dark:bg-indigo-950/10" : ""
                                     } ${
                                       isDuplicate ? "bg-amber-50/5 dark:bg-amber-950/5 border-l-2 border-amber-400 dark:border-amber-550" : ""
                                     }`}>
+                                      <td className="p-3 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedJdIds.includes(j.id)}
+                                          onChange={() => handleToggleJdSelect(j.id)}
+                                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                        />
+                                      </td>
                                       <td className="p-3 text-center">
                                         <button
                                           onClick={() => setExpandedJdId(isExpanded ? null : j.id)}
@@ -4328,7 +4462,7 @@ export default function AdminDashboard() {
                                     </tr>
                                     {isExpanded && (
                                       <tr className="bg-slate-50/40 dark:bg-slate-900/10">
-                                        <td colSpan={7} className="p-4 border-t border-border/50 animate-fade-in">
+                                        <td colSpan={8} className="p-4 border-t border-border/50 animate-fade-in">
                                           <div className="space-y-3 max-w-4xl mx-auto">
                                             <div>
                                               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Full Job Description</h4>
@@ -4354,11 +4488,10 @@ export default function AdminDashboard() {
                                     )}
                                   </React.Fragment>
                                 );
-                              });
-                            })()}
-                            {jds.length === 0 && (
+                              })}
+                            {visibleRequirementRows.length === 0 && (
                               <tr>
-                                <td colSpan={7} className="text-center py-12 text-slate-400 italic">
+                                <td colSpan={8} className="text-center py-12 text-slate-400 italic">
                                   No Job Descriptions / BRs uploaded or scanned yet.
                                 </td>
                               </tr>
@@ -6764,6 +6897,7 @@ export default function AdminDashboard() {
                   {deleteTargetId === "bulk" ? "Delete Selected Records" : 
                    deleteTargetId === "bulk-emails" ? "Delete Selected Email Logs" :
                    deleteTargetId === "bulk-employees-pool" ? "Delete Selected Employees" :
+                   deleteTargetId === "bulk-jds" ? "Delete Selected Requirements" :
                    deleteTargetId === "bulk-portal-videos" ? "Delete Selected Proctoring Videos" :
                    deleteTargetId === "clear-outbox" ? "Clear Email Outbox" :
                    deleteTargetId.startsWith("outbox-log:") ? "Delete Email Log" : 
@@ -6787,6 +6921,8 @@ export default function AdminDashboard() {
                   ? `This action is permanent and will delete the ${selectedEmailIds.length} selected simulated invitation email outbox logs.`
                   : deleteTargetId === "bulk-employees-pool"
                   ? `This action is permanent and will delete the ${selectedEmployeeIds.length} selected corporate pool employee records.`
+                  : deleteTargetId === "bulk-jds"
+                  ? `This action is permanent and will delete the ${selectedJdIds.length} selected job requirements (BR / JD).`
                   : deleteTargetId === "bulk-portal-videos"
                   ? `This will permanently delete proctoring videos for ${selectedPortalVideoTargets.length} selected employee(s). Test scores, answers, and status will NOT be changed.`
                   : deleteTargetId === "clear-outbox"

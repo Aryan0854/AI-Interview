@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateAdminRequest } from "@/lib/employee-auth";
 import { getClientIp, isRateLimited } from "@/lib/security";
 import { auditLogService } from "@/services/audit-log-service";
-import { adminCanChangePassword } from "@/lib/admin-accounts";
-import { changeNamedAdminPassword } from "@/lib/admin-accounts-server";
+import { adminCanChangePassword, changeNamedAdminPassword } from "@/lib/admin-accounts-server";
 
 export async function POST(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -25,7 +24,7 @@ export async function POST(request: NextRequest) {
     const currentPassword = String(body.currentPassword ?? "");
     const newPassword = String(body.newPassword ?? "");
 
-    if (!adminCanChangePassword(email)) {
+    if (!(await adminCanChangePassword(email))) {
       await auditLogService.addLog({
         actorEmail: email || "unknown",
         action: "ADMIN_PASSWORD_CHANGE_DENIED",

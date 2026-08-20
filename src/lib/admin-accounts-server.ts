@@ -1,29 +1,33 @@
 import { supabase } from "@/lib/db";
 import { readPersistedJson, writePersistedJson } from "@/lib/runtime-data";
 import { hashPassword, verifyPassword } from "@/lib/employee-auth";
-import { getAdminAccess, adminCanChangePassword, type AdminAccess } from "@/lib/admin-accounts";
+import type { AdminAccess } from "@/lib/admin-accounts";
 
 const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "12345";
-const TAG_PASSWORD = "56789";
-const PASSWORD_STORE_FILE = "admin-named-passwords.json";
-const PASSWORD_SETTINGS_KEY = "admin_named_passwords";
+const SUPER_ADMIN_EMAIL = "admin@infinite.com";
+const ACCOUNTS_SETTINGS_KEY = "admin_named_accounts";
+const LEGACY_PASSWORD_SETTINGS_KEY = "admin_named_passwords";
+const ACCOUNTS_STORE_FILE = "admin-named-accounts.json";
 
 type StoredSecret = { hash: string; salt: string };
-type SecretMap = Record<string, StoredSecret>;
 
-const NAMED_ADMIN_PASSWORDS: Record<string, string> = {
-  "ramendras@infinite.com": TAG_PASSWORD,
-  "nehalathar@infinite.com": TAG_PASSWORD,
-  "shwethab@infinite.com": TAG_PASSWORD,
+export type NamedAdminRecord = {
+  hash?: string;
+  salt?: string;
+  canViewEmployeePortal: boolean;
+  canChangePassword: boolean;
+  canViewOrgScreeningData: boolean;
 };
 
-let secretCache: { at: number; value: SecretMap } | null = null;
+type NamedAdminMap = Record<string, NamedAdminRecord>;
+
+let accountCache: { at: number; value: NamedAdminMap } | null = null;
 
 function cleanEmail(email: string): string {
   return String(email || "").trim().toLowerCase();
 }
 
-function secretLooksValid(stored?: StoredSecret): stored is StoredSecret {
+function secretLooksValid(stored?: { hash?: string; salt?: string }): stored is StoredSecret {
   return Boolean(stored?.hash && stored?.salt);
 }
 
@@ -35,52 +39,143 @@ function matchesStoredPassword(password: string, stored: StoredSecret): boolean 
   }
 }
 
-async function loadSecrets(): Promise<SecretMap> {
-  if (secretCache && Date.now() - secretCache.at < 4000) return secretCache.value;
+function normalizeRecord(raw: any): { record: NamedAdminRecord; strippedPlaintext: boolean } {
+  const plaintext = String(raw?.password || "").trim();
+  const hashed = plaintext ? hashPassword(plaintext) : null;
+  return {
+    record: {
+      hash: secretLooksValid(raw) ? raw.hash : hashed?.hash,
+      salt: secretLooksValid(raw) ? raw.salt : hashed?.salt,
+      canViewEmployeePortal: raw?.canViewEmployeePortal === true,
+      canChangePassword: raw?.canChangePassword !== false,
+      canViewOrgScreeningData: raw?.canViewOrgScreeningData !== false,
+    },
+    strippedPlaintext: Boolean(plaintext),
+  };
+}
 
-  let value: SecretMap = {};
+function parseAccountMap(value: unknown): { accounts: NamedAdminMap; strippedPlaintext: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { accounts: {}, strippedPlaintext: false };
+  }
+  const accounts: NamedAdminMap = {};
+  let strippedPlaintext = false;
+  for (const [email, raw] of Object.entries(value as Record<string, any>)) {
+    const user = cleanEmail(email);
+    if (!user.endsWith("@infinite.com")) continue;
+    const parsed = normalizeRecord(raw);
+    accounts[user] = parsed.record;
+    if (parsed.strippedPlaintext) strippedPlaintext = true;
+  }
+  return { accounts, strippedPlaintext };
+}
+
+async function readSettingsMap(key: string): Promise<Record<string, any>> {
   try {
     const { data, error } = await supabase
       .from("portal_settings")
       .select("value")
-      .eq("key", PASSWORD_SETTINGS_KEY)
+      .eq("key", key)
       .maybeSingle();
-    if (!error && data?.value && typeof data.value === "object") {
-      value = data.value as SecretMap;
-    }
+    if (error || !data?.value || typeof data.value !== "object") return {};
+    return data.value as Record<string, any>;
   } catch (err) {
-    console.warn("Failed to load named admin passwords from Supabase:", err);
+    console.warn(`Failed to load ${key} from Supabase:`, err);
+    return {};
   }
-
-  if (Object.keys(value).length === 0) {
-    try {
-      const raw = await readPersistedJson(PASSWORD_STORE_FILE);
-      if (raw) value = JSON.parse(raw) as SecretMap;
-    } catch {
-      value = {};
-    }
-  }
-
-  secretCache = { at: Date.now(), value };
-  return value;
 }
 
-async function saveSecrets(value: SecretMap): Promise<void> {
-  secretCache = { at: Date.now(), value };
+async function loadNamedAdminAccounts(): Promise<NamedAdminMap> {
+  if (accountCache && Date.now() - accountCache.at < 4000) return accountCache.value;
+
+  const parsed = parseAccountMap(await readSettingsMap(ACCOUNTS_SETTINGS_KEY));
+  let accounts = parsed.accounts;
+  let dirty = parsed.strippedPlaintext;
+
+  if (Object.keys(accounts).length === 0) {
+    try {
+      const raw = await readPersistedJson(ACCOUNTS_STORE_FILE);
+      if (raw) {
+        const fromFile = parseAccountMap(JSON.parse(raw));
+        accounts = fromFile.accounts;
+        dirty = dirty || fromFile.strippedPlaintext;
+      }
+    } catch {
+      accounts = {};
+    }
+  }
+
+  const legacySecrets = await readSettingsMap(LEGACY_PASSWORD_SETTINGS_KEY);
+  for (const [email, secret] of Object.entries(legacySecrets)) {
+    const user = cleanEmail(email);
+    if (!accounts[user] || !secretLooksValid(secret) || secretLooksValid(accounts[user])) continue;
+    accounts[user] = {
+      ...accounts[user],
+      hash: secret.hash,
+      salt: secret.salt,
+    };
+    dirty = true;
+  }
+
+  if (dirty) {
+    await saveNamedAdminAccounts(accounts);
+  } else {
+    accountCache = { at: Date.now(), value: accounts };
+  }
+
+  return accounts;
+}
+
+async function saveNamedAdminAccounts(value: NamedAdminMap): Promise<void> {
+  accountCache = { at: Date.now(), value };
   try {
     const { error } = await supabase.from("portal_settings").upsert({
-      key: PASSWORD_SETTINGS_KEY,
+      key: ACCOUNTS_SETTINGS_KEY,
       value,
     });
     if (error) throw error;
   } catch (err) {
-    console.warn("Failed to save named admin passwords to Supabase:", err);
+    console.warn("Failed to save named admin accounts to Supabase:", err);
   }
   try {
-    await writePersistedJson(PASSWORD_STORE_FILE, JSON.stringify(value, null, 2));
+    await writePersistedJson(ACCOUNTS_STORE_FILE, JSON.stringify(value, null, 2));
   } catch (err) {
-    console.warn("Failed to persist named admin passwords locally:", err);
+    console.warn("Failed to persist named admin accounts locally:", err);
   }
+}
+
+export async function getNamedAdminRecord(email: string): Promise<NamedAdminRecord | null> {
+  const accounts = await loadNamedAdminAccounts();
+  return accounts[cleanEmail(email)] || null;
+}
+
+export async function getAdminAccess(email: string): Promise<AdminAccess> {
+  const user = cleanEmail(email);
+  const named = await getNamedAdminRecord(user);
+  if (named) {
+    return {
+      email: user,
+      canViewEmployeePortal: named.canViewEmployeePortal,
+      canChangePassword: named.canChangePassword,
+    };
+  }
+  return {
+    email: user,
+    canViewEmployeePortal: true,
+    canChangePassword: false,
+  };
+}
+
+export async function adminCanChangePassword(email: string): Promise<boolean> {
+  const named = await getNamedAdminRecord(email);
+  return Boolean(named?.canChangePassword);
+}
+
+export async function adminCanViewOrgScreeningData(email: string): Promise<boolean> {
+  const user = cleanEmail(email);
+  if (user === SUPER_ADMIN_EMAIL) return true;
+  const named = await getNamedAdminRecord(user);
+  return Boolean(named?.canViewOrgScreeningData);
 }
 
 export async function authenticateAdminCredentials(
@@ -90,19 +185,14 @@ export async function authenticateAdminCredentials(
   const user = cleanEmail(email);
   if (!user.endsWith("@infinite.com") || !password) return null;
 
-  const namedPassword = NAMED_ADMIN_PASSWORDS[user];
-  if (namedPassword) {
-    const secrets = await loadSecrets();
-    const stored = secrets[user];
-    const ok = secretLooksValid(stored)
-      ? matchesStoredPassword(password, stored)
-      : password === namedPassword;
-    if (!ok) return null;
-    return getAdminAccess(user);
+  const named = await getNamedAdminRecord(user);
+  if (named) {
+    if (!secretLooksValid(named) || !matchesStoredPassword(password, named)) return null;
+    return await getAdminAccess(user);
   }
 
   if (password !== DEFAULT_ADMIN_PASSWORD) return null;
-  return getAdminAccess(user);
+  return await getAdminAccess(user);
 }
 
 export async function changeNamedAdminPassword(
@@ -111,7 +201,8 @@ export async function changeNamedAdminPassword(
   newPassword: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = cleanEmail(email);
-  if (!adminCanChangePassword(user)) {
+  const named = await getNamedAdminRecord(user);
+  if (!named?.canChangePassword) {
     return { ok: false, error: "This account cannot change its password here." };
   }
   const next = String(newPassword || "");
@@ -124,8 +215,12 @@ export async function changeNamedAdminPassword(
     return { ok: false, error: "Current password is incorrect." };
   }
 
-  const secrets = await loadSecrets();
-  secrets[user] = hashPassword(next);
-  await saveSecrets(secrets);
+  const accounts = await loadNamedAdminAccounts();
+  const current = accounts[user];
+  if (!current) {
+    return { ok: false, error: "This account cannot change its password here." };
+  }
+  accounts[user] = { ...current, ...hashPassword(next) };
+  await saveNamedAdminAccounts(accounts);
   return { ok: true };
 }

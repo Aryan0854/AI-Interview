@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
         status: "ok",
         token,
         canViewEmployeePortal: access.canViewEmployeePortal,
+        canChangePassword: access.canChangePassword,
       });
     } else {
       await auditLogService.addLog({

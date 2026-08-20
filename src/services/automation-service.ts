@@ -15,6 +15,7 @@ import {
 } from '@/lib/docs-storage';
 import { writePersistedJson } from '@/lib/runtime-data';
 import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
+import { isRequirementDeleted, loadDeletedRequirements } from '@/lib/deleted-requirements';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -374,8 +375,21 @@ async function persistMasterRequirements(
   localJds: any[]
 ): Promise<number> {
   const merged = mergeBrRequirements(parseBrWorkbook(workbook, filename));
-  const upsertRows = merged.map((row) => {
+  const deleted = await loadDeletedRequirements();
+  const upsertRows = merged.flatMap((row) => {
     const jdUuid = brIdToUuid(row.autoReqId);
+    if (
+      isRequirementDeleted(deleted, {
+        id: jdUuid,
+        brId: row.autoReqId,
+        fileName: `${row.autoReqId} | ${filename}`,
+        jdText: row.composedText,
+      })
+    ) {
+      const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
+      if (existingIdx !== -1) localJds.splice(existingIdx, 1);
+      return [];
+    }
     const newLocalJd = {
       id: jdUuid,
       jdText: row.composedText,
@@ -393,13 +407,13 @@ async function persistMasterRequirements(
     } else {
       localJds.push(newLocalJd);
     }
-    return {
+    return [{
       id: jdUuid,
       jd_text: newLocalJd.jdText,
       rm_email: newLocalJd.rmEmail,
       file_name: newLocalJd.fileName,
       created_at: localJds.find((j: any) => j.id === jdUuid)?.createdAt || newLocalJd.createdAt,
-    };
+    }];
   });
 
   let processed = 0;

@@ -11,7 +11,7 @@ import { auditLogService } from "@/services/audit-log-service";
 import { writeLog } from "@/lib/structured-logger";
 
 import { cacheStore } from "@/lib/cache-store";
-import { adminCanViewOrgScreeningData } from "@/lib/admin-accounts";
+import { adminCanViewOrgScreeningData } from "@/lib/admin-accounts-server";
 
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 
     // Filter resumes by RM unless this login is allowed to see org-wide screening data
     let filteredResumes = resumes;
-    if (email && !adminCanViewOrgScreeningData(email)) {
+    if (email && !(await adminCanViewOrgScreeningData(email))) {
       filteredResumes = resumes.filter(
         (resume) => resume.report?.rmEmail?.toLowerCase().trim() === email
       );

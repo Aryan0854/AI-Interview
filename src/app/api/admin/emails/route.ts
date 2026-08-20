@@ -7,7 +7,7 @@ import { readFile, writeFile } from 'fs/promises';
 import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { writeLog } from '@/lib/structured-logger';
 import { allowLocalDataFallback } from '@/lib/db-mode';
-import { adminCanViewOrgScreeningData } from '@/lib/admin-accounts';
+import { adminCanViewOrgScreeningData } from '@/lib/admin-accounts-server';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -56,8 +56,8 @@ function sortEmails(emails: any[]) {
   );
 }
 
-function filterByRm(emails: any[], email: string | null) {
-  if (!email || adminCanViewOrgScreeningData(email)) return emails;
+async function filterByRm(emails: any[], email: string | null) {
+  if (!email || (await adminCanViewOrgScreeningData(email))) return emails;
   return emails.filter((item) => item.rmEmail?.toLowerCase().trim() === email);
 }
 
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
       combined = await readLocalEmails();
     }
 
-    combined = sortEmails(filterByRm(combined, email));
+    combined = sortEmails(await filterByRm(combined, email));
     return NextResponse.json({ emails: combined });
   } catch (error: any) {
     console.error("Failed to read emails outbox:", error);
@@ -162,7 +162,7 @@ export async function DELETE(request: NextRequest) {
     const email = url.searchParams.get("email")?.toLowerCase().trim() || null;
     return NextResponse.json({
       success: true,
-      emails: sortEmails(filterByRm(remaining, email)),
+      emails: sortEmails(await filterByRm(remaining, email)),
       deletedCount: ids.length,
     });
   } catch (error: any) {
