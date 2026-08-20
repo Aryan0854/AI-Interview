@@ -492,5 +492,12 @@ export async function buildResourcePortalEmployees(
     }
   }
 
-  return mergeResourcePortalData(profileRows, allTestResults, manifest);
+  return mergeResourcePortalData(profileRows, allTestResults, manifest).sort((a, b) => {
+    const nameCmp = String(a.full_name || "").localeCompare(String(b.full_name || ""), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+    if (nameCmp !== 0) return nameCmp;
+    return String(a.employee_id || "").localeCompare(String(b.employee_id || ""), undefined, { numeric: true });
+  });
 }

@@ -13,9 +13,10 @@ import { getSupabaseConfig, loadProjectEnv } from "./load-env";
 const ROOT = process.cwd();
 const args = process.argv.slice(2);
 const fileArg = args.find((a) => a.startsWith("--file="));
+const scoresOnly = args.includes("--scores-only");
 const sourceFile =
   fileArg?.split("=").slice(1).join("=") ||
-  join(process.env.USERPROFILE || "", "Downloads", "employee_portal_test_results_2026-08-19.xlsx");
+  join(ROOT, "employee_portal_test_results_2026-08-19.xlsx");
 
 loadProjectEnv(ROOT);
 const { url, key } = getSupabaseConfig();
@@ -226,7 +227,7 @@ async function main() {
       completedOn: parseCompletedOn(cellText(row.getCell(9).value)),
       flags: Math.max(flags, violations.length),
       violations,
-      qa: parseQaBlock(cellText(row.getCell(14).value)),
+      qa: scoresOnly ? [] : parseQaBlock(cellText(row.getCell(14).value)),
     });
   });
 
@@ -286,8 +287,10 @@ async function main() {
     if (qErr) throw qErr;
     const qList = questions || [];
     const qByIndex = new Map(qList.map((q) => [Number(q.question_index), q]));
-    const details = (detailsByEmp.get(row.employeeId) || []).sort((a, b) => a.questionNum - b.questionNum);
-    const mergedAnswers: ParsedAnswer[] = [...row.qa];
+    const details = scoresOnly
+      ? []
+      : (detailsByEmp.get(row.employeeId) || []).sort((a, b) => a.questionNum - b.questionNum);
+    const mergedAnswers: ParsedAnswer[] = scoresOnly ? [] : [...row.qa];
     for (const detail of details) {
       if (!detail.selected || /^not answered$/i.test(detail.selected) || detail.selected === "—") continue;
       const already = mergedAnswers.some(
@@ -357,15 +360,17 @@ async function main() {
           }
         : null;
 
-    await supabase.from("test_attempts").delete().eq("test_id", test.id);
     let attemptError = false;
-    for (let i = 0; i < attempts.length; i += 50) {
-      const chunk = attempts.slice(i, i + 50);
-      const { error } = await supabase.from("test_attempts").insert(chunk);
-      if (error) {
-        console.error(`Attempts failed for ${row.employeeId}:`, error.message);
-        attemptError = true;
-        break;
+    if (!scoresOnly) {
+      await supabase.from("test_attempts").delete().eq("test_id", test.id);
+      for (let i = 0; i < attempts.length; i += 50) {
+        const chunk = attempts.slice(i, i + 50);
+        const { error } = await supabase.from("test_attempts").insert(chunk);
+        if (error) {
+          console.error(`Attempts failed for ${row.employeeId}:`, error.message);
+          attemptError = true;
+          break;
+        }
       }
     }
     if (attemptError) {

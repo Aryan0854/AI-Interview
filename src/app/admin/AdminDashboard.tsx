@@ -1293,12 +1293,12 @@ export default function AdminDashboard() {
     });
 
     return filtered.sort((a, b) => {
-      const aAt = portalPrimaryCompletedAt(a);
-      const bAt = portalPrimaryCompletedAt(b);
-      const aTime = aAt ? new Date(aAt).getTime() : 0;
-      const bTime = bAt ? new Date(bAt).getTime() : 0;
-      if (bTime !== aTime) return bTime - aTime;
-      return String(a.employee_id || "").localeCompare(String(b.employee_id || ""));
+      const nameCmp = portalEmployeeName(a).localeCompare(portalEmployeeName(b), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      if (nameCmp !== 0) return nameCmp;
+      return String(a.employee_id || "").localeCompare(String(b.employee_id || ""), undefined, { numeric: true });
     });
   }, [resourcePortalEmployees, testResultsSearch, testStatusFilter, portalCompletedDateFilter]);
 

@@ -53,3 +53,6 @@ scratch/
 
 # Kilo audit tool directory
 .kilo/
+
+# Portal click-by-click overlay is generated locally; live data is in Supabase
+src/data/portal-question-answers.json
