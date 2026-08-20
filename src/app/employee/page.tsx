@@ -25,7 +25,6 @@ export default function EmployeeLoginPage() {
   const [loading, setLoading] = useState(initialState.loading);
   const [error, setError] = useState(initialState.error);
   const [info, setInfo] = useState(initialState.info);
-  const [showOutlookModal, setShowOutlookModal] = useState(false);
   const [isResetPassword, setIsResetPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetNewPassword, setResetNewPassword] = useState("");
@@ -50,6 +49,10 @@ export default function EmployeeLoginPage() {
       const reason = searchParams.get("reason");
       if (reason === "inactivity") {
         setError("You have been logged out due to inactivity.");
+      }
+      const ssoError = searchParams.get("sso_error");
+      if (ssoError) {
+        setError(ssoError);
       }
       const organization = searchParams.get("org");
       if (organization) {
@@ -124,50 +127,12 @@ export default function EmployeeLoginPage() {
     }
   };
 
-  const handleOutlookSSO = (e: React.MouseEvent) => {
+  const handleMicrosoftSSO = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setShowOutlookModal(true);
-  };
-
-  const handleOutlookSSOSubmit = async (email: string) => {
-    setShowOutlookModal(false);
-    setLoading(true);
     setError("");
-    setInfo("Outlook identity verified. Unlocking portal access...");
-
-    try {
-      const response = await fetch("/api/employee/auth/outlook_sso", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      let result: any = null;
-      const contentType = response.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        result = await response.json();
-      }
-
-      if (!response.ok) {
-        setError(result?.error || `Outlook SSO authentication failed (Server returned status ${response.status}).`);
-        setLoading(false);
-        return;
-      }
-
-      if (result && result.status === "ok" && result.token) {
-        window.localStorage.setItem("employee_token", result.token);
-        setInfo("Access granted. Loading your dashboard...");
-        router.push("/employee/dashboard");
-        return;
-      }
-
-      setError("Failed to process your SSO token.");
-    } catch (err: any) {
-      setError(err.message || "An unexpected error occurred during SSO login.");
-    } finally {
-      setLoading(false);
-    }
+    setInfo("Redirecting to Microsoft…");
+    window.location.assign("/api/employee/auth/microsoft");
   };
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -437,7 +402,7 @@ export default function EmployeeLoginPage() {
             {/* Outlook SSO Button */}
             <Button
               type="button"
-              onClick={handleOutlookSSO}
+              onClick={handleMicrosoftSSO}
               disabled={loading}
               className="w-full px-4 py-2.5 rounded-xl border border-slate-700/80 hover:border-slate-500 bg-slate-900/40 hover:bg-slate-900 text-white font-bold transition-all duration-200 flex items-center justify-center gap-2.5 relative z-10 shadow-sm"
             >
@@ -447,7 +412,7 @@ export default function EmployeeLoginPage() {
                 <path d="M0 12H11V23H0V12Z" fill="#00A4EF"/>
                 <path d="M12 12H23V23H12V12Z" fill="#FFB900"/>
               </svg>
-              <span className="text-xs">Sign in with Outlook SSO</span>
+              <span className="text-xs">Sign in with Microsoft</span>
             </Button>
 
             {/* First-time hint */}
@@ -558,97 +523,6 @@ export default function EmployeeLoginPage() {
           </form>
         )}
       </Card>
-
-      {showOutlookModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
-          <div className="w-full max-w-[440px] bg-white border border-[#cccccc] shadow-2xl p-10 flex flex-col space-y-6 relative text-slate-800 rounded-2xl">
-            {/* Close Button */}
-            <button 
-              type="button"
-              onClick={() => setShowOutlookModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 font-bold text-lg"
-            >
-              ✕
-            </button>
-
-            {/* Microsoft Logo */}
-            <div className="flex items-center gap-2">
-              <svg className="w-[32px] h-[32px]" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M0 0H11V11H0V0Z" fill="#F25022"/>
-                <path d="M12 0H23V11H12V0Z" fill="#7FBA00"/>
-                <path d="M0 12H11V23H0V12Z" fill="#00A4EF"/>
-                <path d="M12 12H23V23H12V12Z" fill="#FFB900"/>
-              </svg>
-              <span className="text-[18px] font-semibold text-[#737373]">Microsoft</span>
-            </div>
-
-            {/* Form Details */}
-            <div className="space-y-2">
-              <h1 className="text-[22px] font-semibold text-[#1b1b1b] tracking-tight">Sign in</h1>
-              <p className="text-xs text-[#505050]">to continue to your Employee Learning Portal</p>
-            </div>
-
-            {/* Seeded Accounts */}
-            <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-[#737373]">Pick an active profile</p>
-              <div className="space-y-2">
-                {[
-                  { name: "Sofia Reddy", email: "sofia.reddy@example.com" },
-                  { name: "Guest Developer", email: "guest.developer@outlook.com" }
-                ].map((acc, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleOutlookSSOSubmit(acc.email)}
-                    className="w-full text-left p-3.5 bg-slate-50 hover:bg-slate-100 border border-[#e5e5e5] rounded-xl transition flex items-center justify-between group"
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-[#1b1b1b]">{acc.name}</p>
-                      <p className="text-[10px] text-[#505050] font-semibold">{acc.email}</p>
-                    </div>
-                    <Badge className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-[9px] border-0 px-2.5 py-1">
-                      Sign In
-                    </Badge>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="relative flex items-center justify-center my-2">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#cccccc]"></div></div>
-              <span className="relative px-3 text-[9px] font-bold text-[#737373] bg-white uppercase tracking-wider">Or Use Other Email</span>
-            </div>
-
-            {/* Custom Input */}
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const form = e.currentTarget;
-              const input = form.elements.namedItem("outlookEmail") as HTMLInputElement;
-              if (input && input.value.trim().includes("@")) {
-                handleOutlookSSOSubmit(input.value.trim());
-              }
-            }} className="space-y-4">
-              <input
-                name="outlookEmail"
-                type="email"
-                required
-                placeholder="Email, phone, or Skype"
-                className="w-full text-sm py-2 px-0 border-b border-[#666666] focus:border-[#0067b8] outline-none text-[#1b1b1b] placeholder:text-[#666666] transition font-medium bg-transparent"
-              />
-
-              <div className="flex justify-end gap-3 pt-2">
-                <Button
-                  type="submit"
-                  className="bg-[#0067b8] hover:bg-[#005da6] text-white text-xs font-semibold px-6 py-2 rounded-none transition h-9"
-                >
-                  Next
-                </Button>
-              </div>
-            </form>
-
-          </div>
-        </div>
-      )}
 
       {firstTimeModalData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
