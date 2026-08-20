@@ -117,3 +117,27 @@ export async function markRequirementsDeleted(
     groupKeys: Array.from(groupKeys),
   });
 }
+
+export async function unmarkRequirementsDeleted(
+  rows: Array<{ id?: string; fileName?: string; jdText?: string; brId?: string }>
+): Promise<void> {
+  const deleted = await loadDeletedRequirements();
+  const ids = new Set(deleted.ids);
+  const brIds = new Set(deleted.brIds);
+  const groupKeys = new Set(deleted.groupKeys);
+
+  for (const row of rows) {
+    const id = String(row.id || "").trim().toLowerCase();
+    const brId = extractBrId(row.brId || row.fileName);
+    const groupKey = requirementTombstoneKey(row.jdText || "", row.id || "");
+    if (id) ids.delete(id);
+    if (brId) brIds.delete(brId);
+    if (groupKey) groupKeys.delete(groupKey);
+  }
+
+  await saveDeletedRequirements({
+    ids: Array.from(ids),
+    brIds: Array.from(brIds),
+    groupKeys: Array.from(groupKeys),
+  });
+}

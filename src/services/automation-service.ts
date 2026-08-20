@@ -16,7 +16,7 @@ import {
 } from '@/lib/docs-storage';
 import { writePersistedJson } from '@/lib/runtime-data';
 import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
-import { isRequirementDeleted, loadDeletedRequirements } from '@/lib/deleted-requirements';
+import { isRequirementDeleted, loadDeletedRequirements, unmarkRequirementsDeleted } from '@/lib/deleted-requirements';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -595,15 +595,24 @@ function mergeBrRequirements(rows: ParsedBrRequirement[]): ParsedBrRequirement[]
  */
 export async function refreshRequirements(opts?: {
   incomingBrFiles?: string[];
+  incomingJdFiles?: string[];
 }): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
   await ensureDocsStorage();
 
   const brFiles = await listDocFiles("BR");
   const jdFiles = await listDocFiles("JD");
   const incomingBr = new Set((opts?.incomingBrFiles || []).map((f) => f.toLowerCase()));
+  const incomingJd = new Set((opts?.incomingJdFiles || []).map((f) => f.toLowerCase()));
 
   let processedBRs = 0;
   let convertedJDs = 0;
+  const restoredIncoming: Array<{
+    id: string;
+    jd_text: string;
+    rm_email: string;
+    file_name: string;
+    created_at: string;
+  }> = [];
 
   let localJds: any[] = [];
   const localJdPath = join(getUploadsRoot(), "job_descriptions.json");
@@ -666,17 +675,35 @@ export async function refreshRequirements(opts?: {
       );
       const buffer = await readDocFileBuffer("JD", file);
       const jdText = await resumeService.extractTextFromBuffer(buffer);
-      if (!jdText.trim()) continue;
+      if (!jdText.trim()) {
+        await writeLog("requirements", "CONVERT_JD_EMPTY", "failed", `No text extracted from JD ${file}`);
+        continue;
+      }
 
       const details = await extractJdDetails(jdText, file);
       const linkedId = autoReqIdFromLabel(
         localJds.find((j: any) => String(j.fileName || "").toLowerCase().includes(file.toLowerCase()))?.fileName
       );
       const autoReqId =
+        normalizeBrId(file) ||
         (details.auto_req_id && normalizeBrId(details.auto_req_id)) ||
         linkedId ||
         (alreadyLinked ? "" : nextAutoReqId(existingIds));
-      if (!autoReqId) continue;
+      if (!autoReqId) {
+        await writeLog("requirements", "CONVERT_JD_NO_ID", "failed", `Could not assign a BR ID for JD ${file}`);
+        continue;
+      }
+
+      if (incomingJd.has(file.toLowerCase())) {
+        await unmarkRequirementsDeleted([
+          {
+            id: brIdToUuid(autoReqId),
+            brId: autoReqId,
+            fileName: `${autoReqId} | ${file}`,
+            jdText,
+          },
+        ]);
+      }
 
       const existingRow = idCol ? findRowByAutoReqId(masterSheet, idCol, autoReqId) : undefined;
       writeMappedRow(
@@ -687,6 +714,19 @@ export async function refreshRequirements(opts?: {
       );
       existingIds.add(autoReqId);
       convertedJDs++;
+      if (incomingJd.has(file.toLowerCase())) {
+        restoredIncoming.push({
+          id: brIdToUuid(autoReqId),
+          jd_text: composeRequirementText(
+            details.job_title || "Technical Role",
+            [...new Set([...(details.skills || []), ...(details.tools || [])].filter(Boolean))].join(", "),
+            jdText
+          ) || jdText,
+          rm_email: "admin@infinite.com",
+          file_name: `${autoReqId} | ${file}`,
+          created_at: new Date().toISOString(),
+        });
+      }
       await writeLog(
         "requirements",
         "CONVERTED_JD_TO_BR",
@@ -700,6 +740,27 @@ export async function refreshRequirements(opts?: {
 
   await saveMasterBrWorkbook(masterWorkbook, masterFilename);
   processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds);
+
+  if (restoredIncoming.length) {
+    const { error } = await supabase.from("job_descriptions").upsert(restoredIncoming);
+    if (error) {
+      await writeLog("requirements", "RESTORE_JD_ERROR", "failed", error.message);
+    } else {
+      processedBRs = Math.max(processedBRs, restoredIncoming.length);
+      for (const row of restoredIncoming) {
+        const existingIdx = localJds.findIndex((j: any) => j.id === row.id);
+        const local = {
+          id: row.id,
+          jdText: row.jd_text,
+          rmEmail: row.rm_email,
+          fileName: row.file_name,
+          createdAt: row.created_at,
+        };
+        if (existingIdx !== -1) localJds[existingIdx] = { ...localJds[existingIdx], ...local };
+        else localJds.push(local);
+      }
+    }
+  }
 
   try {
     const serialized = JSON.stringify(localJds, null, 2);

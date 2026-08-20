@@ -62,8 +62,21 @@ export async function POST(request: NextRequest) {
     let refreshResult: Record<string, unknown> = {};
     if (mapping.refresh === 'requirements') {
       refreshResult = await refreshRequirements(
-        category === "br" ? { incomingBrFiles: [filename] } : undefined
+        category === "br"
+          ? { incomingBrFiles: [filename] }
+          : category === "jd"
+            ? { incomingJdFiles: [filename] }
+            : undefined
       );
+      if (
+        category === "jd" &&
+        Number(refreshResult.convertedJDs || 0) === 0 &&
+        Number(refreshResult.processedBRs || 0) === 0
+      ) {
+        throw new Error(
+          "The file was stored, but it could not be added to Requirements. Check System Logs, or the BR ID may still be blocked."
+        );
+      }
     } else if (mapping.refresh === 'candidates') {
       refreshResult = await refreshCandidates(activeJdId);
     } else if (mapping.refresh === 'employees') {
