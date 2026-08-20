@@ -8,9 +8,11 @@ import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
 import { allowLocalTestsFallback } from '@/lib/db-mode';
 import { formatProductDisplayName, formatTopicTitleForDisplay } from '@/lib/product-display-name';
-import { readPersistedJson } from '@/lib/runtime-data';
+import { readPersistedJson, writePersistedJson } from '@/lib/runtime-data';
 import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
 import { cacheStore } from '@/lib/cache-store';
+import { deleteDocFile, listDocFiles } from '@/lib/docs-storage';
+import { markCorpPoolDeleted } from '@/lib/deleted-corp-pool';
 import {
   buildResourcePortalEmployees,
   loadEmployeeTestManifest,
@@ -666,30 +668,76 @@ export async function DELETE(request: NextRequest) {
     targetIds = ids || [employeeId];
 
     const jsonPath = getEmployeesJsonPath();
-    let employees: EmployeeRecord[] = [];
-    try {
-      const raw = await readFile(jsonPath, "utf8");
-      const parsed = JSON.parse(raw) as EmployeeRecord[];
-      employees = parsed.filter(emp => !targetIds.includes(emp.employee_id));
-      await writeFile(jsonPath, JSON.stringify(employees, null, 2), "utf8");
-      cacheStore.invalidate("employees");
-    } catch (e) {
+    const loadEmployees = async (): Promise<EmployeeRecord[]> => {
+      try {
+        const persisted = await readPersistedJson("employees.json");
+        if (persisted) return JSON.parse(persisted) as EmployeeRecord[];
+      } catch {}
+      try {
+        const raw = await readFile(jsonPath, "utf8");
+        return JSON.parse(raw) as EmployeeRecord[];
+      } catch {
+        return [];
+      }
+    };
+
+    const employees = await loadEmployees();
+    if (!employees.length) {
       return NextResponse.json({ error: "Employees not loaded" }, { status: 404 });
     }
 
-    // Also delete from Supabase employees table
-    const { error: dbError } = await supabase
-      .from('employees')
-      .delete()
-      .in('employee_id', targetIds);
-
-    if (dbError) {
-      console.warn("Failed to delete employees from Supabase:", dbError.message);
+    const idSet = new Set(targetIds.map((id) => String(id)));
+    const removed = employees.filter((emp) => idSet.has(emp.employee_id));
+    const remaining = employees.filter((emp) => !idSet.has(emp.employee_id));
+    if (removed.length === 0) {
+      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
 
-    await writeLog('employee', 'DELETE_EMPLOYEE', 'success', `Deleted employee IDs: ${targetIds.join(', ')}`);
+    const serialized = JSON.stringify(remaining, null, 2);
+    await writeFile(jsonPath, serialized, "utf8");
+    await writePersistedJson("employees.json", serialized).catch((err) => {
+      console.warn("Failed to persist employees.json after Corp Pool delete:", err);
+    });
+    cacheStore.invalidate("employees");
 
-    return NextResponse.json({ success: true });
+    const filesToDelete = new Set(
+      removed.map((emp) => String(emp.source_file || "").trim()).filter(Boolean)
+    );
+    try {
+      const storedFiles = await listDocFiles("Corp Pool");
+      for (const emp of removed) {
+        const empId = String(emp.employee_id || "").trim().toLowerCase();
+        if (!empId || /^cv[a-f0-9]{8,}$/i.test(empId)) continue;
+        for (const file of storedFiles) {
+          if (file.toLowerCase().includes(empId)) filesToDelete.add(file);
+        }
+      }
+    } catch (listErr) {
+      console.warn("Failed to list Corp Pool files during delete:", listErr);
+    }
+
+    for (const file of filesToDelete) {
+      if (/\.zip$/i.test(file)) continue;
+      try {
+        await deleteDocFile("Corp Pool", file);
+      } catch (fileErr) {
+        console.warn(`Failed to delete Corp Pool file ${file}:`, fileErr);
+      }
+    }
+
+    await markCorpPoolDeleted(
+      removed.map((emp) => emp.employee_id),
+      Array.from(filesToDelete)
+    );
+
+    await writeLog(
+      "employee",
+      "DELETE_EMPLOYEE",
+      "success",
+      `Deleted employee IDs: ${targetIds.join(", ")}${filesToDelete.size ? `; removed files: ${Array.from(filesToDelete).join(", ")}` : ""}`
+    );
+
+    return NextResponse.json({ success: true, deleted: removed.length });
   } catch (error: any) {
     await writeLog('employee', 'DELETE_EMPLOYEE_FAILED', 'failed', `Failed to delete employees: ${error.message}`);
     return NextResponse.json({ error: error.message }, { status: 500 });

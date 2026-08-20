@@ -26,6 +26,16 @@ const CATEGORY_MAP: Record<string, { docCategory?: DocCategory; refresh: string 
   interview: { refresh: "interviews" },
 };
 
+function inferUploadCategory(filename: string, selected: string): string {
+  const name = String(filename || "").toLowerCase();
+  if (selected === "interview") return "interview";
+  if (name.endsWith(".csv")) {
+    if (selected === "br") return "br";
+    return "employee";
+  }
+  return selected || "resume";
+}
+
 export async function POST(request: NextRequest) {
   if (!checkCsrf(request)) {
     return NextResponse.json({ error: "Forbidden (CSRF check failed)" }, { status: 403 });
@@ -37,19 +47,20 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    const category = formData.get('category') as string || '';
+    const selectedCategory = formData.get('category') as string || '';
     const activeJdId = formData.get('activeJdId') as string || undefined;
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
+    const filename = file.name;
+    const category = inferUploadCategory(filename, selectedCategory);
     const mapping = CATEGORY_MAP[category];
     if (!mapping) {
       return NextResponse.json({ error: "Invalid upload category" }, { status: 400 });
     }
 
-    const filename = file.name;
     const buffer = Buffer.from(await file.arrayBuffer());
 
     if (category === 'interview') {
@@ -80,13 +91,14 @@ export async function POST(request: NextRequest) {
     } else if (mapping.refresh === 'candidates') {
       refreshResult = await refreshCandidates(activeJdId);
     } else if (mapping.refresh === 'employees') {
-      refreshResult = await refreshEmployees(activeJdId);
+      refreshResult = await refreshEmployees(activeJdId, { incomingCorpPoolFiles: [filename] });
     } else if (mapping.refresh === 'interviews') {
       refreshResult = await refreshInterviews();
     }
 
     return NextResponse.json({ 
       success: true, 
+      category,
       message: `File uploaded and processed successfully under ${category}.`,
       refreshResult 
     });

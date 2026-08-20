@@ -235,46 +235,115 @@ export class ResumeService {
   }
 
   async extractTextFromBuffer(buffer: Buffer): Promise<string> {
-    // Detect format from buffer header / magic bytes — cheaper than relying on filename
+    if (!buffer?.length) return "";
+    const head = buffer.slice(0, 256).toString("latin1").toLowerCase();
     const isPdf = buffer[0] === 0x25 && buffer[1] === 0x50;
     const isZip = buffer[0] === 0x50 && buffer[1] === 0x4b;
+    const isHtml = head.includes("<html") || head.includes("<!doctype html");
+    if (isHtml && !isPdf) return this.stripHtmlToText(buffer.toString("utf8"));
     if (isPdf) return this.extractPDFBuffer(buffer);
     if (isZip) return this.extractDOCXBuffer(buffer);
     return buffer.toString("utf8");
   }
 
-  // ── Buffer-backed extractors (no File → arrayBuffer() re-reads) ──────────
+  private stripHtmlToText(html: string): string {
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|h\d|li|tr)>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+  }
+
+  private normalizeExtractedText(text: string): string {
+    return String(text || "")
+      .replace(/\u0000/g, "")
+      .replace(/[ \t]*\n[ \t]*/g, "\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  private extractPdfLiteralStrings(buffer: Buffer): string {
+    const raw = buffer.toString("latin1");
+    const chunks: string[] = [];
+    const paren = /\((?:\\.|[^\\)])*\)/g;
+    let match: RegExpExecArray | null;
+    while ((match = paren.exec(raw))) {
+      const decoded = match[0]
+        .slice(1, -1)
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\n")
+        .replace(/\\t/g, " ")
+        .replace(/\\([()\\])/g, "$1")
+        .replace(/\\(\d{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
+      if (/[\x00-\x08\x0e-\x1f]/.test(decoded)) continue;
+      const cleaned = decoded.replace(/\s+/g, " ").trim();
+      if (cleaned.length >= 2) chunks.push(cleaned);
+    }
+    return this.normalizeExtractedText(chunks.join(" "));
+  }
 
   private async extractPDFBuffer(buffer: Buffer): Promise<string> {
     if (!buffer || buffer.length === 0) {
       throw new Error("Cannot parse empty PDF buffer.");
     }
 
-    const pdfParseModule = require("pdf-parse");
+    const data = Uint8Array.from(buffer);
+    let parsed = "";
 
-    if (typeof pdfParseModule.PDFParse === "function") {
-      const parser = new pdfParseModule.PDFParse({ data: buffer });
-      try {
-        const result = await parser.getText();
-        return result?.text || "";
-      } finally {
-        if (typeof parser.destroy === "function") await parser.destroy();
+    try {
+      const pdfParseModule = require("pdf-parse");
+      const PDFParse = pdfParseModule.PDFParse;
+      if (typeof pdfParseModule.setWorker === "function") {
+        pdfParseModule.setWorker();
+      } else if (PDFParse && typeof PDFParse.setWorker === "function") {
+        PDFParse.setWorker();
       }
+
+      if (typeof PDFParse === "function") {
+        const parser = new PDFParse({ data });
+        try {
+          const result = await parser.getText({
+            itemJoiner: " ",
+            cellSeparator: " ",
+            lineEnforce: true,
+          });
+          parsed = this.normalizeExtractedText(
+            result?.text ||
+              (Array.isArray(result?.pages)
+                ? result.pages.map((page: any) => page?.text || "").join("\n")
+                : "")
+          );
+        } finally {
+          if (typeof parser.destroy === "function") await parser.destroy();
+        }
+      } else if (typeof pdfParseModule.default === "function") {
+        const dataResult = await pdfParseModule.default(buffer);
+        parsed = this.normalizeExtractedText(dataResult?.text || "");
+      } else if (typeof pdfParseModule === "function") {
+        const dataResult = await pdfParseModule(buffer);
+        parsed = this.normalizeExtractedText(dataResult?.text || "");
+      }
+    } catch (error: any) {
+      console.warn("pdf-parse extraction failed, using PDF string fallback:", error?.message || error);
     }
 
-    if (typeof pdfParseModule.default === "function") {
-      const data = await pdfParseModule.default(buffer);
-      return data.text || "";
-    }
+    if (parsed.length >= 40) return parsed;
 
-    if (typeof pdfParseModule === "function") {
-      const data = await pdfParseModule(buffer);
-      return data.text || "";
-    }
+    const fallback = this.extractPdfLiteralStrings(buffer);
+    if (fallback.length > parsed.length) parsed = fallback;
+    if (parsed.trim()) return parsed;
 
-    throw new Error(
-      `Invalid pdf-parse module format: ${Object.keys(pdfParseModule).join(", ")}`
-    );
+    throw new Error("Could not extract text from this PDF. Try a text-based PDF or a DOCX.");
   }
 
   private async extractDOCXBuffer(buffer: Buffer): Promise<string> {

@@ -77,6 +77,32 @@ function portalEmployeeId(account: { employee_id?: string | null }): string {
   return account.employee_id?.trim() || "—";
 }
 
+function personSkillChips(emp: { skills?: string | null; matchingSkills?: string[] | null }): string[] {
+  const fromSkills = String(emp.skills || "")
+    .split(/[,;|/]+/)
+    .map((skill) => skill.replace(/\s+/g, " ").trim())
+    .filter((skill) => {
+      if (skill.length < 2 || skill.length > 32) return false;
+      if (skill.toLowerCase() === "none listed") return false;
+      if (/^\d+\s*of\s*\d+$/i.test(skill)) return false;
+      if (!/[A-Za-z]{2,}/.test(skill)) return false;
+      if (/[^\x20-\x7E]/.test(skill)) return false;
+      return true;
+    });
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const skill of fromSkills) {
+    const key = skill.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(skill);
+  }
+  if (unique.length) return unique;
+  return (Array.isArray(emp.matchingSkills) ? emp.matchingSkills : []).filter(
+    (skill) => typeof skill === "string" && skill.length >= 2 && skill.length <= 32 && /[A-Za-z]{2,}/.test(skill)
+  );
+}
+
 function portalPrimaryCompletedAt(account: {
   test_status?: string | null;
   test_id?: string | null;
@@ -2071,16 +2097,27 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleUnifiedUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const inferUnifiedCategory = (file: File, selected: string) => {
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".csv")) {
+      if (selected === "br") return "br";
+      return "employee";
+    }
+    return selected === "interview" ? "employee" : selected;
+  };
+
+  const ingestUnifiedFile = async (file: File) => {
+    const category = inferUnifiedCategory(file, uploadCategory);
+    if (category === "employee" && uploadCategory !== "employee") {
+      setUploadCategory("employee");
+    }
 
     setPipelineStatus(`Ingestion: Uploading ${file.name}...`);
-    setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Uploading ${file.name} to ${uploadCategory}...`, ...prev]);
-    
+    setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Uploading ${file.name} to ${category}...`, ...prev]);
+
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("category", uploadCategory);
+    formData.append("category", category);
     const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "";
     if (sendJdId) {
       formData.append("activeJdId", sendJdId);
@@ -2095,16 +2132,17 @@ export default function AdminDashboard() {
       if (result.success) {
         setPipelineStatus(`Ingestion: Idle`);
         setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Successfully uploaded and parsed ${file.name}`, ...prev]);
-        
-        if (uploadCategory === "resume") {
+
+        const usedCategory = result.category || category;
+        if (usedCategory === "resume") {
           await loadResumes();
-        } else if (uploadCategory === "jd" || uploadCategory === "br") {
+        } else if (usedCategory === "jd" || usedCategory === "br") {
           await loadJobDescriptions();
-        } else if (uploadCategory === "employee") {
+        } else if (usedCategory === "employee") {
           await loadEmployees({ fresh: true });
         }
         await loadLogs();
-        
+
         setActionSuccess(`Upload and automated ingestion of ${file.name} successful.`);
         setTimeout(() => setActionSuccess(null), 3000);
       } else {
@@ -2115,6 +2153,14 @@ export default function AdminDashboard() {
       setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Unified upload failed: ${err.message}`, ...prev]);
       setActionError(`Upload failed: ${err.message}`);
       setTimeout(() => setActionError(null), 5000);
+    }
+  };
+
+  const handleUnifiedUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await ingestUnifiedFile(file);
     } finally {
       if (e.target) e.target.value = "";
     }
@@ -3752,6 +3798,51 @@ export default function AdminDashboard() {
     return Number.isFinite(score) && score >= QUALIFIED_COVERAGE_PERCENT;
   }).length;
 
+  const employeeMatchReport = useMemo(() => {
+    if (!activeEmployee) return null;
+    const jdText = jdSavedText.trim();
+    const jdIsActive =
+      Boolean(jdText) &&
+      Boolean(selectedJdId) &&
+      selectedJdId !== "all" &&
+      !selectedJdId.includes("@");
+    const personSkills = personSkillChips(activeEmployee);
+    if (!jdIsActive) {
+      return {
+        personSkills,
+        matched: [] as string[],
+        missing: [] as string[],
+        required: [] as string[],
+        score: Number(activeEmployee.score) || 0,
+        decision: "",
+        rationale: "Select a specific requirement to see a JD match report.",
+        matchedCount: 0,
+        requiredCount: 0,
+        familyRelation: "",
+        personFamily: "",
+        jdFamily: "",
+      };
+    }
+    const result = calculateSkillMatch(employeeMatchText(activeEmployee), jdText);
+    const required = extractJdDisplaySkills(jdText);
+    const matchedSet = new Set((result.matchingSkills || []).map((skill) => skill.toLowerCase()));
+    const missing = required.filter((skill) => !matchedSet.has(skill.toLowerCase()));
+    return {
+      personSkills,
+      matched: result.matchingSkills || [],
+      missing,
+      required,
+      score: Number(result.score) || 0,
+      decision: result.decision,
+      rationale: result.rationale,
+      matchedCount: result.matchedCount,
+      requiredCount: result.requiredCount,
+      familyRelation: result.familyRelation,
+      personFamily: result.personFamily,
+      jdFamily: result.jdFamily,
+    };
+  }, [activeEmployee, jdSavedText, selectedJdId]);
+
   const filteredEmployees = scoredEmployees
     .filter(emp => {
       if (!employeeSearch) return true;
@@ -4551,13 +4642,15 @@ export default function AdminDashboard() {
                                 <th className="p-3">Name</th>
                                 <th className="p-3">Employee ID</th>
                                 <th className="p-3">Department</th>
-                                <th className="p-3">Skill Match</th>
+                                <th className="p-3">Skills</th>
                                 <th className="p-3">Score</th>
                                 <th className="p-3 text-center">Actions</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-800/50">
-                              {filteredEmployees.map(emp => (
+                              {filteredEmployees.map(emp => {
+                                const skillChips = personSkillChips(emp);
+                                return (
                                   <tr key={emp.employee_id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150 ${
                                     selectedEmployeeIds.includes(emp.employee_id) ? "bg-indigo-50/20 dark:bg-indigo-950/20" : ""
                                   }`}>
@@ -4576,18 +4669,18 @@ export default function AdminDashboard() {
                                     <td className="p-3 font-bold text-slate-500">{emp.employee_id}</td>
                                     <td className="p-3 text-muted-foreground font-semibold">{emp.department}</td>
                                     <td className="p-3">
-                                      <div className="flex flex-wrap gap-1 max-w-[180px]">
-                                        {emp.matchingSkills && emp.matchingSkills.length > 0 ? (
-                                          emp.matchingSkills.slice(0, 3).map((s: string, i: number) => (
-                                            <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0">
+                                      <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                        {skillChips.length > 0 ? (
+                                          skillChips.slice(0, 4).map((s: string, i: number) => (
+                                            <Badge key={`${s}-${i}`} className="bg-slate-100 dark:bg-slate-800 border-0 text-slate-700 dark:text-slate-200 text-[9px] px-1.5 py-0">
                                               {s}
                                             </Badge>
                                           ))
                                         ) : (
-                                          <span className="text-slate-400 text-[10px]">No skills match</span>
+                                          <span className="text-slate-400 text-[10px]">No skills listed</span>
                                         )}
-                                        {emp.matchingSkills && emp.matchingSkills.length > 3 && (
-                                          <span className="text-[9px] text-slate-400 font-bold">+{emp.matchingSkills.length - 3} more</span>
+                                        {skillChips.length > 4 && (
+                                          <span className="text-[9px] text-slate-400 font-bold">+{skillChips.length - 4} more</span>
                                         )}
                                       </div>
                                     </td>
@@ -4647,7 +4740,8 @@ export default function AdminDashboard() {
                                       </div>
                                     </td>
                                   </tr>
-                                ))}
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
@@ -6382,29 +6476,37 @@ export default function AdminDashboard() {
                   Unified File Upload
                 </label>
                 <select
-                  value={uploadCategory}
+                  value={uploadCategory === "interview" ? "employee" : uploadCategory}
                   onChange={(e) => setUploadCategory(e.target.value)}
                   className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2 text-[11px] font-bold text-slate-755 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 truncate"
                 >
                   <option value="resume">📄 Candidate Resume</option>
                   <option value="jd">💼 Job Description (JD)</option>
                   <option value="br">📊 Business Requirement (BR)</option>
-                  <option value="employee">👥 Employee Pool Data</option>
-                  <option value="interview">📝 Interview CSV Sync</option>
+                  <option value="employee">👥 Corp Pool</option>
                 </select>
 
                 <div
                   onClick={() => unifiedFileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDrop={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) await ingestUnifiedFile(file);
+                  }}
                   className="border-2 border-dashed border-border hover:border-indigo-400/50 dark:hover:border-slate-600 bg-slate-50/30 dark:bg-slate-950/30 hover:bg-indigo-50/10 dark:hover:bg-slate-900/20 rounded-xl p-4 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-1 group min-h-[88px]"
                 >
                   <Upload className="w-5 h-5 text-primary group-hover:scale-110 transition-transform duration-200" />
-                  <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click to select file for upload</span>
+                  <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click or drop a file to upload</span>
                   <span className="text-[9px] text-slate-400 font-semibold leading-snug">
-                    {uploadCategory === 'resume' && "Saves to /docs/Resumes & auto-screens"}
+                    {uploadCategory === 'resume' && "Resumes, or drop a CSV to send it straight to Corp Pool"}
                     {uploadCategory === 'jd' && "Converts JD → BR row in BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'br' && "Appends BR rows into BR_RawData 3.xlsx & saves to backend"}
-                    {uploadCategory === 'employee' && "Saves to /docs/Corp Pool & updates match scores"}
-                    {uploadCategory === 'interview' && "Syncs and parses candidate_interview_data.csv"}
+                    {uploadCategory === 'employee' && "Adds Excel/CSV/PDF/DOCX or a ZIP of resumes to Corp Pool without removing existing ones"}
                   </span>
                   <input
                     type="file"
@@ -6412,11 +6514,10 @@ export default function AdminDashboard() {
                     onChange={handleUnifiedUpload}
                     className="hidden"
                     accept={
-                      uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip' :
+                      uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip,.csv,.xlsx,.xls' :
                       uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt' :
                       uploadCategory === 'br' ? '.xlsx,.csv' :
-                      uploadCategory === 'employee' ? '.csv,.xlsx,.pdf,.doc,.docx' :
-                      '.csv'
+                      '.csv,.xlsx,.xls,.pdf,.doc,.docx,.zip'
                     }
                   />
                 </div>
@@ -6829,7 +6930,7 @@ export default function AdminDashboard() {
                   : deleteTargetId === "bulk-emails"
                   ? `This action is permanent and will delete the ${selectedEmailIds.length} selected simulated invitation email outbox logs.`
                   : deleteTargetId === "bulk-employees-pool"
-                  ? `This action is permanent and will delete the ${selectedEmployeeIds.length} selected corporate pool employee records.`
+                  ? `This action is permanent and will delete the ${selectedEmployeeIds.length} selected corporate pool employee records and their stored resumes.`
                   : deleteTargetId === "bulk-jds"
                   ? `This action is permanent and will delete the ${selectedJdIds.length} selected job requirements (BR / JD).`
                   : deleteTargetId === "bulk-portal-videos"
@@ -6839,7 +6940,7 @@ export default function AdminDashboard() {
                   : deleteTargetId.startsWith("outbox-log:")
                   ? "This action is permanent and will delete this simulated invitation email log."
                   : deleteTargetId.startsWith("emp-")
-                  ? "This action is permanent and will delete the employee record from the corporate pool database."
+                  ? "This action is permanent and will delete the employee record and stored resume from Corp Pool."
                   : "This action is permanent and will delete the candidate's resume analysis, test answers, and active session."}
                 {" "}Please enter the supervisor password to authorize this action:
               </p>
@@ -7097,11 +7198,11 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {activeEmployee && (
+      {activeEmployee && employeeMatchReport && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in text-foreground">
-          <Card className="w-full max-w-lg bg-card border border-indigo-150 shadow-2xl rounded-3xl overflow-hidden animate-scale-up">
-            <div className="bg-primary text-white px-6 py-4 flex items-center justify-between">
-              <span className="font-bold text-sm tracking-wide">Employee Details</span>
+          <Card className="w-full max-w-2xl max-h-[90vh] bg-card border border-indigo-150 shadow-2xl rounded-3xl overflow-hidden animate-scale-up flex flex-col">
+            <div className="bg-primary text-white px-6 py-4 flex items-center justify-between shrink-0">
+              <span className="font-bold text-sm tracking-wide">Match Report</span>
               <button
                 type="button"
                 onClick={() => setActiveEmployee(null)}
@@ -7111,72 +7212,94 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto">
               <div className="flex items-center gap-3 border-b border-border pb-4">
                 <div className="h-12 w-12 rounded-full bg-indigo-100 dark:bg-slate-800 flex items-center justify-center text-primary font-black text-lg">
                   {activeEmployee.full_name?.charAt(0) || "E"}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-base font-black text-slate-850 dark:text-slate-100">{activeEmployee.full_name}</h3>
                   <p className="text-xs text-slate-400 font-semibold">{activeEmployee.designation || "No Designation"}</p>
+                  <p className="text-[11px] text-slate-500 font-medium">{activeEmployee.employee_id} · {activeEmployee.email || "No email"}</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Employee ID</span>
-                  <span className="font-bold text-slate-700 dark:text-slate-200">{activeEmployee.employee_id}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Department</span>
-                  <span className="font-bold text-slate-700 dark:text-slate-200">{activeEmployee.department || "N/A"}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Email</span>
-                  <span className="font-bold text-slate-700 dark:text-slate-200 break-all">{activeEmployee.email || "N/A"}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Grade</span>
-                  <span className="font-bold text-slate-700 dark:text-slate-200">{activeEmployee.grade || "N/A"}</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Status</span>
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase border-0 ${
-                    activeEmployee.status?.toLowerCase() === 'active' || activeEmployee.status?.toLowerCase() === 'available' || activeEmployee.status?.toLowerCase() === 'deployed'
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-amber-100 text-amber-800'
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-2xl border border-border bg-slate-50/80 dark:bg-slate-950/40 p-3">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-1">Fit score</span>
+                  <span className={`font-black text-xl ${
+                    employeeMatchReport.score >= QUALIFIED_COVERAGE_PERCENT ? "text-emerald-600 dark:text-emerald-400" : (employeeMatchReport.score >= 40 ? "text-amber-500" : "text-rose-500")
                   }`}>
-                    {activeEmployee.status || "N/A"}
+                    {employeeMatchReport.score}%
                   </span>
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Skill Match Score</span>
-                  <span className={`font-black text-sm ${
-                    Number(activeEmployee.score) >= 60 ? 'text-emerald-600 dark:text-emerald-400' : (Number(activeEmployee.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
-                  }`}>
-                    {activeEmployee.score || 0}%
-                  </span>
+                <div className="rounded-2xl border border-border bg-slate-50/80 dark:bg-slate-950/40 p-3">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-1">Decision</span>
+                  <span className="font-black text-sm uppercase tracking-wide">{employeeMatchReport.decision || "—"}</span>
+                </div>
+                <div className="rounded-2xl border border-border bg-slate-50/80 dark:bg-slate-950/40 p-3">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-1">JD coverage</span>
+                  <span className="font-black text-sm">{employeeMatchReport.matchedCount}/{employeeMatchReport.requiredCount || employeeMatchReport.required.length} skills</span>
+                </div>
+                <div className="rounded-2xl border border-border bg-slate-50/80 dark:bg-slate-950/40 p-3">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-1">Role fit</span>
+                  <span className="font-bold text-xs capitalize">{employeeMatchReport.personFamily || "—"} → {employeeMatchReport.jdFamily || "JD"}</span>
+                  {employeeMatchReport.familyRelation ? (
+                    <div className="text-[10px] text-slate-400 font-semibold mt-0.5 capitalize">{employeeMatchReport.familyRelation}</div>
+                  ) : null}
                 </div>
               </div>
 
-              <div className="space-y-1.5 pt-2">
-                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">All Skills</span>
-                <div className="p-3 bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-slate-800 rounded-xl max-h-[80px] overflow-y-auto">
-                  <p className="text-xs font-semibold text-muted-foreground leading-relaxed whitespace-pre-line">{activeEmployee.skills || "None listed"}</p>
+              {employeeMatchReport.rationale ? (
+                <div className="rounded-2xl border border-border bg-indigo-50/50 dark:bg-indigo-950/20 p-3">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-1">Why this score</span>
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 leading-relaxed">{employeeMatchReport.rationale}</p>
                 </div>
-              </div>
+              ) : null}
 
               <div className="space-y-1.5">
-                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Matching Skills against JD</span>
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Person skills</span>
                 <div className="flex flex-wrap gap-1">
-                  {activeEmployee.matchingSkills && activeEmployee.matchingSkills.length > 0 ? (
-                    activeEmployee.matchingSkills.map((s: string, i: number) => (
-                      <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[10px] px-2 py-0.5">
+                  {employeeMatchReport.personSkills.length > 0 ? (
+                    employeeMatchReport.personSkills.map((s: string, i: number) => (
+                      <Badge key={`person-${s}-${i}`} className="bg-slate-100 dark:bg-slate-800 border-0 text-slate-700 dark:text-slate-200 text-[10px] px-2 py-0.5">
                         {s}
                       </Badge>
                     ))
                   ) : (
-                    <span className="text-slate-400 text-xs font-semibold">No skills matched against the selected Job Description.</span>
+                    <span className="text-slate-400 text-xs font-semibold">No skills extracted from this profile.</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Matched against JD</span>
+                <div className="flex flex-wrap gap-1">
+                  {employeeMatchReport.matched.length > 0 ? (
+                    employeeMatchReport.matched.map((s: string, i: number) => (
+                      <Badge key={`matched-${s}-${i}`} className="bg-emerald-50 dark:bg-emerald-950/40 border-0 text-emerald-700 dark:text-emerald-300 text-[10px] px-2 py-0.5">
+                        {s}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-slate-400 text-xs font-semibold">No overlapping JD skills.</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Missing vs JD</span>
+                <div className="flex flex-wrap gap-1">
+                  {employeeMatchReport.missing.length > 0 ? (
+                    employeeMatchReport.missing.map((s: string, i: number) => (
+                      <Badge key={`missing-${s}-${i}`} className="bg-rose-50 dark:bg-rose-950/40 border-0 text-rose-700 dark:text-rose-300 text-[10px] px-2 py-0.5">
+                        {s}
+                      </Badge>
+                    ))
+                  ) : employeeMatchReport.required.length > 0 ? (
+                    <span className="text-emerald-600 text-xs font-semibold">No missing required skills.</span>
+                  ) : (
+                    <span className="text-slate-400 text-xs font-semibold">Select a requirement to compare against a JD.</span>
                   )}
                 </div>
               </div>

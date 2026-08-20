@@ -25,12 +25,25 @@ export const parseDocx = async (buffer: Buffer): Promise<string> => {
  */
 export const parsePdf = async (buffer: Buffer): Promise<string> => {
   try {
-    // Lazily load pdf-parse ONLY at runtime inside the function body.
-    // This prevents browser polyfills from executing during Next.js static build pre-rendering,
-    // solving "DOMMatrix is not defined" build compilation crashes!
-    const pdfParse = requireModule('pdf-parse');
-    const result = await pdfParse(buffer);
-    return result.text || '';
+    const pdfParseModule = requireModule("pdf-parse");
+    const PDFParse = pdfParseModule.PDFParse;
+    if (PDFParse && typeof PDFParse.setWorker === "function") {
+      PDFParse.setWorker();
+    }
+    if (typeof PDFParse !== "function") {
+      throw new Error("pdf-parse PDFParse API is unavailable");
+    }
+    const parser = new PDFParse({ data: Uint8Array.from(buffer) });
+    try {
+      const result = await parser.getText({
+        itemJoiner: " ",
+        cellSeparator: " ",
+        lineEnforce: true,
+      });
+      return String(result?.text || "").replace(/[ \t]{2,}/g, " ").trim();
+    } finally {
+      if (typeof parser.destroy === "function") await parser.destroy();
+    }
   } catch (err: any) {
     console.error('[Parser] Error parsing PDF file:', err.message);
     throw new Error(`Failed to parse PDF: ${err.message}`);

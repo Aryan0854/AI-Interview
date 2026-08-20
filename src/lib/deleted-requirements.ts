@@ -87,10 +87,8 @@ export function isRequirementDeleted(
 ): boolean {
   const id = String(parts.id || "").trim().toLowerCase();
   const brId = extractBrId(parts.brId || parts.fileName);
-  const groupKey = (parts.groupKey || requirementTombstoneKey(parts.jdText || "", parts.id || "")).toLowerCase();
   if (id && deleted.ids.includes(id)) return true;
   if (brId && deleted.brIds.includes(brId)) return true;
-  if (groupKey && deleted.groupKeys.includes(groupKey)) return true;
   return false;
 }
 
@@ -129,9 +127,11 @@ export async function unmarkRequirementsDeleted(
   for (const row of rows) {
     const id = String(row.id || "").trim().toLowerCase();
     const brId = extractBrId(row.brId || row.fileName);
+    const rawBrId = String(row.brId || "").trim().toLowerCase();
     const groupKey = requirementTombstoneKey(row.jdText || "", row.id || "");
     if (id) ids.delete(id);
     if (brId) brIds.delete(brId);
+    if (rawBrId) brIds.delete(rawBrId);
     if (groupKey) groupKeys.delete(groupKey);
   }
 
