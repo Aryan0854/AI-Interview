@@ -1,5 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Corporate SSL inspection (Infinite / Zscaler etc.) often breaks Node→Supabase TLS locally.
+// Set ALLOW_INSECURE_TLS=1 in .env.local for local dev ONLY — never enable on Vercel/prod.
+if (
+  process.env.ALLOW_INSECURE_TLS === "1" &&
+  process.env.NODE_ENV !== "production" &&
+  process.env.VERCEL !== "1"
+) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  console.warn(
+    "[db] ALLOW_INSECURE_TLS=1 — TLS certificate verification disabled for local Supabase calls."
+  );
+}
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -10,9 +23,21 @@ if (!supabaseUrl || !supabaseAnonKey || !supabaseUrl.startsWith('http')) {
 
 const validUrl = supabaseUrl.startsWith('http') ? supabaseUrl : 'https://placeholder.supabase.co';
 
+// Portal roster + test-results loads can exceed 15s on Vercel cold starts.
+// Aborting early left allTestResults empty and every employee looked "Not Started".
+const SUPABASE_FETCH_TIMEOUT_MS = process.env.VERCEL === "1" ? 55_000 : 45_000;
+
 const timeoutFetch = (url: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), SUPABASE_FETCH_TIMEOUT_MS);
+  const parentSignal = options?.signal;
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      controller.abort();
+    } else {
+      parentSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
   return fetch(url, {
     ...options,
     signal: controller.signal,

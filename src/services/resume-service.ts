@@ -16,6 +16,7 @@ import "@/lib/pdf-polyfill";
 import { localEngine } from "@/lib/local-ai";
 import { geminiEngine } from "@/lib/gemini-ai";
 import { supabase } from "@/lib/db";
+import { allowLocalDataFallback } from "@/lib/db-mode";
 import { pushProgress, signalProcessingDone } from "@/lib/sse-queue";
 import { sessionService } from "@/services/session-service";
 
@@ -358,13 +359,13 @@ export class ResumeService {
       console.error("Failed to find resume by filename:", e);
     }
 
-    if (rows.length === 0) {
+    if (rows.length === 0 && allowLocalDataFallback()) {
       const localResumes = await this.ensureResumesJson();
-      rows = localResumes.filter(r => r.filename === filename);
+      rows = localResumes.filter((r) => r.filename === filename);
     }
 
     for (const row of rows) {
-      const report = row.report ? (typeof row.report === 'object' ? row.report : JSON.parse(row.report)) : {};
+      const report = this.safeJsonField(row.report);
       if (report.rmEmail?.toLowerCase().trim() === rmEmail.toLowerCase().trim()) {
         return this.mapRowToResume(row);
       }
@@ -1338,45 +1339,91 @@ export class ResumeService {
 
   async getAllResumes(): Promise<ResumeData[]> {
     let rows: any[] = [];
+    let dbFailed = false;
+
     try {
-      const { data, error } = await supabase.from('resumes').select('id, filename, parsed, analysis, enhanced, report, error, created_at, file_hash').order('created_at', { ascending: false });
-      if (!error && data) {
-        rows = data;
-      } else if (error) {
-        console.warn("Failed to fetch resumes from Supabase, falling back to local storage:", error.message);
-        rows = await this.ensureResumesJson();
+      // Lean list projection + pagination — full analysis/enhanced payloads were timing out admin UI.
+      const pageSize = 500;
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("resumes")
+          .select("id, filename, parsed, report, error, created_at, file_hash")
+          .order("created_at", { ascending: false })
+          .range(from, from + pageSize - 1);
+
+        if (error) {
+          console.warn("Failed to fetch resumes from Supabase:", error.message);
+          dbFailed = true;
+          break;
+        }
+        if (!data?.length) break;
+        rows.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
       }
     } catch (e) {
-      console.warn("Failed to fetch resumes from Supabase (exception), falling back to local storage:", e);
-      try {
-        rows = await this.ensureResumesJson();
-      } catch (localErr) {}
+      console.warn("Failed to fetch resumes from Supabase (exception):", e);
+      dbFailed = true;
     }
 
-    if (rows.length === 0) {
+    if ((dbFailed || rows.length === 0) && allowLocalDataFallback()) {
       try {
-        rows = await this.ensureResumesJson();
-      } catch (e) {}
+        const local = await this.ensureResumesJson();
+        if (local.length > 0) {
+          console.warn(
+            `[resumes] Using local uploads/resumes.json (${local.length} rows) — set ALLOW_LOCAL_DATA_FALLBACK=0 to disable.`
+          );
+          rows = local;
+        }
+      } catch {
+        /* ignore */
+      }
     }
 
-    return rows.map((row: any) => this.mapRowToResume(row));
+    const mapped: ResumeData[] = [];
+    for (const row of rows) {
+      try {
+        mapped.push(this.mapRowToResume(row));
+      } catch (err) {
+        console.warn("[resumes] Skipping corrupt resume row:", row?.id, err);
+      }
+    }
+    return mapped;
+  }
+
+  private safeJsonField(value: any): any {
+    if (value == null) return {};
+    if (typeof value === "object") return value;
+    if (typeof value === "string") {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return {};
+      }
+    }
+    return {};
   }
 
   private mapRowToResume(row: any): ResumeData {
     return {
       id: row.id,
-      filename: row.filename || 'unknown',
-      originalText: row.text_content || '',
-      parsed: row.parsed ? (typeof row.parsed === 'object' ? row.parsed : JSON.parse(row.parsed)) : ({} as any),
-      analysis: row.analysis ? (typeof row.analysis === 'object' ? row.analysis : JSON.parse(row.analysis)) : ({} as any),
-      enhanced: row.enhanced ? (typeof row.enhanced === 'object' ? row.enhanced : JSON.parse(row.enhanced)) : ({} as any),
-      report: row.report ? (typeof row.report === 'object' ? row.report : JSON.parse(row.report)) : ({} as any),
+      filename: row.filename || "unknown",
+      originalText: row.text_content || "",
+      parsed: this.safeJsonField(row.parsed) as any,
+      analysis: this.safeJsonField(row.analysis) as any,
+      enhanced: this.safeJsonField(row.enhanced) as any,
+      report: this.safeJsonField(row.report) as any,
       error: row.error || undefined,
       fileHash: row.file_hash || undefined,
       fileBase64: row.file_base64 || undefined,
       createdAt: row.created_at ? new Date(row.created_at) : new Date(),
-      updatedAt: row.updated_at ? new Date(row.updated_at) : (row.created_at ? new Date(row.created_at) : new Date()),
-      status: row.error ? 'failed' : 'completed',
+      updatedAt: row.updated_at
+        ? new Date(row.updated_at)
+        : row.created_at
+          ? new Date(row.created_at)
+          : new Date(),
+      status: row.error ? "failed" : "completed",
     };
   }
 }

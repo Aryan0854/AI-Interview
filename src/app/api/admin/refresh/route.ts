@@ -4,7 +4,8 @@ import {
   refreshRequirements, 
   refreshCandidates, 
   refreshEmployees, 
-  refreshInterviews 
+  refreshInterviews,
+  syncSelectedRequirementToMaster,
 } from '@/services/automation-service';
 
 export const runtime = 'nodejs';
@@ -22,6 +23,9 @@ export async function POST(request: NextRequest) {
   try {
     if (type === 'requirements') {
       const res = await refreshRequirements();
+      return NextResponse.json({ ...res, success: true });
+    } else if (type === 'sync-selected') {
+      const res = await syncSelectedRequirementToMaster(activeJdId || "");
       return NextResponse.json({ ...res, success: true });
     } else if (type === 'candidates') {
       const res = await refreshCandidates(activeJdId);

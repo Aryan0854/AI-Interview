@@ -32,6 +32,7 @@ export async function POST(
     resume.report = {
       ...resume.report,
       suitability,
+      suitabilityOverridden: true,
       ...(activeJdId ? { jdId: activeJdId } : {})
     };
 

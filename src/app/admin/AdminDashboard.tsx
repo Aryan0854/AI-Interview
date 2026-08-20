@@ -31,7 +31,10 @@ import {
   ShieldAlert,
   ChevronDown,
   ChevronUp,
-  Edit2
+  Edit2,
+  Pin,
+  Layers,
+  KeyRound,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { formatPortalTimestamp } from "@/lib/portal-format";
@@ -47,6 +50,7 @@ const AdminResumeDetails = dynamic(() => import("@/components/AdminResumeDetails
   )
 });
 import ThemeToggle from "@/components/ThemeToggle";
+import PlyrVideoPlayer from "@/components/PlyrVideoPlayer";
 import {
   getPortalTestStatusBadgeClass,
   getPortalTestStatusLabel,
@@ -54,17 +58,14 @@ import {
   matchesPortalTestStatusFilter,
   PORTAL_TEST_STATUS_FILTER_OPTIONS,
   type PortalTestStatusFilter,
+  formatPortalScore,
+  portalScorePercent,
+  portalScoreColorClass,
 } from "@/lib/portal-test-status";
-
-function formatSyncAge(date: Date): string {
-  const sec = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (sec < 5) return "just now";
-  if (sec < 60) return `${sec}s ago`;
-  return `${Math.floor(sec / 60)}m ago`;
-}
-
-const AUTO_SYNC_EMPLOYEES_MS = 15_000;
-const AUTO_SYNC_OTHER_MS = 30_000;
+import { formatProductDisplayName } from "@/lib/product-display-name";
+import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
+import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT } from "@/lib/skill-match";
+import { clearAdminAccessFlags, readAdminAccessFlags, storeAdminAccessFlags } from "@/lib/admin-accounts";
 
 function portalEmployeeName(account: { full_name?: string | null; employee_id?: string | null }): string {
   const name = account.full_name?.trim();
@@ -74,6 +75,235 @@ function portalEmployeeName(account: { full_name?: string | null; employee_id?: 
 
 function portalEmployeeId(account: { employee_id?: string | null }): string {
   return account.employee_id?.trim() || "—";
+}
+
+function portalPrimaryCompletedAt(account: {
+  test_status?: string | null;
+  test_id?: string | null;
+  completed_at?: string | null;
+  tests?: Array<{ id: string; status?: string; completedAt?: string | null }>;
+}): string | null {
+  if (account.test_status !== "completed") return null;
+  if (account.completed_at) return account.completed_at;
+  const primary =
+    account.tests?.find((t) => t.id === account.test_id && t.status === "completed") ??
+    account.tests?.find((t) => t.status === "completed");
+  return primary?.completedAt ?? null;
+}
+
+function formatPortalCompletedAt(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** Local calendar day key (YYYY-MM-DD) for Completed On filtering. */
+function portalCompletedDayKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return portalDayKeyFromDate(date);
+}
+
+function portalDayKeyFromDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function portalParseDayKey(dayKey: string): Date {
+  return new Date(`${dayKey}T12:00:00`);
+}
+
+/** Monday (local) of the week that contains `date`. Weeks are Mon–Sun. */
+function portalStartOfWeekMonday(date: Date): Date {
+  const local = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = local.getDay(); // 0=Sun ... 6=Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  local.setDate(local.getDate() + diff);
+  return local;
+}
+
+function portalAddDays(date: Date, days: number): Date {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function portalWeekStartKeyForDay(dayKey: string): string {
+  return portalDayKeyFromDate(portalStartOfWeekMonday(portalParseDayKey(dayKey)));
+}
+
+function portalWeekEndKey(weekStartKey: string): string {
+  return portalDayKeyFromDate(portalAddDays(portalParseDayKey(weekStartKey), 6));
+}
+
+/** Display like "Aug 12, 2026" from a YYYY-MM-DD key. */
+function formatPortalCompletedDayLabel(dayKey: string): string {
+  const date = portalParseDayKey(dayKey);
+  if (Number.isNaN(date.getTime())) return dayKey;
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/** Display like "Aug 3 - Aug 9" for a Mon–Sun week start key. */
+function formatPortalWeekRangeShort(weekStartKey: string): string {
+  const start = portalParseDayKey(weekStartKey);
+  const end = portalParseDayKey(portalWeekEndKey(weekStartKey));
+  const startLabel = start.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `${startLabel} - ${endLabel}`;
+}
+
+type PortalCompletedFilterOption = {
+  value: string;
+  label: string;
+};
+
+type PortalCompletedOlderWeek = {
+  weekStartKey: string;
+  weekFilterValue: string;
+  label: string;
+  dayKeys: string[];
+  dayOptions: PortalCompletedFilterOption[];
+};
+
+type PortalCompletedFilterModel = {
+  currentWeekOptions: PortalCompletedFilterOption[];
+  lastWeekOptions: PortalCompletedFilterOption[];
+  lastWeekDayKeys: string[];
+  olderWeeks: PortalCompletedOlderWeek[];
+};
+
+type PortalCompletedDateMenu =
+  | { type: "root" }
+  | { type: "last-week" }
+  | { type: "week"; weekStartKey: string };
+
+const PORTAL_LAST_WEEK_FILTER = "last-week";
+const PORTAL_WEEK_FILTER_PREFIX = "week:";
+
+function buildPortalCompletedFilterModel(
+  dayKeys: string[],
+  now: Date = new Date()
+): PortalCompletedFilterModel {
+  const currentWeekStart = portalStartOfWeekMonday(now);
+  const currentWeekStartKey = portalDayKeyFromDate(currentWeekStart);
+  const lastWeekStartKey = portalDayKeyFromDate(portalAddDays(currentWeekStart, -7));
+
+  const byWeek = new Map<string, string[]>();
+  for (const dayKey of dayKeys) {
+    const weekStartKey = portalWeekStartKeyForDay(dayKey);
+    const list = byWeek.get(weekStartKey) ?? [];
+    list.push(dayKey);
+    byWeek.set(weekStartKey, list);
+  }
+
+  const toDayOptions = (days: string[] | undefined): PortalCompletedFilterOption[] =>
+    [...(days ?? [])]
+      .sort((a, b) => b.localeCompare(a))
+      .map((dayKey) => ({
+        value: dayKey,
+        label: formatPortalCompletedDayLabel(dayKey),
+      }));
+
+  const currentWeekOptions = toDayOptions(byWeek.get(currentWeekStartKey));
+  const lastWeekDayKeys = [...(byWeek.get(lastWeekStartKey) ?? [])].sort((a, b) =>
+    b.localeCompare(a)
+  );
+  const lastWeekOptions = toDayOptions(lastWeekDayKeys);
+
+  const olderWeeks: PortalCompletedOlderWeek[] = Array.from(byWeek.keys())
+    .filter((weekStartKey) => weekStartKey < lastWeekStartKey)
+    .sort((a, b) => b.localeCompare(a))
+    .map((weekStartKey) => {
+      const weekDayKeys = [...(byWeek.get(weekStartKey) ?? [])].sort((a, b) =>
+        b.localeCompare(a)
+      );
+      return {
+        weekStartKey,
+        weekFilterValue: `${PORTAL_WEEK_FILTER_PREFIX}${weekStartKey}`,
+        label: `Week (${formatPortalWeekRangeShort(weekStartKey)})`,
+        dayKeys: weekDayKeys,
+        dayOptions: toDayOptions(weekDayKeys),
+      };
+    });
+
+  return {
+    currentWeekOptions,
+    lastWeekOptions,
+    lastWeekDayKeys,
+    olderWeeks,
+  };
+}
+
+function matchesPortalCompletedDateFilter(
+  dayKey: string | null,
+  filter: string,
+  now: Date = new Date()
+): boolean {
+  if (filter === "all") return true;
+  if (!dayKey) return false;
+
+  if (filter === PORTAL_LAST_WEEK_FILTER) {
+    const currentWeekStart = portalStartOfWeekMonday(now);
+    const lastWeekStartKey = portalDayKeyFromDate(portalAddDays(currentWeekStart, -7));
+    return portalWeekStartKeyForDay(dayKey) === lastWeekStartKey;
+  }
+
+  if (filter.startsWith(PORTAL_WEEK_FILTER_PREFIX)) {
+    const weekStartKey = filter.slice(PORTAL_WEEK_FILTER_PREFIX.length);
+    return portalWeekStartKeyForDay(dayKey) === weekStartKey;
+  }
+
+  return dayKey === filter;
+}
+
+function isPortalLastWeekFilterValue(
+  filter: string,
+  lastWeekDayKeys: string[]
+): boolean {
+  return filter === PORTAL_LAST_WEEK_FILTER || lastWeekDayKeys.includes(filter);
+}
+
+function findPortalOlderWeekForFilter(
+  filter: string,
+  olderWeeks: PortalCompletedOlderWeek[]
+): PortalCompletedOlderWeek | null {
+  if (filter.startsWith(PORTAL_WEEK_FILTER_PREFIX)) {
+    const weekStartKey = filter.slice(PORTAL_WEEK_FILTER_PREFIX.length);
+    return olderWeeks.find((week) => week.weekStartKey === weekStartKey) ?? null;
+  }
+  return olderWeeks.find((week) => week.dayKeys.includes(filter)) ?? null;
+}
+
+function getPortalCompletedDateMenuForFilter(
+  filter: string,
+  model: PortalCompletedFilterModel
+): PortalCompletedDateMenu {
+  if (isPortalLastWeekFilterValue(filter, model.lastWeekDayKeys)) {
+    return { type: "last-week" };
+  }
+  const olderWeek = findPortalOlderWeekForFilter(filter, model.olderWeeks);
+  if (olderWeek) {
+    return { type: "week", weekStartKey: olderWeek.weekStartKey };
+  }
+  return { type: "root" };
+}
+
+function formatPortalCompletedFilterButtonLabel(filter: string): string {
+  if (filter === "all") return "Completed On: All";
+  if (filter === PORTAL_LAST_WEEK_FILTER) return "Completed On: Last Week";
+  if (filter.startsWith(PORTAL_WEEK_FILTER_PREFIX)) {
+    const weekStartKey = filter.slice(PORTAL_WEEK_FILTER_PREFIX.length);
+    return `Completed On: Week (${formatPortalWeekRangeShort(weekStartKey)})`;
+  }
+  return `Completed On: ${formatPortalCompletedDayLabel(filter)}`;
 }
 
 function portalVideoTest(account: {
@@ -124,16 +354,6 @@ function portalVideoFileName(employeeId: string, employeeName: string): string {
   return namePart ? `${idPart}-${namePart}.webm` : `${idPart}.webm`;
 }
 
-function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
-  if (score === null || score === undefined) return "—";
-  return `${score}/${scoreMax}`;
-}
-
-function portalScorePercent(score: number | null | undefined, scoreMax = 25): number {
-  if (score === null || score === undefined || scoreMax <= 0) return 0;
-  return Math.round((score / scoreMax) * 100);
-}
-
 function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
   const headersObj: Record<string, string> = {};
@@ -169,6 +389,7 @@ function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respo
       window.sessionStorage.removeItem("resume-admin-authenticated");
       window.sessionStorage.removeItem("admin-email");
       window.sessionStorage.removeItem("admin_token");
+      clearAdminAccessFlags();
       window.location.reload();
     }
     return res;
@@ -178,66 +399,64 @@ function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respo
 const fetch = adminFetch;
 
 function extractSkillsFromText(text: string): string[] {
-  if (!text) return [];
-  const COMMON_TECH_SKILLS = [
-    "javascript", "typescript", "python", "java", "c++", "c#", "c", "ruby", "golang", "php", "rust", "swift", "kotlin", "perl", "r", "scala",
-    "react", "angular", "vue", "next.js", "nextjs", "nuxt", "node.js", "nodejs", "express", "django", "flask", "spring", "springboot", "asp.net", "laravel", "rails",
-    "sql", "postgresql", "postgres", "oracle", "mysql", "sql server", "sqlite", "mongodb", "mongo", "redis", "cassandra", "dynamodb", "mariadb", "couchdb", "neo4j",
-    "aws", "amazon web services", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s", "jenkins", "ansible", "terraform", "ci/cd", "cicd", "git", "github", "gitlab",
-    "linux", "windows", "unix", "ubuntu", "centos", "redhat", "red hat", "debian", "macos", "shell", "bash", "powershell",
-    "splunk", "datadog", "dynatrace", "appdynamics", "new relic", "prometheus", "grafana", "elk", "elasticsearch", "logstash", "kibana", "service now", "servicenow", "jira", "confluence",
-    "manual testing", "manual", "automation", "selenium", "postman", "jmeter", "cucumber", "testing",
-    "microservices", "api", "apis", "rest", "graphql", "soap", "kafka", "rabbitmq", "mq", "activemq", "architecture", "architect", "estimation", "rca", "incident management", "problem management", "change management"
-  ];
-  
-  const lower = text.toLowerCase();
-  const found = new Set<string>();
-  for (const skill of COMMON_TECH_SKILLS) {
-    const escaped = skill.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-    const regex = new RegExp(`(^|[^a-zA-Z0-9_#+])(${escaped})([^a-zA-Z0-9_#+]|$)`, 'i');
-    if (regex.test(lower)) {
-      if (skill === "postgres") found.add("PostgreSQL");
-      else if (skill === "nodejs") found.add("Node.js");
-      else if (skill === "nextjs") found.add("Next.js");
-      else if (skill === "amazon web services") found.add("AWS");
-      else if (skill === "google cloud") found.add("GCP");
-      else if (skill === "servicenow") found.add("ServiceNow");
-      else if (skill === "red hat") found.add("RedHat");
-      else if (skill === "apis") found.add("API");
-      else {
-        const pretty = skill.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-        found.add(pretty);
-      }
-    }
-  }
-  return Array.from(found);
+  return extractJdDisplaySkills(text);
 }
 
-function calculateCandidateMatch(row: any, jdText: string): { score: number; matchingSkills: string[] } {
+function extractJobTitleFromJd(text: string, fallback = "Untitled requirement"): string {
+  const raw = String(text || "").trim();
+  if (!raw) return fallback;
+  const labeled = raw.match(/Job Title:\s*(.+?)(?:\n|Mandatory Skills:|$)/i);
+  if (labeled?.[1]) {
+    return labeled[1].replace(/\s+/g, " ").trim() || fallback;
+  }
+  const firstLine = raw.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || "";
+  if (firstLine && !firstLine.toLowerCase().startsWith("mandatory skills:")) {
+    return firstLine.replace(/\s+/g, " ").slice(0, 120);
+  }
+  return fallback;
+}
+
+function requirementCreatedDayKey(createdAt: unknown): string {
+  const d = new Date(String(createdAt || ""));
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatRequirementDayLabel(dayKey: string): string {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  if (!y || !m || !d) return dayKey;
+  return new Date(y, m - 1, d).toLocaleDateString();
+}
+
+function requirementDuplicateKey(jd: { id?: string; jdText?: string }): string {
+  const title = extractJobTitleFromJd(jd.jdText || "", "").toLowerCase();
+  const skillsMatch = String(jd.jdText || "").match(/Mandatory Skills:\s*(.+?)(?:\n|$)/i);
+  const skills = (skillsMatch?.[1] || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const genericTitle = !title || title === "technical role" || title === "untitled requirement";
+  if (genericTitle) {
+    const text = String(jd.jdText || "").trim().toLowerCase();
+    return text.length < 40 ? `id:${jd.id}` : text;
+  }
+  if (skills) return `${title}::${skills}`;
+  const text = String(jd.jdText || "").trim().toLowerCase();
+  return text.length < 80 ? `id:${jd.id}` : `${title}::${text.slice(0, 240)}`;
+}
+
+function calculateCandidateMatch(row: any, jdText: string) {
   if (!row || !jdText) {
-    return { score: 0, matchingSkills: [] };
+    return {
+      score: 0,
+      matchingSkills: [] as string[],
+      matchedCount: 0,
+      requiredCount: 0,
+      decision: "reject" as const,
+      rationale: "No skills or requirement text to score.",
+    };
   }
-  
-  const candSkills = [
-    ...(row.parsed?.skills?.technical || []),
-    ...(row.parsed?.skills?.tools || [])
-  ];
-  
-  const jdSkillsList = extractSkillsFromText(jdText);
-  if (candSkills.length === 0 || jdSkillsList.length === 0) {
-    return { score: 0, matchingSkills: [] };
-  }
-  
-  const candSkillsLower = candSkills.map((s: string) => s.toLowerCase());
-  const jdSkillsLower = jdSkillsList.map((s: string) => s.toLowerCase());
-  
-  const matchingLower = candSkillsLower.filter((s: string) => jdSkillsLower.includes(s));
-  const matchingSkills = candSkills.filter((s: string) => matchingLower.includes(s.toLowerCase()));
-  
-  const divisor = Math.min(8, jdSkillsLower.length);
-  const score = Math.min(100, Math.round((matchingLower.length / divisor) * 100));
-  
-  return { score, matchingSkills };
+  return calculateSkillMatch(candidateMatchText(row), jdText);
 }
 
 
@@ -259,13 +478,37 @@ interface ResetLog {
 }
 
 function resolveJdId(jdId: string): string {
-  if (jdId === "42494d90-ab41-4f39-87a1-c01be666e9f7") {
-    return "5ca7d4fe-c80a-4b9a-a360-c787dbdc5f8b"; // Maps to 49238BR
+  // Identity — JD UUIDs come from Supabase; no hardcoded remaps.
+  return jdId || "";
+}
+
+const PINNED_JD_STORAGE_KEY = "hr-console-pinned-jd-id";
+
+function readPinnedJdId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return localStorage.getItem(PINNED_JD_STORAGE_KEY) || "";
+  } catch {
+    return "";
   }
-  if (jdId === "a5b156cf-c501-4410-a3f9-2a50b766347a") {
-    return "5bf4e5d4-6578-4cb0-a8c5-16c8b29ecbba"; // Maps to 47652BR
+}
+
+function isNamedPinnedJd(jd: { fileName?: string; jdText?: string }): boolean {
+  const file = (jd.fileName || "").toLowerCase();
+  const text = (jd.jdText || "").toLowerCase();
+  return file.includes("pinned") || text.includes("[pinned]");
+}
+
+function pickDefaultJd(jdsList: any[]): any | undefined {
+  if (!jdsList?.length) return undefined;
+  const pinnedId = readPinnedJdId();
+  if (pinnedId) {
+    const pinned = jdsList.find((j) => j.id === pinnedId);
+    if (pinned) return pinned;
   }
-  return jdId;
+  const named = jdsList.find((j) => isNamedPinnedJd(j));
+  if (named) return named;
+  return jdsList[0];
 }
 
 export default function AdminDashboard() {
@@ -296,12 +539,21 @@ export default function AdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
+  const [canViewEmployeePortal, setCanViewEmployeePortal] = useState(true);
+  const [canChangePassword, setCanChangePassword] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
+  const [passwordModalError, setPasswordModalError] = useState("");
+  const [passwordModalSaving, setPasswordModalSaving] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [authError, setAuthError] = useState("");
 
   // Job Description states
   const [jds, setJds] = useState<any[]>([]);
   const [selectedJdId, setSelectedJdId] = useState<string>("");
+  const [pinnedJdId, setPinnedJdId] = useState<string>("");
   const [editingJdId, setEditingJdId] = useState<string | null>(null);
   const [editingRmEmail, setEditingRmEmail] = useState<string>("");
   const [editingBrId, setEditingBrId] = useState<string | null>(null);
@@ -316,15 +568,13 @@ export default function AdminDashboard() {
   const jdFileInputRef = useRef<HTMLInputElement>(null);
   const isInitialLoadRef = useRef(true);
   const [dashboardReady, setDashboardReady] = useState(false);
-  const [lastEmployeeSyncAt, setLastEmployeeSyncAt] = useState<Date | null>(null);
-  const [syncAgeTick, setSyncAgeTick] = useState(0);
-  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
-  const employeeSyncInFlightRef = useRef(false);
+  const emailsFetchSeqRef = useRef(0);
+  const deletedEmailIdsRef = useRef<Set<string>>(new Set());
   const [isJdDragging, setIsJdDragging] = useState(false);
 
   // Invite Configuration Modal states
   const [inviteTargetResume, setInviteTargetResume] = useState<any | null>(null);
-  const [inviteType, setInviteType] = useState<"technical" | "non-technical">("technical");
+  const [inviteType, setInviteType] = useState<"technical" | "non-technical" | "both">("technical");
   
   // Tech section counts
   const [countOverlapping, setCountOverlapping] = useState(8);
@@ -377,6 +627,7 @@ export default function AdminDashboard() {
   const [allTestResults, setAllTestResults] = useState<any[]>([]);
   const [resourcePortalEmployees, setResourcePortalEmployees] = useState<any[]>([]);
   const [resettingTestId, setResettingTestId] = useState<string | null>(null);
+  const [deletingVideoTestId, setDeletingVideoTestId] = useState<string | null>(null);
   const [resetTargetEmployee, setResetTargetEmployee] = useState<{
     testId: string;
     employeeId: string;
@@ -384,7 +635,14 @@ export default function AdminDashboard() {
   } | null>(null);
   const [testResultsSearch, setTestResultsSearch] = useState("");
   const [testStatusFilter, setTestStatusFilter] = useState<PortalTestStatusFilter>("all");
+  const [portalCompletedDateFilter, setPortalCompletedDateFilter] = useState<string>("all");
+  const [portalCompletedDateMenu, setPortalCompletedDateMenu] = useState<PortalCompletedDateMenu>({
+    type: "root",
+  });
+  const [portalCompletedDateOpen, setPortalCompletedDateOpen] = useState(false);
+  const portalCompletedDateRef = useRef<HTMLDivElement | null>(null);
   const [expandedEmployees, setExpandedEmployees] = useState<Record<string, boolean>>({});
+  const [expandedProctorFlags, setExpandedProctorFlags] = useState<Record<string, boolean>>({});
   const [testAttemptDetails, setTestAttemptDetails] = useState<
     Record<
       string,
@@ -413,15 +671,26 @@ export default function AdminDashboard() {
   const [selectedResumeIds, setSelectedResumeIds] = useState<string[]>([]);
   const [selectedEmailIds, setSelectedEmailIds] = useState<string[]>([]);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [selectedJdIds, setSelectedJdIds] = useState<string[]>([]);
+  const [selectedPortalEmployeeIds, setSelectedPortalEmployeeIds] = useState<string[]>([]);
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(false);
   const [isExportingPortal, setIsExportingPortal] = useState(false);
   const [isDispatchingMails, setIsDispatchingMails] = useState(false);
   const [isBulkDispatchingMails, setIsBulkDispatchingMails] = useState(false);
+  const [portalMailSendingId, setPortalMailSendingId] = useState<string | null>(null);
+  const [isBulkPortalMailing, setIsBulkPortalMailing] = useState(false);
+  const [isBulkPortalDownloading, setIsBulkPortalDownloading] = useState(false);
+  const [bulkPortalDownloadProgress, setBulkPortalDownloadProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [activeEmployee, setActiveEmployee] = useState<any>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [requirementSearch, setRequirementSearch] = useState("");
+  const [requirementDateFilter, setRequirementDateFilter] = useState("all");
+  const [requirementSkillFilter, setRequirementSkillFilter] = useState("all");
   const [candidateSearch, setCandidateSearch] = useState("");
   const [outboxSearch, setOutboxSearch] = useState("");
   const [expandedJdId, setExpandedJdId] = useState<string | null>(null);
@@ -440,7 +709,7 @@ export default function AdminDashboard() {
 
   // Ingestion status state
   const [pipelineStatus, setPipelineStatus] = useState("Ingestion: Idle");
-  const [refreshingType, setRefreshingType] = useState<"requirements" | "candidates" | "employees" | "interviews" | null>(null);
+  const [refreshingType, setRefreshingType] = useState<"requirements" | "candidates" | "employees" | "interviews" | "all" | null>(null);
   const [activityLogs, setActivityLogs] = useState<string[]>([]);
   const [uploadCategory, setUploadCategory] = useState("resume");
 
@@ -449,13 +718,21 @@ export default function AdminDashboard() {
     setSelectedResumeIds([]);
     setSelectedEmailIds([]);
     setSelectedEmployeeIds([]);
+    setSelectedJdIds([]);
   }, [activeTab]);
 
   // General Action Loading states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [videoPreview, setVideoPreview] = useState<{ url: string; title: string } | null>(null);
+  const [videoPreview, setVideoPreview] = useState<{
+    url: string;
+    title: string;
+    testId: string;
+    employeeId: string;
+    employeeName?: string;
+    mode: "stream" | "blob" | "cdn";
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -464,6 +741,10 @@ export default function AdminDashboard() {
         setAdminEmail(storedEmail);
         setAuthenticated(true);
       }
+      const flags = readAdminAccessFlags();
+      setCanViewEmployeePortal(flags.canViewEmployeePortal);
+      setCanChangePassword(flags.canChangePassword);
+      setPinnedJdId(readPinnedJdId());
     }
     setAuthInitialized(true);
   }, []);
@@ -474,9 +755,30 @@ export default function AdminDashboard() {
         window.sessionStorage.removeItem("resume-admin-authenticated");
         window.sessionStorage.removeItem("admin-email");
         window.sessionStorage.removeItem("admin_token");
+        clearAdminAccessFlags();
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!adminEmail) return;
+    void (async () => {
+      try {
+        const res = await adminFetch(`/api/admin/auth/validate?email=${encodeURIComponent(adminEmail)}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return;
+        const access = {
+          canViewEmployeePortal: data.canViewEmployeePortal !== false,
+          canChangePassword: Boolean(data.canChangePassword),
+        };
+        storeAdminAccessFlags(access);
+        setCanViewEmployeePortal(access.canViewEmployeePortal);
+        setCanChangePassword(access.canChangePassword);
+      } catch {
+        // Keep session flags if the access lookup fails.
+      }
+    })();
+  }, [adminEmail]);
 
   useEffect(() => {
     if (!authenticated || !adminEmail) {
@@ -486,6 +788,12 @@ export default function AdminDashboard() {
 
     loadInitialData(adminEmail);
   }, [authenticated, adminEmail]);
+
+  useEffect(() => {
+    if (!canViewEmployeePortal && activeTab === "employee-portal") {
+      setActiveTab("requirements");
+    }
+  }, [canViewEmployeePortal, activeTab]);
 
   useEffect(() => {
     if (authenticated && adminEmail) {
@@ -500,6 +808,65 @@ export default function AdminDashboard() {
     setSelectedResumeIds(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
+  };
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setCurrentPasswordInput("");
+    setNewPasswordInput("");
+    setConfirmPasswordInput("");
+    setPasswordModalError("");
+    setPasswordModalSaving(false);
+  };
+
+  const handleChangeAdminPassword = async () => {
+    if (!canChangePassword) return;
+    const currentPassword = currentPasswordInput.trim();
+    const newPassword = newPasswordInput.trim();
+    const confirmPassword = confirmPasswordInput.trim();
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordModalError("Fill in current password, new password, and confirm password.");
+      return;
+    }
+    if (newPassword.length < 5) {
+      setPasswordModalError("New password must be at least 5 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordModalError("New password and confirmation do not match.");
+      return;
+    }
+    if (newPassword === currentPassword) {
+      setPasswordModalError("New password must be different from the current password.");
+      return;
+    }
+
+    setPasswordModalSaving(true);
+    setPasswordModalError("");
+    try {
+      const res = await adminFetch("/api/admin/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: adminEmail,
+          currentPassword,
+          newPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPasswordModalError(data.error || "Failed to change password.");
+        return;
+      }
+      closePasswordModal();
+      setActionError(null);
+      setActionSuccess("Password updated. Use the new password the next time you sign in.");
+    } catch {
+      setPasswordModalError("Failed to change password. Please try again.");
+    } finally {
+      setPasswordModalSaving(false);
+    }
   };
 
   const handleToggleAllResumes = () => {
@@ -610,7 +977,11 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`);
       const data = await res.json();
-      setResumes(data.resumes || []);
+      if (Array.isArray(data.resumes)) {
+        setResumes(data.resumes);
+      } else {
+        console.warn("[admin] resumes payload missing resumes[]; keeping prior state");
+      }
     } catch (err) {
       console.error("Failed to fetch resumes", err);
     } finally {
@@ -624,9 +995,12 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/admin/jd?email=${encodeURIComponent(email)}`);
       const data = await res.json();
-      if (data.jds) {
-        setJds(data.jds || []);
-        if (data.jds.length > 0) {
+      if (!Array.isArray(data.jds)) {
+        console.warn("[admin] jd payload missing jds[]; keeping prior state");
+        return;
+      }
+      setJds(data.jds);
+      if (data.jds.length > 0) {
           setSelectedJdId((prevId) => {
             const exists = data.jds.some((j: any) => j.id === prevId);
             if (exists && prevId && prevId !== "all") {
@@ -636,15 +1010,8 @@ export default function AdminDashboard() {
               return prevId;
             }
 
-            // Default to 47652BR if it exists, otherwise fallback to 46401BR / 46394BR
-            const defaultJd = data.jds.find((j: any) => 
-              (j.fileName && j.fileName.includes("47652")) || 
-              (j.brId && j.brId.includes("47652")) ||
-              (j.id && j.id.includes("47652"))
-            ) || data.jds.find((j: any) => 
-              (j.fileName && (j.fileName.includes("46401") || j.fileName.includes("46394"))) || 
-              (j.brId && (j.brId.includes("46401") || j.brId.includes("46394")))
-            ) || data.jds[0];
+            // Default to most recent JD from Supabase (list is newest-first)
+            const defaultJd = pickDefaultJd(data.jds);
 
             if (defaultJd) {
               setJdSavedText(defaultJd.jdText);
@@ -658,7 +1025,6 @@ export default function AdminDashboard() {
           setJdSavedText("");
           setJdText("");
         }
-      }
     } catch (err) {
       console.error("Failed to load JDs", err);
     } finally {
@@ -666,17 +1032,36 @@ export default function AdminDashboard() {
     }
   };
 
+  const applyEmails = (incoming: any[]) => {
+    const hidden = deletedEmailIdsRef.current;
+    if (hidden.size === 0) {
+      setEmails(incoming);
+      return;
+    }
+    const incomingIds = new Set(incoming.map((item) => String(item.id)));
+    for (const id of Array.from(hidden)) {
+      if (!incomingIds.has(id)) hidden.delete(id);
+    }
+    setEmails(incoming.filter((item) => !hidden.has(String(item.id))));
+  };
+
   const loadEmails = async (emailToUse?: string, opts?: { silent?: boolean }) => {
     const email = emailToUse || adminEmail;
+    const seq = ++emailsFetchSeqRef.current;
     if (!opts?.silent) setIsEmailsLoading(true);
     try {
       const res = await fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`);
       const data = await res.json();
-      setEmails(data.emails || []);
+      if (seq !== emailsFetchSeqRef.current) return;
+      if (Array.isArray(data.emails)) {
+        applyEmails(data.emails);
+      } else {
+        console.warn("[admin] emails payload missing emails[]; keeping prior state");
+      }
     } catch (err) {
       console.error("Failed to fetch emails", err);
     } finally {
-      if (!opts?.silent) setIsEmailsLoading(false);
+      if (!opts?.silent && seq === emailsFetchSeqRef.current) setIsEmailsLoading(false);
     }
   };
 
@@ -693,14 +1078,8 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadEmployees = useCallback(async (opts?: { silent?: boolean; fresh?: boolean }) => {
-    if (employeeSyncInFlightRef.current && opts?.silent) return;
-    employeeSyncInFlightRef.current = true;
-    if (!opts?.silent) {
-      setIsEmployeesLoading(true);
-    } else {
-      setIsBackgroundSyncing(true);
-    }
+  const loadEmployees = useCallback(async (opts?: { fresh?: boolean }) => {
+    setIsEmployeesLoading(true);
     try {
       const sendJdId = selectedJdId && !selectedJdId.includes("@") ? selectedJdId : "all";
       const freshQuery = opts?.fresh ? "&fresh=1" : "";
@@ -708,19 +1087,24 @@ export default function AdminDashboard() {
         `/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}${freshQuery}`
       );
       const data = await res.json();
-      setEmployees(data.employees || []);
-      setAllTestResults(data.allTestResults || []);
-      setResourcePortalEmployees(data.resourcePortalEmployees || []);
-      setLastEmployeeSyncAt(new Date());
+      if (!res.ok) {
+        console.warn("[admin] employees fetch failed; keeping prior state", data?.error);
+        return;
+      }
+      // Never wipe prior roster/portal data on partial/empty error payloads
+      if (Array.isArray(data.employees)) {
+        setEmployees(data.employees);
+      }
+      if (Array.isArray(data.allTestResults)) {
+        setAllTestResults(data.allTestResults);
+      }
+      if (Array.isArray(data.resourcePortalEmployees)) {
+        setResourcePortalEmployees(data.resourcePortalEmployees);
+      }
     } catch (err) {
       console.error("Failed to fetch employees", err);
     } finally {
-      employeeSyncInFlightRef.current = false;
-      if (!opts?.silent) {
-        setIsEmployeesLoading(false);
-      } else {
-        setIsBackgroundSyncing(false);
-      }
+      setIsEmployeesLoading(false);
     }
   }, [selectedJdId]);
 
@@ -732,51 +1116,6 @@ export default function AdminDashboard() {
       loadEmployees();
     }
   }, [authenticated, adminEmail, selectedJdId, loadEmployees]);
-
-  // Live auto-sync: poll Supabase-backed portal data without manual refresh
-  useEffect(() => {
-    if (!authenticated || !adminEmail || !dashboardReady) return;
-
-    const syncEmployees = () => {
-      if (document.hidden) return;
-      void loadEmployees({ silent: true, fresh: true });
-    };
-
-    syncEmployees();
-    const employeeInterval = window.setInterval(syncEmployees, AUTO_SYNC_EMPLOYEES_MS);
-
-    let otherInterval: number | undefined;
-    if (activeTab === "suitable" || activeTab === "unsuitable") {
-      const syncResumes = () => {
-        if (!document.hidden) void loadResumes(undefined, { silent: true });
-      };
-      syncResumes();
-      otherInterval = window.setInterval(syncResumes, AUTO_SYNC_OTHER_MS);
-    } else if (activeTab === "outbox") {
-      const syncOutbox = () => {
-        if (!document.hidden) void loadEmails(undefined, { silent: true });
-      };
-      syncOutbox();
-      otherInterval = window.setInterval(syncOutbox, AUTO_SYNC_OTHER_MS);
-    }
-
-    const onVisible = () => {
-      if (!document.hidden) syncEmployees();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      window.clearInterval(employeeInterval);
-      if (otherInterval) window.clearInterval(otherInterval);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [authenticated, adminEmail, dashboardReady, activeTab, loadEmployees]);
-
-  useEffect(() => {
-    if (!lastEmployeeSyncAt) return;
-    const id = window.setInterval(() => setSyncAgeTick((t) => t + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [lastEmployeeSyncAt]);
 
   const loadAssignedQuestions = async (employeeId: string) => {
     let shouldFetch = true;
@@ -854,23 +1193,91 @@ export default function AdminDashboard() {
           loadAssignedQuestions(account.employee_id);
         }
         if (
-          account.test_id &&
           account.test_status === "completed"
         ) {
-          loadTestAttemptDetails(account.test_id);
+          const completedTestId =
+            account.tests?.find((test: any) => test.status === "completed")?.id ??
+            account.test_id;
+          if (completedTestId) loadTestAttemptDetails(completedTestId);
         }
       }
     }
   }, [expandedEmployees, resourcePortalEmployees]);
 
+  const isDashboardBootstrapping = !dashboardReady;
   const isEmployeeDataPending =
-    loading || isEmployeesLoading || refreshingType === "employees";
+    isDashboardBootstrapping ||
+    loading ||
+    isEmployeesLoading ||
+    refreshingType === "employees" ||
+    refreshingType === "all";
+  const isTabContentLoading =
+    isDashboardBootstrapping ||
+    (activeTab === "employee" || activeTab === "employee-portal"
+      ? isEmployeeDataPending
+      : activeTab === "requirements"
+        ? isJdLoading
+        : activeTab === "outbox"
+          ? isEmailsLoading
+          : loading);
+
+  const portalCompletedDateModel = useMemo(() => {
+    const keys = new Set<string>();
+    for (const account of resourcePortalEmployees) {
+      const day = portalCompletedDayKey(portalPrimaryCompletedAt(account));
+      if (day) keys.add(day);
+    }
+    return buildPortalCompletedFilterModel(Array.from(keys));
+  }, [resourcePortalEmployees]);
+
+  useEffect(() => {
+    if (!portalCompletedDateOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (
+        portalCompletedDateRef.current &&
+        target &&
+        !portalCompletedDateRef.current.contains(target)
+      ) {
+        setPortalCompletedDateOpen(false);
+        setPortalCompletedDateMenu(
+          getPortalCompletedDateMenuForFilter(
+            portalCompletedDateFilter,
+            portalCompletedDateModel
+          )
+        );
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [portalCompletedDateOpen, portalCompletedDateFilter, portalCompletedDateModel]);
+
+  useEffect(() => {
+    if (portalCompletedDateFilter === "all") return;
+    const validValues = new Set<string>([
+      PORTAL_LAST_WEEK_FILTER,
+      ...portalCompletedDateModel.currentWeekOptions.map((o) => o.value),
+      ...portalCompletedDateModel.lastWeekOptions.map((o) => o.value),
+      ...portalCompletedDateModel.olderWeeks.flatMap((week) => [
+        week.weekFilterValue,
+        ...week.dayKeys,
+      ]),
+    ]);
+    if (!validValues.has(portalCompletedDateFilter)) {
+      setPortalCompletedDateFilter("all");
+      setPortalCompletedDateMenu({ type: "root" });
+    }
+  }, [portalCompletedDateFilter, portalCompletedDateModel]);
 
   const filteredPortalEmployees = useMemo(() => {
     const term = testResultsSearch.trim().toLowerCase();
-    return resourcePortalEmployees.filter((account) => {
+    const filtered = resourcePortalEmployees.filter((account) => {
       if (!matchesPortalTestStatusFilter(account.test_status, testStatusFilter)) {
         return false;
+      }
+      if (portalCompletedDateFilter !== "all") {
+        const day = portalCompletedDayKey(portalPrimaryCompletedAt(account));
+        if (!matchesPortalCompletedDateFilter(day, portalCompletedDateFilter)) return false;
       }
       if (!term) return true;
       return (
@@ -879,19 +1286,259 @@ export default function AdminDashboard() {
         account.role?.toLowerCase().includes(term) ||
         account.domain?.toLowerCase().includes(term) ||
         account.product?.toLowerCase().includes(term) ||
+        (term.includes("nds") && account.product?.toLowerCase() === "sdl") ||
         account.email?.toLowerCase().includes(term) ||
         account.ddh?.toLowerCase().includes(term)
       );
     });
-  }, [resourcePortalEmployees, testResultsSearch, testStatusFilter]);
+
+    return filtered.sort((a, b) => {
+      const nameCmp = portalEmployeeName(a).localeCompare(portalEmployeeName(b), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+      if (nameCmp !== 0) return nameCmp;
+      return String(a.employee_id || "").localeCompare(String(b.employee_id || ""), undefined, { numeric: true });
+    });
+  }, [resourcePortalEmployees, testResultsSearch, testStatusFilter, portalCompletedDateFilter]);
+
+  const portalDateOnlyMatchCount = useMemo(() => {
+    if (portalCompletedDateFilter === "all") return 0;
+    return resourcePortalEmployees.filter((account) =>
+      matchesPortalCompletedDateFilter(
+        portalCompletedDayKey(portalPrimaryCompletedAt(account)),
+        portalCompletedDateFilter
+      )
+    ).length;
+  }, [resourcePortalEmployees, portalCompletedDateFilter]);
+
+  const hasActivePortalFilters =
+    Boolean(testResultsSearch.trim()) ||
+    testStatusFilter !== "all" ||
+    portalCompletedDateFilter !== "all";
+
+  const clearPortalFilters = () => {
+    setTestResultsSearch("");
+    setTestStatusFilter("all");
+    setPortalCompletedDateFilter("all");
+    setPortalCompletedDateMenu({ type: "root" });
+  };
+
+  const selectedPortalVideoTargets = useMemo(() => {
+    return selectedPortalEmployeeIds
+      .map((id) => {
+        const account = resourcePortalEmployees.find((entry) => entry.employee_id === id);
+        if (!account) return null;
+        const videoTest = portalVideoTest(account);
+        return videoTest?.hasVideo
+          ? { employeeId: id, testId: videoTest.testId }
+          : null;
+      })
+      .filter(Boolean) as Array<{ employeeId: string; testId: string }>;
+  }, [selectedPortalEmployeeIds, resourcePortalEmployees]);
+
+  const handleTogglePortalEmployeeSelect = (id: string) => {
+    setSelectedPortalEmployeeIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleAllPortalEmployees = () => {
+    const currentListIds = filteredPortalEmployees.map((account) => account.employee_id);
+    const allSelected =
+      currentListIds.length > 0 &&
+      currentListIds.every((id) => selectedPortalEmployeeIds.includes(id));
+    if (allSelected) {
+      setSelectedPortalEmployeeIds((prev) => prev.filter((id) => !currentListIds.includes(id)));
+    } else {
+      setSelectedPortalEmployeeIds((prev) => Array.from(new Set([...prev, ...currentListIds])));
+    }
+  };
+
+  const handleBulkDeletePortalVideos = () => {
+    if (selectedPortalVideoTargets.length === 0) return;
+    setDeleteTargetId("bulk-portal-videos");
+    setDeletePasswordInput("");
+    setDeleteModalError(null);
+  };
+
+  const handleBulkDownloadPortalVideos = async () => {
+    if (selectedPortalVideoTargets.length === 0 || isBulkPortalDownloading) return;
+    setIsBulkPortalDownloading(true);
+    setBulkPortalDownloadProgress({ current: 0, total: selectedPortalVideoTargets.length });
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const usedNames = new Set<string>();
+      let downloaded = 0;
+      let skipped = 0;
+
+      for (const target of selectedPortalVideoTargets) {
+        const account = resourcePortalEmployees.find(
+          (entry) => entry.employee_id === target.employeeId
+        );
+        const employeeName = account ? portalEmployeeName(account) : target.employeeId;
+        try {
+          const { blob, fileName } = await fetchTestVideoBlob(
+            target.testId,
+            target.employeeId,
+            employeeName
+          );
+          let uniqueName = fileName;
+          if (usedNames.has(uniqueName)) {
+            const base = fileName.replace(/\.webm$/i, "");
+            uniqueName = `${base}-${sanitizeDownloadPart(target.testId) || "test"}.webm`;
+          }
+          usedNames.add(uniqueName);
+          zip.file(uniqueName, blob);
+          downloaded += 1;
+        } catch {
+          skipped += 1;
+        }
+        setBulkPortalDownloadProgress({
+          current: downloaded + skipped,
+          total: selectedPortalVideoTargets.length,
+        });
+      }
+
+      if (downloaded === 0) {
+        throw new Error("Could not download any selected recordings.");
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `employee_portal_videos_${new Date().toISOString().split("T")[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setActionSuccess(
+        skipped > 0
+          ? `Downloaded ${downloaded} video(s) as a ZIP. ${skipped} skipped (no recording or not found). Open WebM files in Chrome/Edge or VLC.`
+          : `Downloaded ${downloaded} video(s) as a ZIP. Open WebM files in Chrome/Edge or VLC — Windows Media Player does not support WebM.`
+      );
+      setTimeout(() => setActionSuccess(null), 5000);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to download selected videos.");
+    } finally {
+      setIsBulkPortalDownloading(false);
+      setBulkPortalDownloadProgress(null);
+    }
+  };
+
+  const buildPortalMailRecipients = (employeeIds: string[]) => {
+    return employeeIds
+      .map((id) => {
+        const account = resourcePortalEmployees.find((entry) => entry.employee_id === id);
+        if (!account?.email) return null;
+        return {
+          employee_id: account.employee_id,
+          email: account.email,
+          full_name: portalEmployeeName(account),
+        };
+      })
+      .filter(Boolean) as Array<{ employee_id: string; email: string; full_name: string }>;
+  };
+
+  const handleSendPortalEmployeeMail = async (account: {
+    employee_id: string;
+    email?: string | null;
+    full_name?: string | null;
+  }) => {
+    if (!account.email) {
+      setActionError("Cannot send mail: this employee has no email address.");
+      return;
+    }
+    setPortalMailSendingId(account.employee_id);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const response = await fetch("/api/admin/employees/dispatch_mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminEmail,
+          portal: true,
+          recipients: [
+            {
+              employee_id: account.employee_id,
+              email: account.email,
+              full_name: portalEmployeeName(account),
+            },
+          ],
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send assessment invitation.");
+      }
+      setActionSuccess(
+        `Assessment invitation sent to ${portalEmployeeName(account)} (${account.email}).`
+      );
+      await loadEmails();
+    } catch (err: any) {
+      setActionError(err.message || "Failed to send assessment invitation.");
+    } finally {
+      setPortalMailSendingId(null);
+    }
+  };
+
+  const handleBulkSendPortalEmployeeMails = async () => {
+    const recipients = buildPortalMailRecipients(selectedPortalEmployeeIds);
+    if (recipients.length === 0) {
+      setActionError("Selected employees have no email addresses to send mail to.");
+      return;
+    }
+    setIsBulkPortalMailing(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const response = await fetch("/api/admin/employees/dispatch_mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminEmail,
+          portal: true,
+          recipients,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send assessment invitations.");
+      }
+      setActionSuccess(
+        `Assessment invitation sent to ${data.count} selected employee(s).`
+      );
+      await loadEmails();
+    } catch (err: any) {
+      setActionError(err.message || "Failed to send assessment invitations.");
+    } finally {
+      setIsBulkPortalMailing(false);
+    }
+  };
 
   const portalDashboardStats = useMemo(() => {
-    const scored = resourcePortalEmployees.filter((e) => e.score !== null);
+    const scored = resourcePortalEmployees.filter((e) => e.score !== null && e.score !== undefined);
+    const completed = resourcePortalEmployees.filter(
+      (e) =>
+        e.test_status === "completed" ||
+        (Array.isArray(e.tests) && e.tests.some((t: any) => t?.status === "completed"))
+    ).length;
+    const pending = resourcePortalEmployees.filter((e) =>
+      e.test_status === "pending" ||
+      e.test_status === "not_started" ||
+      e.test_status === "in_progress"
+    ).length;
     return {
       mapped: resourcePortalEmployees.length,
-      assigned: resourcePortalEmployees.filter((e) => e.test_id).length,
-      pending: resourcePortalEmployees.filter((e) => e.test_status === "pending").length,
-      completed: resourcePortalEmployees.filter((e) => e.test_status === "completed").length,
+      assigned: resourcePortalEmployees.filter((e) => e.test_id || (e.assigned_question_count ?? 0) > 0).length,
+      pending,
+      completed,
       globalAvgScore:
         scored.length > 0
           ? Math.round(scored.reduce((acc, curr) => acc + (curr.score || 0), 0) / scored.length)
@@ -943,6 +1590,40 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeleteEmployeeVideo = async (
+    testId: string,
+    employeeId: string,
+    employeeName: string
+  ) => {
+    const confirmed = window.confirm(
+      `Delete proctoring video only for ${employeeName || employeeId}?\n\nThis removes the recording from storage. Test score, status, and answers will NOT be changed.`
+    );
+    if (!confirmed) return;
+
+    setDeletingVideoTestId(testId);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/admin/employees/delete-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testId, employeeId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete video");
+      setActionSuccess(
+        `Proctoring video deleted for ${employeeName || employeeId}. Score and test status unchanged.`
+      );
+      if (videoPreview?.testId === testId) {
+        setVideoPreview(null);
+      }
+      await loadEmployees({ fresh: true });
+    } catch (err: any) {
+      setActionError(err.message || "Failed to delete video");
+    } finally {
+      setDeletingVideoTestId(null);
+    }
+  };
+
   const fetchTestVideoBlob = async (
     testId: string,
     employeeId: string,
@@ -969,10 +1650,26 @@ export default function AdminDashboard() {
     if (contentType.includes("application/json")) {
       throw new Error("Recording not available for this test.");
     }
-    const blob = await res.blob();
-    if (!blob.size) throw new Error("Recording file is empty.");
-    if (blob.size < 512) throw new Error("Recording file is too small or incomplete.");
+    const arrayBuffer = await res.arrayBuffer();
+    if (!arrayBuffer.byteLength) throw new Error("Recording file is empty.");
+    if (arrayBuffer.byteLength < 512) throw new Error("Recording file is too small or incomplete.");
+    const blob = new Blob([arrayBuffer], { type: "video/webm" });
     return { blob, fileName };
+  };
+
+  const buildVideoStreamUrl = (
+    testId: string,
+    fileName: string,
+    token: string,
+    opts?: { cdn?: boolean }
+  ) => {
+    const params = new URLSearchParams({
+      inline: "1",
+      filename: fileName,
+      token,
+    });
+    if (opts?.cdn) params.set("cdn", "1");
+    return `/api/admin/employee-tests/${testId}/video?${params.toString()}`;
   };
 
   const handleDownloadTestVideo = async (
@@ -998,25 +1695,79 @@ export default function AdminDashboard() {
     }
   };
 
-  const handlePlayTestVideo = async (
+  const handlePlayTestVideo = (
     testId: string,
     employeeId: string,
     employeeName?: string
   ) => {
-    try {
-      if (videoPreview?.url?.startsWith("blob:")) {
-        URL.revokeObjectURL(videoPreview.url);
-      }
-      setActionError(null);
-      const { blob, fileName } = await fetchTestVideoBlob(testId, employeeId, employeeName);
-      const url = URL.createObjectURL(blob);
-      setVideoPreview({
-        url,
-        title: employeeName || employeeId || fileName,
-      });
-    } catch (err: any) {
-      setActionError(err.message || "Failed to open test recording");
+    if (videoPreview?.url?.startsWith("blob:")) {
+      URL.revokeObjectURL(videoPreview.url);
     }
+    setActionError(null);
+    const token =
+      typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
+    if (!token) {
+      setActionError("Admin session expired. Please log in again.");
+      return;
+    }
+    const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+    setVideoPreview({
+      url: buildVideoStreamUrl(testId, fileName, token),
+      title: employeeName || employeeId || fileName,
+      testId,
+      employeeId,
+      employeeName,
+      mode: "stream",
+    });
+  };
+
+  const handleVideoPlaybackError = async () => {
+    if (!videoPreview) return;
+    const { testId, employeeId, employeeName, mode, title } = videoPreview;
+
+    if (mode === "stream") {
+      try {
+        const { blob } = await fetchTestVideoBlob(testId, employeeId, employeeName);
+        if (videoPreview.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(videoPreview.url);
+        }
+        setVideoPreview({
+          url: URL.createObjectURL(blob),
+          title,
+          testId,
+          employeeId,
+          employeeName,
+          mode: "blob",
+        });
+        return;
+      } catch {
+        // fall through to CDN
+      }
+    }
+
+    if (mode === "stream" || mode === "blob") {
+      const token =
+        typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") : null;
+      if (token) {
+        if (videoPreview.url?.startsWith("blob:")) {
+          URL.revokeObjectURL(videoPreview.url);
+        }
+        const fileName = portalVideoFileName(employeeId, employeeName || employeeId);
+        setVideoPreview({
+          url: buildVideoStreamUrl(testId, fileName, token, { cdn: true }),
+          title,
+          testId,
+          employeeId,
+          employeeName,
+          mode: "cdn",
+        });
+        return;
+      }
+    }
+
+    setActionError(
+      "Could not play this recording in the browser. Use Download and open the file in Chrome or VLC."
+    );
   };
 
   const handleExportPortalData = async () => {
@@ -1096,31 +1847,8 @@ export default function AdminDashboard() {
     setIsSystemLogsLoading(true);
 
     try {
-      // 1. Fetch JDs first to compute default selectedJdId
-      const jdRes = await fetch(`/api/admin/jd?email=${encodeURIComponent(email)}`);
-      const jdData = await jdRes.json();
-      const fetchedJds = jdData.jds || [];
-
-      let initialJdId = "all";
-      let initialJdText = "";
-      if (fetchedJds.length > 0) {
-        const defaultJd = fetchedJds.find((j: any) => 
-          (j.fileName && j.fileName.includes("47652")) || 
-          (j.brId && j.brId.includes("47652")) ||
-          (j.id && j.id.includes("47652"))
-        ) || fetchedJds.find((j: any) => 
-          (j.fileName && (j.fileName.includes("46401") || j.fileName.includes("46394"))) || 
-          (j.brId && (j.brId.includes("46401") || j.brId.includes("46394")))
-        ) || fetchedJds[0];
-        
-        if (defaultJd) {
-          initialJdId = defaultJd.id;
-          initialJdText = defaultJd.jdText;
-        }
-      }
-
-      // 2. Fetch all other states in parallel using computed default JD ID
-      const sendJdId = (initialJdId && !initialJdId.includes("@")) ? initialJdId : "all";
+      const sendJdId =
+        selectedJdId && !selectedJdId.includes("@") ? selectedJdId : "all";
       const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T | null> =>
         Promise.race([
           promise,
@@ -1132,51 +1860,114 @@ export default function AdminDashboard() {
           ),
         ]);
 
-      const [resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] = await Promise.all([
-        withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 20000, "resumes"),
-        withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
-        withTimeout(fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}`), 60000, "employees"),
-        withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
-        withTimeout(fetch(`/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`), 15000, "logs"),
-        withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
-      ]);
+      // Load all dashboard datasets together — never clear prior state on timeout/partial failure
+      const [jdRes, resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] =
+        await Promise.all([
+          withTimeout(fetch(`/api/admin/jd?email=${encodeURIComponent(email)}`), 60000, "jd"),
+          withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 60000, "resumes"),
+          withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
+          withTimeout(
+            fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1`),
+            60000,
+            "employees"
+          ),
+          withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
+          withTimeout(
+            fetch(
+              `/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`
+            ),
+            15000,
+            "logs"
+          ),
+          withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
+        ]);
 
-      const [resumesData, emailsData, employeesData, resetLogsData, logsData, settingsData] = await Promise.all([
-        resumesRes ? resumesRes.json().catch(() => ({})) : Promise.resolve({}),
-        emailsRes ? emailsRes.json().catch(() => ({})) : Promise.resolve({}),
-        employeesRes ? employeesRes.json().catch(() => ({})) : Promise.resolve({}),
-        resetLogsRes ? resetLogsRes.json().catch(() => ({})) : Promise.resolve({}),
-        logsRes ? logsRes.json().catch(() => ({})) : Promise.resolve({}),
-        settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
-      ]);
+      const [jdData, resumesData, emailsData, employeesData, resetLogsData, logsData, settingsData] =
+        await Promise.all([
+          jdRes ? jdRes.json().catch(() => ({})) : Promise.resolve({}),
+          resumesRes ? resumesRes.json().catch(() => ({})) : Promise.resolve({}),
+          emailsRes ? emailsRes.json().catch(() => ({})) : Promise.resolve({}),
+          employeesRes ? employeesRes.json().catch(() => ({})) : Promise.resolve({}),
+          resetLogsRes ? resetLogsRes.json().catch(() => ({})) : Promise.resolve({}),
+          logsRes ? logsRes.json().catch(() => ({})) : Promise.resolve({}),
+          settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
+        ]);
 
-      // 3. Batch state updates together
-      setJds(fetchedJds);
-      setResumes(resumesData.resumes || []);
-      setEmails(emailsData.emails || []);
-      setEmployees(employeesData.employees || []);
-      setAllTestResults(employeesData.allTestResults || []);
-      setResourcePortalEmployees(employeesData.resourcePortalEmployees || []);
-      setResetLogs(resetLogsData.logs || []);
-      setSystemLogs(logsData.logs || []);
-      setLastEmployeeSyncAt(new Date());
-      
+      const fetchedJds = Array.isArray(jdData.jds) ? jdData.jds : null;
+      if (fetchedJds) {
+        setJds(fetchedJds);
+
+        let initialJdId = "all";
+        let initialJdText = "";
+        if (fetchedJds.length > 0) {
+          const namedPinned = fetchedJds.find((j: any) => isNamedPinnedJd(j));
+          if (namedPinned && !readPinnedJdId()) {
+            try {
+              localStorage.setItem(PINNED_JD_STORAGE_KEY, namedPinned.id);
+            } catch {}
+            setPinnedJdId(namedPinned.id);
+          }
+          const defaultJd = pickDefaultJd(fetchedJds);
+          if (defaultJd) {
+            initialJdId = defaultJd.id;
+            initialJdText = defaultJd.jdText;
+          }
+          setSelectedJdId(initialJdId);
+          setJdSavedText(initialJdText);
+          setJdText(initialJdText);
+        } else {
+          setSelectedJdId(email === "admin@infinite.com" ? "all" : "");
+          setJdSavedText("");
+          setJdText("");
+        }
+      } else {
+        console.warn("[admin] jd payload missing/timed out; retrying JD load");
+        await loadJobDescriptions(email);
+      }
+
+      if (Array.isArray(resumesData.resumes)) {
+        setResumes(resumesData.resumes);
+      } else if (resumesRes) {
+        console.warn("[admin] resumes payload missing resumes[]; keeping prior state");
+      } else {
+        console.warn("[admin] resumes timed out; keeping prior state");
+      }
+
+      if (Array.isArray(emailsData.emails)) {
+        applyEmails(emailsData.emails);
+      } else if (emailsRes) {
+        console.warn("[admin] emails payload missing emails[]; keeping prior state");
+      } else {
+        console.warn("[admin] emails timed out; keeping prior state");
+      }
+
+      if (Array.isArray(employeesData.employees)) {
+        setEmployees(employeesData.employees);
+      } else if (employeesRes) {
+        console.warn("[admin] employees payload missing employees[]; keeping prior state");
+      } else {
+        console.warn("[admin] employees timed out; keeping prior state");
+      }
+
+      if (Array.isArray(employeesData.allTestResults)) {
+        setAllTestResults(employeesData.allTestResults);
+      }
+      if (Array.isArray(employeesData.resourcePortalEmployees)) {
+        setResourcePortalEmployees(employeesData.resourcePortalEmployees);
+      }
+
+      if (Array.isArray(resetLogsData.logs)) {
+        setResetLogs(resetLogsData.logs);
+      }
+      if (Array.isArray(logsData.logs)) {
+        setSystemLogs(logsData.logs);
+      }
+
       if (settingsData && typeof settingsData === "object") {
         setPortalSettings({
           showSystemLogsViewer: settingsData.showSystemLogsViewer !== false,
         });
       }
-
-      if (fetchedJds.length > 0) {
-        setSelectedJdId(initialJdId);
-        setJdSavedText(initialJdText);
-        setJdText(initialJdText);
-      } else {
-        setSelectedJdId(email === "admin@infinite.com" ? "all" : "");
-        setJdSavedText("");
-        setJdText("");
-      }
-
     } catch (err) {
       console.error("Failed to load initial data", err);
     } finally {
@@ -1229,35 +2020,47 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleRefresh = async (type: "requirements" | "candidates" | "employees" | "interviews") => {
+  const handleRefresh = async (type: "requirements" | "candidates" | "employees" | "interviews" | "all") => {
     if (refreshingType) return;
     setRefreshingType(type);
+    const steps =
+      type === "all"
+        ? (["requirements", "candidates", "employees", "interviews"] as const)
+        : ([type] as const);
     setPipelineStatus(`Ingestion: Scanning & refreshing ${type}...`);
     setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Starting folder scan and refresh for ${type}...`, ...prev]);
     try {
       const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "all";
       const jdQuery = `&activeJdId=${encodeURIComponent(sendJdId)}`;
-      const res = await fetch(`/api/admin/refresh?type=${type}${jdQuery}`, {
-        method: "POST"
-      });
-      const result = await res.json();
-      if (result.success) {
-        setPipelineStatus(`Ingestion: Idle (Last scan: ${new Date().toLocaleTimeString()})`);
-        setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} completed.`, ...prev]);
-        
-        if (type === "requirements") {
+      for (const step of steps) {
+        setPipelineStatus(`Ingestion: Scanning & refreshing ${step}...`);
+        const res = await fetch(`/api/admin/refresh?type=${step}${jdQuery}`, {
+          method: "POST"
+        });
+        const result = await res.json();
+        if (!res.ok || !result.success) {
+          throw new Error(result.error || `Failed to refresh ${step}`);
+        }
+        if (step === "requirements") {
           await loadJobDescriptions();
-        } else if (type === "candidates" || type === "interviews") {
+        } else if (step === "candidates" || step === "interviews") {
           await loadResumes();
-        } else if (type === "employees") {
+        } else if (step === "employees") {
           await loadEmployees({ fresh: true });
         }
-        await loadLogs();
-        setActionSuccess(`Scan & refresh of ${type} completed successfully.`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      } else {
-        throw new Error(result.error || "Failed");
       }
+      if (type === "all") {
+        await loadEmails();
+      }
+      await loadLogs();
+      setPipelineStatus(`Ingestion: Idle (Last scan: ${new Date().toLocaleTimeString()})`);
+      setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} completed.`, ...prev]);
+      setActionSuccess(
+        type === "all"
+          ? "Scan & refresh of all sources completed successfully."
+          : `Scan & refresh of ${type} completed successfully.`
+      );
+      setTimeout(() => setActionSuccess(null), 3000);
     } catch (err: any) {
       setPipelineStatus("Ingestion: Error");
       setActivityLogs(prev => [`[${new Date().toLocaleTimeString()}] Scan & refresh for ${type} failed: ${err.message}`, ...prev]);
@@ -2043,6 +2846,7 @@ export default function AdminDashboard() {
               report: {
                 ...r.report,
                 suitability: nextSuitability,
+                suitabilityOverridden: true,
                 ...(activeJdIdToSend ? { jdId: activeJdIdToSend } : {})
               },
             };
@@ -2134,16 +2938,29 @@ export default function AdminDashboard() {
     try {
       const interviewConfig = {
         interviewType: inviteType,
-        sections: inviteType === "technical" ? {
-          overlapping: countOverlapping,
-          gap: countGap,
-          projects: countProjects,
-          coding: countCoding
-        } : {
-          behavioral: countBehavioral,
-          leadership: countLeadership,
-          softskills: countSoftSkills
-        }
+        sections:
+          inviteType === "technical"
+            ? {
+                overlapping: countOverlapping,
+                gap: countGap,
+                projects: countProjects,
+                coding: countCoding,
+              }
+            : inviteType === "non-technical"
+              ? {
+                  behavioral: countBehavioral,
+                  leadership: countLeadership,
+                  softskills: countSoftSkills,
+                }
+              : {
+                  overlapping: countOverlapping,
+                  gap: countGap,
+                  projects: countProjects,
+                  coding: countCoding,
+                  behavioral: countBehavioral,
+                  leadership: countLeadership,
+                  softskills: countSoftSkills,
+                },
       };
 
       const response = await fetch(`/api/admin/resumes/${resume.id}/invite`, {
@@ -2253,24 +3070,104 @@ export default function AdminDashboard() {
       return;
     }
 
+    if (targetId === "bulk-jds") {
+      setActionLoading("bulk-jds");
+      setActionError(null);
+      try {
+        const idsToDelete = [...selectedJdIds];
+        const response = await fetch("/api/admin/jd", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: idsToDelete }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to delete selected requirements");
+
+        if (selectedJdId && idsToDelete.includes(selectedJdId)) {
+          setSelectedJdId("all");
+          setJdSavedText("");
+          setJdText("");
+        }
+        if (pinnedJdId && idsToDelete.includes(pinnedJdId)) {
+          try {
+            localStorage.removeItem(PINNED_JD_STORAGE_KEY);
+          } catch {}
+          setPinnedJdId("");
+        }
+
+        setActionSuccess(`${idsToDelete.length} requirement(s) deleted successfully.`);
+        setSelectedJdIds([]);
+        setTimeout(() => setActionSuccess(null), 3000);
+        await loadJobDescriptions(adminEmail);
+      } catch (error: any) {
+        setActionError(error.message || "Failed to delete requirements.");
+      } finally {
+        setActionLoading(null);
+      }
+      return;
+    }
+
     if (targetId === "bulk-emails") {
       setActionLoading("bulk-emails");
       setActionError(null);
       try {
+        const idsToDelete = [...selectedEmailIds];
         const response = await fetch("/api/admin/emails", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: selectedEmailIds })
+          body: JSON.stringify({ ids: idsToDelete })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to delete emails");
 
-        setActionSuccess(`${selectedEmailIds.length} outbox log(s) deleted successfully.`);
+        emailsFetchSeqRef.current += 1;
+        idsToDelete.forEach((id) => deletedEmailIdsRef.current.add(String(id)));
+        if (Array.isArray(data.emails)) {
+          applyEmails(data.emails);
+        } else {
+          setEmails((prev) => prev.filter((item) => !idsToDelete.includes(item.id)));
+        }
+        setActionSuccess(`${idsToDelete.length} outbox log(s) deleted successfully.`);
         setSelectedEmailIds([]);
         setTimeout(() => setActionSuccess(null), 3000);
-        await loadEmails(adminEmail);
       } catch (error: any) {
         setActionError(error.message || "Failed to delete email logs.");
+      } finally {
+        setActionLoading(null);
+      }
+      return;
+    }
+
+    if (targetId === "bulk-portal-videos") {
+      setActionLoading("bulk-portal-videos");
+      setActionError(null);
+      try {
+        const response = await fetch("/api/admin/employees/delete-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: selectedPortalVideoTargets }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to delete proctoring videos");
+
+        const deletedCount = data.deletedCount ?? selectedPortalVideoTargets.length;
+        const skippedCount = data.skippedCount ?? 0;
+        setActionSuccess(
+          skippedCount > 0
+            ? `${deletedCount} proctoring video(s) deleted. ${skippedCount} skipped (no recording or not found).`
+            : `${deletedCount} proctoring video(s) deleted successfully. Scores and test status unchanged.`
+        );
+        setSelectedPortalEmployeeIds([]);
+        setTimeout(() => setActionSuccess(null), 4000);
+        if (videoPreview?.testId && selectedPortalVideoTargets.some((item) => item.testId === videoPreview.testId)) {
+          if (videoPreview.url?.startsWith("blob:")) {
+            URL.revokeObjectURL(videoPreview.url);
+          }
+          setVideoPreview(null);
+        }
+        await loadEmployees({ fresh: true });
+      } catch (error: any) {
+        setActionError(error.message || "Failed to delete proctoring videos.");
       } finally {
         setActionLoading(null);
       }
@@ -2283,11 +3180,16 @@ export default function AdminDashboard() {
       try {
         const response = await fetch("/api/admin/emails", {
           method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: [] }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to clear outbox");
 
+        emailsFetchSeqRef.current += 1;
+        deletedEmailIdsRef.current = new Set();
         setEmails([]);
+        setSelectedEmailIds([]);
         setActionSuccess("Outbox logs cleared successfully.");
         setTimeout(() => setActionSuccess(null), 3000);
       } catch (error: any) {
@@ -2298,8 +3200,8 @@ export default function AdminDashboard() {
       return;
     }
 
-    if (targetId.startsWith("email-")) {
-      const emailId = targetId.substring(6); // remove "email-" prefix
+    if (targetId.startsWith("outbox-log:")) {
+      const emailId = targetId.slice("outbox-log:".length);
       setActionLoading(targetId);
       setActionError(null);
       try {
@@ -2311,7 +3213,13 @@ export default function AdminDashboard() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to delete email log");
 
-        setEmails((prev) => prev.filter((item) => item.id !== emailId));
+        emailsFetchSeqRef.current += 1;
+        deletedEmailIdsRef.current.add(String(emailId));
+        if (Array.isArray(data.emails)) {
+          applyEmails(data.emails);
+        } else {
+          setEmails((prev) => prev.filter((item) => item.id !== emailId));
+        }
         setActionSuccess("Simulated invitation email log deleted successfully.");
         setTimeout(() => setActionSuccess(null), 3000);
       } catch (error: any) {
@@ -2553,21 +3461,53 @@ export default function AdminDashboard() {
     return "all";
   })();
 
-  // Categorize candidate list
-  const activeJdResumes = resumes.filter((r) => {
-    if (selectedJdId && selectedJdId !== "all") {
-      if (selectedJdId.includes("@")) {
+  // Categorize candidate list against the selected JD / BR
+  const jdIsActiveForScoring = Boolean(
+    jdSavedText.trim() &&
+    selectedJdId &&
+    selectedJdId !== "all" &&
+    !String(selectedJdId).includes("@")
+  );
+
+  const activeJdResumes = useMemo(() => {
+    return resumes.filter((r) => {
+      if (selectedJdId && selectedJdId !== "all" && String(selectedJdId).includes("@")) {
         const emailJds = jds.filter(j => (j.rmEmail || "admin@infinite.com").toLowerCase().trim() === selectedJdId.toLowerCase().trim());
         const emailJdIds = emailJds.map(j => j.id);
         const emailJdDuplicateIds = emailJds.flatMap(j => Array.isArray(j.duplicateIds) ? j.duplicateIds.map(resolveJdId) : []);
         const candidateJdId = resolveJdId(r.report?.jdId);
         return emailJdIds.includes(candidateJdId) || emailJdDuplicateIds.includes(candidateJdId);
       }
-      // Show all candidate resumes, they will be dynamically classified as suitable/unsuitable based on score
       return true;
-    }
-    return true;
-  });
+    });
+  }, [resumes, selectedJdId, jds]);
+
+  const scoredResumes = useMemo(() => {
+    const jdText = jdSavedText.trim();
+    return activeJdResumes.map((row) => {
+      if (!jdIsActiveForScoring) {
+        return {
+          ...row,
+          score: row.report?.jdMatchScore ?? row.analysis?.overallScore ?? 0,
+          matchingSkills: [] as string[],
+          matchedCount: 0,
+          requiredCount: 0,
+          matchDecision: undefined as string | undefined,
+          matchRationale: row.report?.jdMatchRationale || "",
+        };
+      }
+      const result = calculateSkillMatch(candidateMatchText(row), jdText);
+      return {
+        ...row,
+        score: Number(result.score) || 0,
+        matchingSkills: result.matchingSkills,
+        matchedCount: result.matchedCount,
+        requiredCount: result.requiredCount,
+        matchDecision: result.decision,
+        matchRationale: result.rationale,
+      };
+    });
+  }, [activeJdResumes, jdIsActiveForScoring, jdSavedText]);
 
   const filteredJds = jds.filter((j) => {
     if (selectedJdId && selectedJdId !== "all") {
@@ -2584,47 +3524,187 @@ export default function AdminDashboard() {
     return true;
   });
 
-  const defaultJd = jds.find(j => 
-    (j.fileName && j.fileName.includes("47652")) || 
-    (j.brId && j.brId.includes("47652")) ||
-    (j.id && j.id.includes("47652"))
-  ) || jds.find(j => 
-    (j.fileName && (j.fileName.includes("46401") || j.fileName.includes("46394"))) || 
-    (j.brId && (j.brId.includes("46401") || j.brId.includes("46394")))
-  ) || jds[0];
+  const visibleRequirementRows = useMemo(() => {
+    const baseJds = [...filteredJds].filter((j) => {
+      const searchLower = requirementSearch.toLowerCase();
+      const displayName = j.fileName || "";
+      const email = j.rmEmail || "";
+      const text = j.jdText || "";
+      const matchesSearch =
+        !searchLower ||
+        displayName.toLowerCase().includes(searchLower) ||
+        email.toLowerCase().includes(searchLower) ||
+        text.toLowerCase().includes(searchLower);
+      if (!matchesSearch) return false;
+
+      if (requirementDateFilter !== "all") {
+        if (requirementCreatedDayKey(j.createdAt) !== requirementDateFilter) return false;
+      }
+
+      if (requirementSkillFilter !== "all") {
+        const skills = extractSkillsFromText(j.jdText).map((s) => s.toLowerCase());
+        if (!skills.includes(requirementSkillFilter.toLowerCase())) return false;
+      }
+
+      return true;
+    });
+
+    const textGroups: { [key: string]: any[] } = {};
+    baseJds.forEach((j) => {
+      const groupKey = requirementDuplicateKey(j);
+      if (!textGroups[groupKey]) {
+        textGroups[groupKey] = [];
+      }
+      textGroups[groupKey].push(j);
+    });
+
+    const ogJds: any[] = [];
+    const duplicatesMap = new Map<string, any[]>();
+    Object.values(textGroups).forEach((group) => {
+      group.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const og = group[0];
+      ogJds.push(og);
+      if (group.length > 1) {
+        duplicatesMap.set(og.id, group.slice(1, 2));
+      }
+    });
+
+    ogJds.sort((a, b) => {
+      const aPinned = a.id === pinnedJdId || isNamedPinnedJd(a) ? 1 : 0;
+      const bPinned = b.id === pinnedJdId || isNamedPinnedJd(b) ? 1 : 0;
+      if (bPinned !== aPinned) return bPinned - aPinned;
+
+      const aTime = new Date(a.createdAt || 0).getTime();
+      const bTime = new Date(b.createdAt || 0).getTime();
+      if (bTime !== aTime) return bTime - aTime;
+
+      const aSkills = extractSkillsFromText(a.jdText).length;
+      const bSkills = extractSkillsFromText(b.jdText).length;
+      if (aSkills === 0 && bSkills > 0) return 1;
+      if (bSkills === 0 && aSkills > 0) return -1;
+      return bSkills - aSkills;
+    });
+
+    const orderedJds: { jd: any; isDuplicate: boolean; ogJd?: any }[] = [];
+    ogJds.forEach((og) => {
+      orderedJds.push({ jd: og, isDuplicate: false });
+      const dups = duplicatesMap.get(og.id);
+      if (dups) {
+        dups.forEach((dup) => {
+          orderedJds.push({ jd: dup, isDuplicate: true, ogJd: og });
+        });
+      }
+    });
+    return orderedJds;
+  }, [filteredJds, requirementSearch, requirementDateFilter, requirementSkillFilter, pinnedJdId]);
+
+  const visibleRequirementIds = visibleRequirementRows.map((row) => row.jd.id);
+
+  const handleToggleJdSelect = (id: string) => {
+    setSelectedJdIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleAllJds = () => {
+    const allSelected =
+      visibleRequirementIds.length > 0 &&
+      visibleRequirementIds.every((id) => selectedJdIds.includes(id));
+    if (allSelected) {
+      setSelectedJdIds((prev) => prev.filter((id) => !visibleRequirementIds.includes(id)));
+    } else {
+      setSelectedJdIds((prev) => Array.from(new Set([...prev, ...visibleRequirementIds])));
+    }
+  };
+
+  const handleBulkDeleteJds = () => {
+    if (selectedJdIds.length === 0) return;
+    setDeleteTargetId("bulk-jds");
+    setDeletePasswordInput("");
+    setDeleteModalError(null);
+  };
+
+  const requirementFilterOptions = useMemo(() => {
+    const dates = new Map<string, string>();
+    const skills = new Map<string, string>();
+    for (const j of filteredJds) {
+      const dayKey = requirementCreatedDayKey(j.createdAt);
+      if (dayKey) dates.set(dayKey, formatRequirementDayLabel(dayKey));
+      for (const skill of extractSkillsFromText(j.jdText)) {
+        const label = String(skill || "").trim();
+        if (!label) continue;
+        const key = label.toLowerCase();
+        if (!skills.has(key)) skills.set(key, label);
+      }
+    }
+    return {
+      dates: Array.from(dates.entries())
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([value, label]) => ({ value, label })),
+      skills: Array.from(skills.entries())
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([value, label]) => ({ value, label })),
+    };
+  }, [filteredJds]);
+
+  useEffect(() => {
+    if (
+      requirementDateFilter !== "all" &&
+      !requirementFilterOptions.dates.some((d) => d.value === requirementDateFilter)
+    ) {
+      setRequirementDateFilter("all");
+    }
+    if (
+      requirementSkillFilter !== "all" &&
+      !requirementFilterOptions.skills.some(
+        (s) => s.value === requirementSkillFilter.toLowerCase()
+      )
+    ) {
+      setRequirementSkillFilter("all");
+    }
+  }, [requirementFilterOptions, requirementDateFilter, requirementSkillFilter]);
+
+  const defaultJd = pickDefaultJd(jds);
   const activeJdIdForHighlight = (selectedJdId && selectedJdId !== "all" && !selectedJdId.includes("@")) ? selectedJdId : (defaultJd?.id || "");
 
   const getScore = (r: any) => {
-    if (selectedJdId && selectedJdId !== "all" && jdSavedText) {
+    const scored = scoredResumes.find((row) => row.id === r.id);
+    if (scored) return Number(scored.score) || 0;
+    if (jdIsActiveForScoring) {
       return calculateCandidateMatch(r, jdSavedText).score;
     }
     return r.report?.jdMatchScore ?? r.analysis?.overallScore ?? 0;
   };
 
   const getSuitability = (r: any) => {
-    if (selectedJdId && selectedJdId !== "all" && jdSavedText) {
-      const currentJd = jds.find(j => j.id === selectedJdId);
-      const candidateJdId = resolveJdId(r.report?.jdId);
-      const isOriginallyForActiveJd = currentJd && (
-        candidateJdId === selectedJdId || 
-        (Array.isArray(currentJd.duplicateIds) && currentJd.duplicateIds.map(resolveJdId).includes(candidateJdId))
-      );
-      if (isOriginallyForActiveJd) {
-        return r.report?.suitability ?? "suitable";
-      }
-      const score = getScore(r);
-      return score >= 40 ? "suitable" : "unsuitable";
+    if (
+      r.report?.suitabilityOverridden &&
+      r.report?.suitability &&
+      (!jdIsActiveForScoring || !r.report?.jdId || r.report.jdId === selectedJdId)
+    ) {
+      return r.report.suitability;
+    }
+    if (jdIsActiveForScoring) {
+      return getScore(r) >= QUALIFIED_COVERAGE_PERCENT ? "suitable" : "unsuitable";
     }
     return r.report?.suitability ?? "suitable";
   };
 
-  const suitableCandidates = activeJdResumes
+  const suitableCandidates = scoredResumes
     .filter((r) => getSuitability(r) === "suitable")
-    .sort((a, b) => getScore(b) - getScore(a));
+    .sort((a, b) => {
+      const scoreDelta = getScore(b) - getScore(a);
+      if (scoreDelta !== 0) return scoreDelta;
+      return (b.matchingSkills?.length || 0) - (a.matchingSkills?.length || 0);
+    });
 
-  const unsuitableCandidates = activeJdResumes
+  const unsuitableCandidates = scoredResumes
     .filter((r) => getSuitability(r) === "unsuitable")
-    .sort((a, b) => getScore(b) - getScore(a));
+    .sort((a, b) => {
+      const scoreDelta = getScore(b) - getScore(a);
+      if (scoreDelta !== 0) return scoreDelta;
+      return (b.matchingSkills?.length || 0) - (a.matchingSkills?.length || 0);
+    });
 
   const rawCandidates = activeTab === "suitable" ? suitableCandidates : unsuitableCandidates;
 
@@ -2643,7 +3723,36 @@ export default function AdminDashboard() {
     );
   });
 
-  const filteredEmployees = employees
+  const scoredEmployees = useMemo(() => {
+    const jdText = jdSavedText.trim();
+    const jdIsActive =
+      Boolean(jdText) &&
+      Boolean(selectedJdId) &&
+      selectedJdId !== "all" &&
+      !selectedJdId.includes("@");
+    if (!jdIsActive) return employees;
+    return employees.map((emp) => {
+      const result = calculateSkillMatch(employeeMatchText(emp), jdText);
+      const score = Number(result.score) || 0;
+      return {
+        ...emp,
+        score,
+        matchingSkills: result.matchingSkills,
+        matchedCount: result.matchedCount,
+        requiredCount: result.requiredCount,
+        matchDecision: result.decision,
+        matchRationale: result.rationale,
+        familyRelation: result.familyRelation,
+      };
+    });
+  }, [employees, jdSavedText, selectedJdId]);
+
+  const jdCoverageQualifiedCount = scoredEmployees.filter((e) => {
+    const score = Number(e.score);
+    return Number.isFinite(score) && score >= QUALIFIED_COVERAGE_PERCENT;
+  }).length;
+
+  const filteredEmployees = scoredEmployees
     .filter(emp => {
       if (!employeeSearch) return true;
       const term = employeeSearch.toLowerCase();
@@ -2653,10 +3762,16 @@ export default function AdminDashboard() {
         emp.skills?.toLowerCase().includes(term)
       );
     })
-    .sort((a, b) => (b.score || 0) - (a.score || 0));
+    .sort((a, b) => {
+      const scoreDelta = (b.score || 0) - (a.score || 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      const matchDelta = (b.matchingSkills?.length || 0) - (a.matchingSkills?.length || 0);
+      if (matchDelta !== 0) return matchDelta;
+      return String(a.full_name || "").localeCompare(String(b.full_name || ""));
+    });
 
-  const bestMatch = employees.length > 0
-    ? employees.reduce((best, current) => (current.score || 0) > (best.score || 0) ? current : best, employees[0])
+  const bestMatch = scoredEmployees.length > 0
+    ? scoredEmployees.reduce((best, current) => (current.score || 0) > (best.score || 0) ? current : best, scoredEmployees[0])
     : null;
 
   const emailsToRender = emails.filter((email) => {
@@ -2703,6 +3818,21 @@ export default function AdminDashboard() {
             </span>
           </div>
           <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+            {canChangePassword && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs"
+                onClick={() => {
+                  setPasswordModalError("");
+                  setShowPasswordModal(true);
+                }}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Change password</span>
+                <span className="inline sm:hidden">Password</span>
+              </Button>
+            )}
             <ThemeToggle />
             <Link href="/">
               <Button variant="outline" size="sm" className="rounded-xl border-border text-primary hover:bg-secondary gap-1.5 md:gap-2 font-bold text-xs">
@@ -2726,26 +3856,6 @@ export default function AdminDashboard() {
               Upload job descriptions, screen candidate CVs in bulk, override suitability categories, and reset test sessions.
             </p>
           </div>
-          {dashboardReady && (
-            <div
-              className="flex items-center gap-2 rounded-xl border border-border bg-card/80 px-3 py-2 text-[11px] font-bold text-muted-foreground shadow-sm"
-              data-sync-tick={syncAgeTick}
-            >
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  isBackgroundSyncing ? "bg-amber-400 animate-pulse" : "bg-emerald-500"
-                }`}
-                aria-hidden
-              />
-              <span>
-                {isBackgroundSyncing
-                  ? "Syncing live data…"
-                  : lastEmployeeSyncAt
-                    ? `Live · updated ${formatSyncAge(lastEmployeeSyncAt)}`
-                    : "Live sync on"}
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Global Action Toasts */}
@@ -2776,7 +3886,7 @@ export default function AdminDashboard() {
                   <ClipboardList className="w-4 h-4 text-primary" />
                   Requirements (BR / JD)
                   <Badge className={`border-0 text-[10px] ${activeTab === "requirements" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {filteredJds.length}
+                    {isDashboardBootstrapping || isJdLoading ? "…" : filteredJds.length}
                   </Badge>
                 </button>
                 <button
@@ -2787,9 +3897,9 @@ export default function AdminDashboard() {
                       : "border-transparent text-muted-foreground hover:text-slate-800 dark:hover:text-white"
                   }`}
                 >
-                  Employee Data
+                  Corp Pool
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {isEmployeeDataPending ? "…" : employees.length}
+                    {isDashboardBootstrapping || isEmployeeDataPending ? "…" : employees.length}
                   </Badge>
                 </button>
                 <button
@@ -2802,7 +3912,7 @@ export default function AdminDashboard() {
                 >
                   Suitable Candidates
                   <Badge className={`border-0 text-[10px] ${activeTab === "suitable" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {suitableCandidates.length}
+                    {isDashboardBootstrapping || loading ? "…" : suitableCandidates.length}
                   </Badge>
                 </button>
                 <button
@@ -2815,9 +3925,10 @@ export default function AdminDashboard() {
                 >
                   Non-Suitable Candidates
                   <Badge className={`border-0 text-[10px] ${activeTab === "unsuitable" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {unsuitableCandidates.length}
+                    {isDashboardBootstrapping || loading ? "…" : unsuitableCandidates.length}
                   </Badge>
                 </button>
+                {canViewEmployeePortal && (
                 <button
                   onClick={() => setActiveTab("employee-portal")}
                   className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
@@ -2828,12 +3939,13 @@ export default function AdminDashboard() {
                 >
                   Employee Portal
                   <Badge className={`border-0 text-[10px] ${activeTab === "employee-portal" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {isEmployeeDataPending
+                    {isDashboardBootstrapping || isEmployeeDataPending
                       ? "…"
                       : resourcePortalEmployees.length ||
                         Array.from(new Set(allTestResults.map((t) => t.employeeId))).length}
                   </Badge>
                 </button>
+                )}
                 <button
                   onClick={() => setActiveTab("outbox")}
                   className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
@@ -2845,29 +3957,35 @@ export default function AdminDashboard() {
                   <Mail className="w-4 h-4 text-primary" />
                   Email Outbox
                   <Badge className={`border-0 text-[10px] ${activeTab === "outbox" ? "bg-indigo-100 text-indigo-700 dark:bg-slate-800 dark:text-violet-400" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"}`}>
-                    {emails.length}
+                    {isDashboardBootstrapping || isEmailsLoading ? "…" : emails.length}
                   </Badge>
                 </button>
               </div>
 
               {/* Candidates List Container */}
               <div className="p-6">
-                {isEmployeeDataPending ? (
+                {isTabContentLoading ? (
                   <div className="flex-1 flex flex-col items-center justify-center py-24 gap-3">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
                     <p className="text-slate-500 font-bold text-sm">
-                      {activeTab === "employee-portal"
-                        ? "Loading employee portal data…"
-                        : activeTab === "employee"
-                          ? "Loading employee pool…"
-                          : "Loading screening dashboard…"}
+                      {isDashboardBootstrapping
+                        ? "Loading screening dashboard…"
+                        : activeTab === "employee-portal"
+                          ? "Loading employee portal data…"
+                          : activeTab === "employee"
+                            ? "Loading Corp Pool…"
+                            : activeTab === "requirements"
+                              ? "Loading requirements…"
+                              : activeTab === "outbox"
+                                ? "Loading email outbox…"
+                                : "Loading candidates…"}
                     </p>
                   </div>
                 ) : activeTab === "requirements" ? (
                   <div className="space-y-4">
-                    {/* Search requirements */}
-                    <div className="flex flex-col sm:flex-row gap-3 justify-between items-center shrink-0">
-                      <div className="w-full sm:w-72 relative">
+                    {/* Search + filters */}
+                    <div className="flex flex-col xl:flex-row gap-3 justify-between items-stretch xl:items-center shrink-0">
+                      <div className="w-full xl:flex-1 min-w-0 relative">
                         <input
                           type="text"
                           placeholder="Search requirements..."
@@ -2876,7 +3994,60 @@ export default function AdminDashboard() {
                           className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
                         />
                       </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full xl:w-auto xl:min-w-[24rem]">
+                        <select
+                          value={requirementDateFilter}
+                          onChange={(e) => setRequirementDateFilter(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                          aria-label="Filter requirements by created date"
+                        >
+                          <option value="all">Date: All</option>
+                          {requirementFilterOptions.dates.map((d) => (
+                            <option key={d.value} value={d.value}>
+                              {d.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={requirementSkillFilter}
+                          onChange={(e) => setRequirementSkillFilter(e.target.value)}
+                          className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                          aria-label="Filter requirements by skill"
+                        >
+                          <option value="all">Skills: All</option>
+                          {requirementFilterOptions.skills.map((skill) => (
+                            <option key={`skill-${skill.value}`} value={skill.value}>
+                              {skill.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
+
+                    {selectedJdIds.length > 0 && (
+                      <div className="flex items-center justify-between p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
+                        <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                          {selectedJdIds.length} requirement{selectedJdIds.length > 1 ? "s" : ""} selected for bulk actions
+                        </span>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={actionLoading === "bulk-jds"}
+                          onClick={handleBulkDeleteJds}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-500/25"
+                        >
+                          {actionLoading === "bulk-jds" ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-3.5 h-3.5" /> Delete Selected
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
 
                     {/* Requirements Table */}
                     <div className="border border-border rounded-2xl overflow-hidden">
@@ -2884,6 +4055,17 @@ export default function AdminDashboard() {
                         <table className="w-full text-left border-collapse text-xs">
                           <thead>
                             <tr className="bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-border text-slate-500 font-extrabold uppercase tracking-wider text-[10px] sticky top-0 z-10">
+                              <th className="p-3 w-10 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    visibleRequirementIds.length > 0 &&
+                                    visibleRequirementIds.every((id) => selectedJdIds.includes(id))
+                                  }
+                                  onChange={handleToggleAllJds}
+                                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                />
+                              </th>
                               <th className="p-3 w-8"></th>
                               <th className="p-3 w-20">BR ID</th>
                               <th className="p-3 w-1/4">Requirement / File</th>
@@ -2894,77 +4076,7 @@ export default function AdminDashboard() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-800/50">
-                            {(() => {
-                              const baseJds = [...filteredJds].filter((j) => {
-                                const searchLower = requirementSearch.toLowerCase();
-                                const displayName = j.fileName || "";
-                                const email = j.rmEmail || "";
-                                const text = j.jdText || "";
-                                return (
-                                  displayName.toLowerCase().includes(searchLower) ||
-                                  email.toLowerCase().includes(searchLower) ||
-                                  text.toLowerCase().includes(searchLower)
-                                );
-                              });
-
-                              // Group JDs by text to identify duplicates
-                              const textGroups: { [key: string]: any[] } = {};
-                              baseJds.forEach((j) => {
-                                const normalizedText = (j.jdText || "").trim().toLowerCase();
-                                if (!textGroups[normalizedText]) {
-                                  textGroups[normalizedText] = [];
-                                }
-                                textGroups[normalizedText].push(j);
-                              });
-
-                              // For each group, sort by createdAt ascending (oldest is OG)
-                              const ogJds: any[] = [];
-                              const duplicatesMap = new Map<string, any[]>();
-                              Object.values(textGroups).forEach((group) => {
-                                group.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-                                const og = group[0];
-                                ogJds.push(og);
-                                if (group.length > 1) {
-                                  duplicatesMap.set(og.id, group.slice(1));
-                                }
-                              });
-
-                              // Sort OG JDs: keep 46401BR at the very top, followed by 49238BR, then by skills
-                              ogJds.sort((a, b) => {
-                                const isA46401 = (a.fileName && (a.fileName.includes("46401") || a.fileName.includes("46394"))) || (a.brId && (a.brId.includes("46401") || a.brId.includes("46394")));
-                                const isB46401 = (b.fileName && (b.fileName.includes("46401") || b.fileName.includes("46394"))) || (b.brId && (b.brId.includes("46401") || b.brId.includes("46394")));
-                                
-                                const isA49238 = (a.fileName && a.fileName.includes("49238")) || (a.brId && a.brId.includes("49238"));
-                                const isB49238 = (b.fileName && b.fileName.includes("49238")) || (b.brId && b.brId.includes("49238"));
-
-                                // 46401BR is always first
-                                if (isA46401 && !isB46401) return -1;
-                                if (!isA46401 && isB46401) return 1;
-
-                                // 49238BR is second
-                                if (isA49238 && !isB49238) return -1;
-                                if (!isA49238 && isB49238) return 1;
-
-                                const aSkills = extractSkillsFromText(a.jdText).length;
-                                const bSkills = extractSkillsFromText(b.jdText).length;
-                                if (aSkills === 0 && bSkills > 0) return 1;
-                                if (bSkills === 0 && aSkills > 0) return -1;
-                                return bSkills - aSkills;
-                              });
-
-                              // Flatten into final rendering order: OG followed immediately by duplicates
-                              const orderedJds: { jd: any; isDuplicate: boolean; ogJd?: any }[] = [];
-                              ogJds.forEach((og) => {
-                                orderedJds.push({ jd: og, isDuplicate: false });
-                                const dups = duplicatesMap.get(og.id);
-                                if (dups) {
-                                  dups.forEach((dup) => {
-                                    orderedJds.push({ jd: dup, isDuplicate: true, ogJd: og });
-                                  });
-                                }
-                              });
-
-                              return orderedJds.map(({ jd: j, isDuplicate, ogJd }) => {
+                            {visibleRequirementRows.map(({ jd: j, isDuplicate, ogJd }) => {
                                 let brNo = "N/A";
                                 let filename = j.fileName || "Pasted Job Description";
                                 if (filename.includes(" | ")) {
@@ -2974,6 +4086,7 @@ export default function AdminDashboard() {
                                 } else if (filename.match(/^\d+BR$/i)) {
                                   brNo = filename;
                                 }
+                                const jobTitle = extractJobTitleFromJd(j.jdText, filename);
                                 const isActive = activeJdIdForHighlight === j.id;
                                 const isExpanded = expandedJdId === j.id;
                                 const skills = extractSkillsFromText(j.jdText);
@@ -2993,10 +4106,20 @@ export default function AdminDashboard() {
                                 return (
                                   <React.Fragment key={j.id}>
                                     <tr className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150 ${
+                                      selectedJdIds.includes(j.id) ? "bg-indigo-50/20 dark:bg-indigo-950/20" : ""
+                                    } ${
                                       isActive ? "bg-indigo-50/10 dark:bg-indigo-950/10" : ""
                                     } ${
                                       isDuplicate ? "bg-amber-50/5 dark:bg-amber-950/5 border-l-2 border-amber-400 dark:border-amber-550" : ""
                                     }`}>
+                                      <td className="p-3 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedJdIds.includes(j.id)}
+                                          onChange={() => handleToggleJdSelect(j.id)}
+                                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                        />
+                                      </td>
                                       <td className="p-3 text-center">
                                         <button
                                           onClick={() => setExpandedJdId(isExpanded ? null : j.id)}
@@ -3063,11 +4186,11 @@ export default function AdminDashboard() {
                                         </div>
                                       </td>
                                       <td className={`p-3 ${isDuplicate ? "pl-6" : ""}`}>
-                                        <div className="font-bold text-slate-800 dark:text-slate-200 max-w-[200px] truncate" title={filename}>
-                                          {filename}
+                                        <div className="font-bold text-slate-800 dark:text-slate-200 max-w-[220px] truncate" title={jobTitle}>
+                                          {jobTitle}
                                         </div>
-                                        <div className="text-[10px] text-slate-400 font-semibold max-w-[200px] truncate">
-                                          {j.jdText ? j.jdText.substring(0, 85) + "..." : ""}
+                                        <div className="text-[10px] text-slate-400 font-semibold max-w-[220px] truncate" title={filename}>
+                                          {filename}
                                         </div>
                                         {isDuplicate && (
                                           <div className="mt-1.5">
@@ -3108,8 +4231,8 @@ export default function AdminDashboard() {
                                           <div className="flex items-center gap-1 group">
                                             <div className="flex flex-wrap gap-1 max-w-[200px]">
                                               {skills.length > 0 ? (
-                                                skills.slice(0, 4).map((s) => (
-                                                  <Badge key={s} className="bg-secondary border-0 text-muted-foreground text-[9px] px-1.5 py-0 font-bold">
+                                                skills.slice(0, 4).map((s, i) => (
+                                                  <Badge key={`${s}-${i}`} className="bg-secondary border-0 text-muted-foreground text-[9px] px-1.5 py-0 font-bold">
                                                     {s}
                                                   </Badge>
                                                 ))
@@ -3191,7 +4314,12 @@ export default function AdminDashboard() {
                                               setSelectedJdId(j.id);
                                               setJdSavedText(j.jdText);
                                               setJdText(j.jdText);
+                                              setEmployeeSearch("");
                                               setActiveTab("employee");
+                                              void fetch(
+                                                `/api/admin/refresh?type=sync-selected&activeJdId=${encodeURIComponent(j.id)}`,
+                                                { method: "POST" }
+                                              ).catch(() => {});
                                             }}
                                             className={`h-7 px-2.5 rounded-lg text-[10px] font-extrabold transition duration-200 ${
                                               isActive
@@ -3201,6 +4329,30 @@ export default function AdminDashboard() {
                                           >
                                             {isActive ? "Viewing Candidates" : "Select & Screen"}
                                           </Button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const next = pinnedJdId === j.id ? "" : j.id;
+                                              try {
+                                                if (next) localStorage.setItem(PINNED_JD_STORAGE_KEY, next);
+                                                else localStorage.removeItem(PINNED_JD_STORAGE_KEY);
+                                              } catch {}
+                                              setPinnedJdId(next);
+                                              if (next) {
+                                                setSelectedJdId(j.id);
+                                                setJdSavedText(j.jdText);
+                                                setJdText(j.jdText);
+                                              }
+                                            }}
+                                            className={`h-7 w-7 rounded-lg flex items-center justify-center border ${
+                                              pinnedJdId === j.id || isNamedPinnedJd(j)
+                                                ? "bg-amber-50 border-amber-200 text-amber-600"
+                                                : "border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-200"
+                                            }`}
+                                            title={pinnedJdId === j.id ? "Unpin job" : "Pin job to top"}
+                                          >
+                                            <Pin className="w-3.5 h-3.5" />
+                                          </button>
                                           <Button
                                             variant="ghost"
                                             onClick={() => handleDeleteJd(j.id)}
@@ -3214,7 +4366,7 @@ export default function AdminDashboard() {
                                     </tr>
                                     {isExpanded && (
                                       <tr className="bg-slate-50/40 dark:bg-slate-900/10">
-                                        <td colSpan={7} className="p-4 border-t border-border/50 animate-fade-in">
+                                        <td colSpan={8} className="p-4 border-t border-border/50 animate-fade-in">
                                           <div className="space-y-3 max-w-4xl mx-auto">
                                             <div>
                                               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Full Job Description</h4>
@@ -3226,8 +4378,8 @@ export default function AdminDashboard() {
                                               <div>
                                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">All Detected Technical Skills ({skills.length})</h4>
                                                 <div className="flex flex-wrap gap-1.5">
-                                                  {skills.map((s) => (
-                                                    <Badge key={s} className="bg-secondary border-0 text-indigo-700 dark:text-indigo-300 text-[10px] px-2.5 py-0.5 font-bold">
+                                                  {skills.map((s, i) => (
+                                                    <Badge key={`${s}-${i}`} className="bg-secondary border-0 text-indigo-700 dark:text-indigo-300 text-[10px] px-2.5 py-0.5 font-bold">
                                                       {s}
                                                     </Badge>
                                                   ))}
@@ -3240,11 +4392,10 @@ export default function AdminDashboard() {
                                     )}
                                   </React.Fragment>
                                 );
-                              });
-                            })()}
-                            {jds.length === 0 && (
+                              })}
+                            {visibleRequirementRows.length === 0 && (
                               <tr>
-                                <td colSpan={7} className="text-center py-12 text-slate-400 italic">
+                                <td colSpan={8} className="text-center py-12 text-slate-400 italic">
                                   No Job Descriptions / BRs uploaded or scanned yet.
                                 </td>
                               </tr>
@@ -3259,18 +4410,18 @@ export default function AdminDashboard() {
                       {/* Summary Metrics */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total Employees</span>
-                          <span className="text-xl md:text-2xl font-black text-primary">{employees.length}</span>
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Total in Corp Pool</span>
+                          <span className="text-xl md:text-2xl font-black text-primary">{scoredEmployees.length}</span>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center flex flex-col items-center justify-center min-h-[70px]">
-                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Matches &gt;60% (JD)</span>
-                          {selectedJdId && selectedJdId !== "all" ? (
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Recruiter fit ≥60%</span>
+                          {selectedJdId && selectedJdId !== "all" && jdSavedText.trim() ? (
                             <div className="w-full">
                               <span className="text-xl md:text-2xl font-black text-emerald-600 dark:text-emerald-400 block leading-none">
-                                {employees.filter(e => (e.score || 0) > 60).length}
+                                {jdCoverageQualifiedCount}
                               </span>
                               <span className="text-[10px] font-bold text-muted-foreground block mt-1.5 leading-none">
-                                Qualified Profiles
+                                Qualified for this req
                               </span>
                             </div>
                           ) : (
@@ -3280,13 +4431,13 @@ export default function AdminDashboard() {
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Shortlisted</span>
                           <span className="text-xl md:text-2xl font-black text-violet-600 dark:text-fuchsia-400">
-                            {employees.filter(e => e.shortlisted).length}
+                            {scoredEmployees.filter(e => e.shortlisted).length}
                           </span>
                         </div>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Avg Match Score</span>
                           <span className="text-xl md:text-2xl font-black text-primary">
-                            {employees.length > 0 ? Math.round(employees.reduce((acc, curr) => acc + (curr.score || 0), 0) / employees.length) : 0}%
+                            {scoredEmployees.length > 0 ? Math.round(scoredEmployees.reduce((acc, curr) => acc + (Number(curr.score) || 0), 0) / scoredEmployees.length) : 0}%
                           </span>
                         </div>
                       </div>
@@ -3296,7 +4447,7 @@ export default function AdminDashboard() {
                         <div className="w-full sm:w-72 relative">
                           <input
                             type="text"
-                            placeholder="Search employees..."
+                            placeholder="Search Corp Pool..."
                             value={employeeSearch}
                             onChange={(e) => setEmployeeSearch(e.target.value)}
                             className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
@@ -3427,8 +4578,8 @@ export default function AdminDashboard() {
                                     <td className="p-3">
                                       <div className="flex flex-wrap gap-1 max-w-[180px]">
                                         {emp.matchingSkills && emp.matchingSkills.length > 0 ? (
-                                          emp.matchingSkills.slice(0, 3).map((s: string) => (
-                                            <Badge key={s} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0">
+                                          emp.matchingSkills.slice(0, 3).map((s: string, i: number) => (
+                                            <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0">
                                               {s}
                                             </Badge>
                                           ))
@@ -3441,11 +4592,21 @@ export default function AdminDashboard() {
                                       </div>
                                     </td>
                                     <td className="p-3">
-                                      <span className={`font-black text-sm ${
-                                        emp.score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : (emp.score >= 40 ? 'text-amber-500' : 'text-rose-500')
-                                      }`}>
+                                      <span
+                                        className={`font-black text-sm ${
+                                          Number(emp.score) >= QUALIFIED_COVERAGE_PERCENT ? 'text-emerald-600 dark:text-emerald-400' : (Number(emp.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
+                                        }`}
+                                        title={emp.matchRationale || (emp.requiredCount
+                                            ? `${emp.matchedCount}/${emp.requiredCount} required JD skills`
+                                            : undefined)}
+                                      >
                                         {emp.score}%
                                       </span>
+                                      {emp.matchDecision && (
+                                        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">
+                                          {emp.matchDecision}
+                                        </div>
+                                      )}
                                     </td>
                                     <td className="p-3">
                                       <div className="flex items-center justify-center gap-1.5">
@@ -3492,7 +4653,7 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                     </div>
-                ) : activeTab === "employee-portal" ? (
+                ) : activeTab === "employee-portal" && canViewEmployeePortal ? (
                   <div className="space-y-4">
                     <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/60 dark:bg-indigo-950/20 px-4 py-3 text-xs text-indigo-800 dark:text-indigo-200">
                       Showing employee data from <span className="font-bold">Resource_Question_Mapping.xlsx</span> merged with live portal test results.
@@ -3537,8 +4698,211 @@ export default function AdminDashboard() {
                             placeholder="Search name, ID, product, email..."
                             value={testResultsSearch}
                             onChange={(e) => setTestResultsSearch(e.target.value)}
-                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 pr-8 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
                           />
+                          {testResultsSearch ? (
+                            <button
+                              type="button"
+                              onClick={() => setTestResultsSearch("")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                              aria-label="Clear search"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="w-full sm:w-56 shrink-0 relative" ref={portalCompletedDateRef}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPortalCompletedDateOpen((open) => {
+                                const next = !open;
+                                if (next) {
+                                  setPortalCompletedDateMenu(
+                                    getPortalCompletedDateMenuForFilter(
+                                      portalCompletedDateFilter,
+                                      portalCompletedDateModel
+                                    )
+                                  );
+                                }
+                                return next;
+                              });
+                            }}
+                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200 flex items-center justify-between gap-2"
+                            aria-label="Completed On date filter"
+                            aria-expanded={portalCompletedDateOpen}
+                          >
+                            <span className="truncate text-left">
+                              {formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter)}
+                            </span>
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 shrink-0 opacity-70 transition-transform ${
+                                portalCompletedDateOpen ? "rotate-180" : ""
+                              }`}
+                            />
+                          </button>
+                          {portalCompletedDateOpen ? (
+                            <div className="absolute z-50 mt-1 w-full min-w-[15rem] max-h-64 overflow-auto rounded-xl border border-border bg-white dark:bg-slate-950 shadow-lg py-1">
+                              {portalCompletedDateMenu.type === "last-week" ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
+                                    onClick={() => setPortalCompletedDateMenu({ type: "root" })}
+                                  >
+                                    ← Back
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                      portalCompletedDateFilter === PORTAL_LAST_WEEK_FILTER
+                                        ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                        : "text-slate-700 dark:text-slate-200"
+                                    }`}
+                                    onClick={() => {
+                                      setPortalCompletedDateFilter(PORTAL_LAST_WEEK_FILTER);
+                                      setPortalCompletedDateOpen(false);
+                                    }}
+                                  >
+                                    Last Week: All dates
+                                  </button>
+                                  {portalCompletedDateModel.lastWeekOptions.map((option) => (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                        portalCompletedDateFilter === option.value
+                                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                          : "text-slate-700 dark:text-slate-200"
+                                      }`}
+                                      onClick={() => {
+                                        setPortalCompletedDateFilter(option.value);
+                                        setPortalCompletedDateOpen(false);
+                                      }}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  ))}
+                                </>
+                              ) : portalCompletedDateMenu.type === "week" ? (
+                                (() => {
+                                  const olderWeek =
+                                    portalCompletedDateModel.olderWeeks.find(
+                                      (week) =>
+                                        week.weekStartKey ===
+                                        (portalCompletedDateMenu.type === "week"
+                                          ? portalCompletedDateMenu.weekStartKey
+                                          : "")
+                                    ) ?? null;
+                                  if (!olderWeek) return null;
+                                  return (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
+                                        onClick={() => setPortalCompletedDateMenu({ type: "root" })}
+                                      >
+                                        ← Back
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                          portalCompletedDateFilter === olderWeek.weekFilterValue
+                                            ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                            : "text-slate-700 dark:text-slate-200"
+                                        }`}
+                                        onClick={() => {
+                                          setPortalCompletedDateFilter(olderWeek.weekFilterValue);
+                                          setPortalCompletedDateOpen(false);
+                                        }}
+                                      >
+                                        {olderWeek.label}: All dates
+                                      </button>
+                                      {olderWeek.dayOptions.map((option) => (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                            portalCompletedDateFilter === option.value
+                                              ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                              : "text-slate-700 dark:text-slate-200"
+                                          }`}
+                                          onClick={() => {
+                                            setPortalCompletedDateFilter(option.value);
+                                            setPortalCompletedDateOpen(false);
+                                          }}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      ))}
+                                    </>
+                                  );
+                                })()
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                      portalCompletedDateFilter === "all"
+                                        ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                        : "text-slate-700 dark:text-slate-200"
+                                    }`}
+                                    onClick={() => {
+                                      setPortalCompletedDateFilter("all");
+                                      setPortalCompletedDateOpen(false);
+                                    }}
+                                  >
+                                    Completed On: All
+                                  </button>
+                                  {portalCompletedDateModel.currentWeekOptions.map((option) => (
+                                    <button
+                                      key={option.value}
+                                      type="button"
+                                      className={`w-full px-3 py-2 text-left text-xs font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/40 ${
+                                        portalCompletedDateFilter === option.value
+                                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+                                          : "text-slate-700 dark:text-slate-200"
+                                      }`}
+                                      onClick={() => {
+                                        setPortalCompletedDateFilter(option.value);
+                                        setPortalCompletedDateOpen(false);
+                                      }}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  ))}
+                                  {portalCompletedDateModel.lastWeekOptions.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between"
+                                      onClick={() =>
+                                        setPortalCompletedDateMenu({ type: "last-week" })
+                                      }
+                                    >
+                                      <span>Last Week</span>
+                                      <span aria-hidden="true">▸</span>
+                                    </button>
+                                  ) : null}
+                                  {portalCompletedDateModel.olderWeeks.map((week) => (
+                                    <button
+                                      key={week.weekFilterValue}
+                                      type="button"
+                                      className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900 flex items-center justify-between"
+                                      onClick={() =>
+                                        setPortalCompletedDateMenu({
+                                          type: "week",
+                                          weekStartKey: week.weekStartKey,
+                                        })
+                                      }
+                                    >
+                                      <span>{week.label}</span>
+                                      <span aria-hidden="true">▸</span>
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                         <div className="w-full sm:w-44 shrink-0">
                           <select
@@ -3570,28 +4934,148 @@ export default function AdminDashboard() {
                           )}
                           {isExportingPortal ? "Exporting..." : "Export to Excel"}
                         </Button>
-                        <Button
-                          onClick={() => handleRefresh("employees")}
-                          disabled={refreshingType !== null}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 sm:flex-none rounded-xl border-border text-primary hover:bg-secondary gap-1.5 font-bold text-xs"
-                        >
-                          {isEmployeesLoading ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <RefreshCcw className="w-3.5 h-3.5" />
-                          )}
-                          Scan & Refresh Portal
-                        </Button>
                       </div>
                     </div>
 
+                    {hasActivePortalFilters && (
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        {testResultsSearch.trim() ? (
+                          <button
+                            type="button"
+                            onClick={() => setTestResultsSearch("")}
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 px-2.5 py-1 text-[10px] font-bold"
+                          >
+                            Search: {testResultsSearch.trim()}
+                            <X className="w-3 h-3" />
+                          </button>
+                        ) : null}
+                        {portalCompletedDateFilter !== "all" ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPortalCompletedDateFilter("all");
+                              setPortalCompletedDateMenu({ type: "root" });
+                            }}
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 px-2.5 py-1 text-[10px] font-bold"
+                          >
+                            {formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter)}
+                            <X className="w-3 h-3" />
+                          </button>
+                        ) : null}
+                        {testStatusFilter !== "all" ? (
+                          <button
+                            type="button"
+                            onClick={() => setTestStatusFilter("all")}
+                            className="inline-flex items-center gap-1 rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 px-2.5 py-1 text-[10px] font-bold"
+                          >
+                            Status: {getPortalTestStatusLabel(testStatusFilter)}
+                            <X className="w-3 h-3" />
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={clearPortalFilters}
+                          className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 underline"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                    )}
+
+                    {selectedPortalEmployeeIds.length > 0 && (
+                      <div className="flex items-center justify-between gap-3 p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
+                        <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
+                          {selectedPortalEmployeeIds.length} employee
+                          {selectedPortalEmployeeIds.length > 1 ? "s" : ""} selected
+                          {selectedPortalVideoTargets.length > 0
+                            ? ` · ${selectedPortalVideoTargets.length} with recording`
+                            : " · none with a recording"}
+                        </span>
+                        <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isBulkPortalMailing || isBulkPortalDownloading}
+                          onClick={handleBulkSendPortalEmployeeMails}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 border-border text-primary hover:bg-secondary"
+                        >
+                          {isBulkPortalMailing ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending...
+                            </>
+                          ) : (
+                            <>
+                              <Mail className="w-3.5 h-3.5" /> Send Mail
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            isBulkPortalDownloading ||
+                            selectedPortalVideoTargets.length === 0
+                          }
+                          onClick={handleBulkDownloadPortalVideos}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 border-border text-primary hover:bg-secondary"
+                        >
+                          {isBulkPortalDownloading ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              {bulkPortalDownloadProgress
+                                ? `Downloading ${bulkPortalDownloadProgress.current}/${bulkPortalDownloadProgress.total}...`
+                                : "Downloading..."}
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-3.5 h-3.5" /> Download Selected Videos
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={
+                            actionLoading === "bulk-portal-videos" ||
+                            isBulkPortalDownloading ||
+                            selectedPortalVideoTargets.length === 0
+                          }
+                          onClick={handleBulkDeletePortalVideos}
+                          className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-500/25"
+                        >
+                          {actionLoading === "bulk-portal-videos" ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-3.5 h-3.5" /> Delete Selected Videos
+                            </>
+                          )}
+                        </Button>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="border border-border rounded-2xl overflow-hidden">
                       <div className="overflow-auto max-h-[600px]">
-                        <table className="w-full text-left border-collapse text-xs min-w-[1200px]">
+                        <table className="w-full text-left border-collapse text-xs min-w-[1430px]">
                           <thead>
                             <tr className="bg-slate-100/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-border text-slate-500 font-extrabold uppercase tracking-wider text-[10px] sticky top-0 z-10">
+                              <th className="p-3 w-10 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    filteredPortalEmployees.length > 0 &&
+                                    filteredPortalEmployees.every((account) =>
+                                      selectedPortalEmployeeIds.includes(account.employee_id)
+                                    )
+                                  }
+                                  onChange={handleToggleAllPortalEmployees}
+                                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                  aria-label="Select all employees in portal table"
+                                />
+                              </th>
                               <th className="p-3 w-10"></th>
                               <th className="p-3">Employee Name</th>
                               <th className="p-3">Employee ID</th>
@@ -3602,7 +5086,9 @@ export default function AdminDashboard() {
                               <th className="p-3">Emp Status</th>
                               <th className="p-3">Assigned Qs</th>
                               <th className="p-3">Test Status</th>
+                              <th className="p-3">Completed On</th>
                               <th className="p-3">Score</th>
+                              <th className="p-3">Proctor Flags</th>
                               <th className="p-3">Actions</th>
                             </tr>
                           </thead>
@@ -3616,8 +5102,21 @@ export default function AdminDashboard() {
                                 return (
                                   <React.Fragment key={account.employee_id}>
                                     <tr
-                                      className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150"
+                                      className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150 ${
+                                        selectedPortalEmployeeIds.includes(account.employee_id)
+                                          ? "bg-indigo-50/20 dark:bg-indigo-950/20"
+                                          : ""
+                                      }`}
                                     >
+                                      <td className="p-3 text-center">
+                                        <input
+                                          type="checkbox"
+                                          checked={selectedPortalEmployeeIds.includes(account.employee_id)}
+                                          onChange={() => handleTogglePortalEmployeeSelect(account.employee_id)}
+                                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                                          aria-label={`Select ${portalEmployeeName(account)}`}
+                                        />
+                                      </td>
                                       <td className="p-3 text-center">
                                         <button
                                           className="text-slate-500 hover:text-slate-800 dark:hover:text-white transition-colors duration-150"
@@ -3638,7 +5137,7 @@ export default function AdminDashboard() {
                                       <td className="p-3 font-bold text-slate-700 dark:text-slate-300">{portalEmployeeId(account)}</td>
                                       <td className="p-3 font-medium text-slate-600 dark:text-slate-400">{account.role || "—"}</td>
                                       <td className="p-3 font-medium text-slate-500">{account.domain || "—"}</td>
-                                      <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={account.product}>{account.product || "—"}</td>
+                                      <td className="p-3 font-semibold text-slate-700 dark:text-slate-300 max-w-[160px] truncate" title={formatProductDisplayName(account.product)}>{formatProductDisplayName(account.product) || "—"}</td>
                                       <td className="p-3 text-slate-500 max-w-[180px] truncate" title={account.email}>{account.email || "—"}</td>
                                       <td className="p-3">
                                         <Badge className="border-0 text-[10px] px-2 py-0.5 font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/35 dark:text-indigo-300">
@@ -3655,18 +5154,56 @@ export default function AdminDashboard() {
                                           {statusLabel}
                                         </Badge>
                                       </td>
+                                      <td className="p-3 text-slate-500 font-medium whitespace-nowrap">
+                                        {formatPortalCompletedAt(portalPrimaryCompletedAt(account))}
+                                      </td>
                                       <td className="p-3">
                                         <span className={`font-black text-sm ${
                                           account.score !== null
-                                            ? (portalScorePercent(account.score, account.score_max ?? 25) >= 70
-                                              ? "text-emerald-600 dark:text-emerald-400"
-                                              : (portalScorePercent(account.score, account.score_max ?? 25) >= 40
-                                                ? "text-amber-500"
-                                                : "text-rose-500"))
+                                            ? portalScoreColorClass(
+                                                portalScorePercent(account.score, account.score_max ?? 25)
+                                              )
                                             : "text-slate-400"
                                         }`}>
                                           {formatPortalScore(account.score, account.score_max ?? 25)}
                                         </span>
+                                      </td>
+                                      <td className="p-3">
+                                        {(() => {
+                                          const proctorInfo = getPortalPrimaryProctoring(account);
+                                          if (!proctorInfo) return <span className="text-slate-400">—</span>;
+                                          const showDetails = !!expandedProctorFlags[account.employee_id];
+                                          return (
+                                            <div className="flex flex-col gap-0.5">
+                                              <div className="flex items-center gap-1.5">
+                                                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                                  {proctorInfo.flagCount} flag{proctorInfo.flagCount !== 1 ? "s" : ""}
+                                                </span>
+                                                {proctorInfo.violations.length > 0 ? (
+                                                  <button
+                                                    type="button"
+                                                    className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 underline"
+                                                    onClick={() =>
+                                                      setExpandedProctorFlags((prev) => ({
+                                                        ...prev,
+                                                        [account.employee_id]: !prev[account.employee_id],
+                                                      }))
+                                                    }
+                                                  >
+                                                    {showDetails ? "Hide" : "View"}
+                                                  </button>
+                                                ) : null}
+                                              </div>
+                                              {showDetails && proctorInfo.violations.length > 0 ? (
+                                                <ul className="text-[9px] text-slate-500 dark:text-slate-400 max-w-[220px] list-disc list-inside leading-relaxed">
+                                                  {proctorInfo.violations.map((v, idx) => (
+                                                    <li key={`${v.type}-${v.timestamp ?? idx}`}>{v.type}</li>
+                                                  ))}
+                                                </ul>
+                                              ) : null}
+                                            </div>
+                                          );
+                                        })()}
                                       </td>
                                       <td className="p-3">
                                         <div className="flex flex-wrap items-center gap-1.5">
@@ -3738,12 +5275,68 @@ export default function AdminDashboard() {
                                               </>
                                             )}
                                           </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={
+                                              !account.email ||
+                                              portalMailSendingId === account.employee_id ||
+                                              isBulkPortalMailing
+                                            }
+                                            title={
+                                              account.email
+                                                ? `Send assessment invitation to ${account.email}`
+                                                : "No email address on file"
+                                            }
+                                            onClick={() => handleSendPortalEmployeeMail(account)}
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border"
+                                          >
+                                            {portalMailSendingId === account.employee_id ? (
+                                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                              <>
+                                                <Mail className="w-3.5 h-3.5 mr-1" />
+                                                Send Mail
+                                              </>
+                                            )}
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={
+                                              !videoTest?.hasVideo ||
+                                              deletingVideoTestId === videoTest?.testId
+                                            }
+                                            title={
+                                              videoTest?.hasVideo
+                                                ? "Delete proctoring video from storage only (score unchanged)"
+                                                : "No recording to delete"
+                                            }
+                                            onClick={() =>
+                                              videoTest &&
+                                              handleDeleteEmployeeVideo(
+                                                videoTest.testId,
+                                                portalEmployeeId(account),
+                                                portalEmployeeName(account)
+                                              )
+                                            }
+                                            className="rounded-lg h-8 px-3 text-[10px] font-bold border-border text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                          >
+                                            {deletingVideoTestId === videoTest?.testId ? (
+                                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                            ) : (
+                                              <>
+                                                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                                Delete Video
+                                              </>
+                                            )}
+                                          </Button>
                                         </div>
                                       </td>
                                     </tr>
                                     {isExpanded && (
                                       <tr className="bg-slate-50/40 dark:bg-slate-900/10">
-                                        <td colSpan={12} className="p-4 border-t border-b border-border/50">
+                                        <td colSpan={15} className="p-4 border-t border-b border-border/50">
                                           <div className="pl-6 space-y-4">
                                             {account.remarks && (
                                               <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
@@ -3773,8 +5366,13 @@ export default function AdminDashboard() {
                                                   );
                                                 }
 
-                                                if (account.test_status === "completed" && account.test_id) {
-                                                  const attemptData = testAttemptDetails[account.test_id];
+                                                if (account.test_status === "completed") {
+                                                  const completedTestId =
+                                                    account.tests?.find((test: any) => test.status === "completed")?.id ??
+                                                    account.test_id;
+                                                  const attemptData = completedTestId
+                                                    ? testAttemptDetails[completedTestId]
+                                                    : undefined;
                                                   if (attemptData?.loading) {
                                                     return (
                                                       <div className="flex items-center gap-2 text-[11px] text-slate-500 py-2">
@@ -3873,7 +5471,7 @@ export default function AdminDashboard() {
                                                         <td className="p-2.5 capitalize text-slate-600 dark:text-slate-400 font-medium">{test.difficulty}</td>
                                                         <td className="p-2.5 text-slate-500 font-medium">{test.totalQuestions} Qs</td>
                                                         <td className="p-2.5">
-                                                          <span className={`font-black ${portalScorePercent(test.score, test.scoreMax ?? 25) >= 70 ? "text-emerald-600" : (portalScorePercent(test.score, test.scoreMax ?? 25) >= 40 ? "text-amber-500" : "text-rose-500")}`}>
+                                                          <span className={`font-black ${portalScoreColorClass(portalScorePercent(test.score, test.scoreMax ?? 25))}`}>
                                                             {test.status === "completed"
                                                               ? formatPortalScore(test.score, test.scoreMax ?? 25)
                                                               : "—"}
@@ -4006,10 +5604,43 @@ export default function AdminDashboard() {
                               })}
                             {filteredPortalEmployees.length === 0 && (
                               <tr>
-                                <td colSpan={12} className="text-center py-12 text-slate-400 italic">
-                                  {resourcePortalEmployees.length === 0
-                                    ? "No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root."
-                                    : "No employees match the current search or test status filter."}
+                                <td colSpan={15} className="text-center py-12 text-slate-400">
+                                  {resourcePortalEmployees.length === 0 ? (
+                                    <span className="italic">
+                                      No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root.
+                                    </span>
+                                  ) : (
+                                    <div className="flex flex-col items-center gap-2 px-6">
+                                      <p className="italic">
+                                        {testResultsSearch.trim() && portalCompletedDateFilter !== "all"
+                                          ? `No employees match search “${testResultsSearch.trim()}” for ${formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter).replace(/^Completed On: /, "")}.`
+                                          : testResultsSearch.trim()
+                                            ? `No employees match search “${testResultsSearch.trim()}”.`
+                                            : portalCompletedDateFilter !== "all"
+                                              ? `No employees completed on ${formatPortalCompletedFilterButtonLabel(portalCompletedDateFilter).replace(/^Completed On: /, "")}.`
+                                              : testStatusFilter !== "all"
+                                                ? `No employees match test status “${getPortalTestStatusLabel(testStatusFilter)}”.`
+                                                : "No employees match the current filters."}
+                                      </p>
+                                      {testResultsSearch.trim() && portalDateOnlyMatchCount > 0 ? (
+                                        <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                          {portalDateOnlyMatchCount} employee{portalDateOnlyMatchCount > 1 ? "s" : ""} completed on that date
+                                          {testResultsSearch.trim() ? " — clear search to see them." : "."}
+                                        </p>
+                                      ) : null}
+                                      {hasActivePortalFilters ? (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={clearPortalFilters}
+                                          className="mt-1 h-8 text-xs font-bold rounded-xl"
+                                        >
+                                          Clear filters
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  )}
                                 </td>
                               </tr>
                             )}
@@ -4155,9 +5786,9 @@ export default function AdminDashboard() {
                                 <Button
                                   size="sm"
                                   variant="destructive"
-                                  disabled={actionLoading === `email-${email.id}`}
+                                  disabled={actionLoading === `outbox-log:${email.id}`}
                                   onClick={() => {
-                                    setDeleteTargetId(`email-${email.id}`);
+                                    setDeleteTargetId(`outbox-log:${email.id}`);
                                     setDeletePasswordInput("");
                                     setDeleteModalError(null);
                                   }}
@@ -4176,6 +5807,18 @@ export default function AdminDashboard() {
                     </div>
                   ) ) : (
                     <div className="space-y-4">
+                      {jdIsActiveForScoring && (
+                        <div className="rounded-xl border border-border bg-slate-50/60 dark:bg-slate-950/40 px-3 py-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                          Graded against{" "}
+                          <span className="font-black text-slate-800 dark:text-slate-100">
+                            {extractJobTitleFromJd(
+                              jdSavedText,
+                              jds.find((j) => j.id === selectedJdId)?.fileName || "selected requirement"
+                            )}
+                          </span>
+                          {" "}with the same recruiter fit used in Corp Pool. Suitable = {QUALIFIED_COVERAGE_PERCENT}%+.
+                        </div>
+                      )}
                       {/* Candidate Search Bar */}
                       {(suitableCandidates.length > 0 || unsuitableCandidates.length > 0 || candidateSearch) && (
                         <div className="relative shrink-0">
@@ -4318,22 +5961,24 @@ export default function AdminDashboard() {
 
                                 {/* Dynamic skills match list */}
                                 {(() => {
-                                  if (selectedJdId && selectedJdId !== "all" && jdSavedText) {
-                                    const matchInfo = calculateCandidateMatch(row, jdSavedText);
-                                    if (matchInfo.matchingSkills.length > 0) {
-                                      return (
-                                        <div className="flex flex-wrap gap-1 mt-2">
-                                          {matchInfo.matchingSkills.slice(0, 5).map(s => (
-                                            <Badge key={s} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0 font-bold">
-                                              {s}
-                                            </Badge>
-                                          ))}
-                                          {matchInfo.matchingSkills.length > 5 && (
-                                            <span className="text-[9px] text-slate-400 font-bold">+{matchInfo.matchingSkills.length - 5} more</span>
-                                          )}
-                                        </div>
-                                      );
-                                    }
+                                  const skills = row.matchingSkills || (
+                                    selectedJdId && selectedJdId !== "all" && jdSavedText
+                                      ? calculateCandidateMatch(row, jdSavedText).matchingSkills
+                                      : []
+                                  );
+                                  if (skills.length > 0) {
+                                    return (
+                                      <div className="flex flex-wrap gap-1 mt-2">
+                                        {skills.slice(0, 5).map((s: string, i: number) => (
+                                          <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[9px] px-1.5 py-0 font-bold">
+                                            {s}
+                                          </Badge>
+                                        ))}
+                                        {skills.length > 5 && (
+                                          <span className="text-[9px] text-slate-400 font-bold">+{skills.length - 5} more</span>
+                                        )}
+                                      </div>
+                                    );
                                   }
                                   return null;
                                 })()}
@@ -4345,15 +5990,41 @@ export default function AdminDashboard() {
                                   JD Match
                                 </span>
                                 {(() => {
-                                  const score = getScore(row);
+                                  const matchInfo = jdIsActiveForScoring
+                                    ? {
+                                        score: Number(row.score) || 0,
+                                        rationale: row.matchRationale,
+                                        requiredCount: row.requiredCount,
+                                        matchedCount: row.matchedCount,
+                                        decision: row.matchDecision,
+                                      }
+                                    : null;
+                                  const score = matchInfo?.score ?? getScore(row);
+                                  const colorClass =
+                                    score >= QUALIFIED_COVERAGE_PERCENT
+                                      ? "bg-emerald-100 dark:bg-emerald-950/35 text-emerald-800 dark:text-emerald-300"
+                                      : score >= 40
+                                        ? "bg-amber-100 dark:bg-amber-950/35 text-amber-800 dark:text-amber-300"
+                                        : "bg-rose-100 dark:bg-rose-950/35 text-rose-800 dark:text-rose-300";
                                   return (
-                                    <Badge className={`border-0 font-extrabold text-xs px-3 py-1 ${
-                                      score >= 40
-                                        ? "bg-emerald-100 dark:bg-emerald-950/35 text-emerald-800 dark:text-emerald-300"
-                                        : "bg-amber-100 dark:bg-amber-955/35 text-amber-855 dark:text-amber-300"
-                                    }`}>
-                                      {score}%
-                                    </Badge>
+                                    <>
+                                      <Badge
+                                        className={`border-0 font-extrabold text-xs px-3 py-1 ${colorClass}`}
+                                        title={
+                                          matchInfo?.rationale
+                                            || (matchInfo?.requiredCount
+                                            ? `${matchInfo.matchedCount}/${matchInfo.requiredCount} required JD skills`
+                                            : undefined)
+                                        }
+                                      >
+                                        {score}%
+                                      </Badge>
+                                      {matchInfo?.decision && (
+                                        <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-1">
+                                          {matchInfo.decision}
+                                        </span>
+                                      )}
+                                    </>
                                   );
                                 })()}
                               </div>
@@ -4362,8 +6033,10 @@ export default function AdminDashboard() {
                             {/* Middle Row: Rationale Quote */}
                             <div className="bg-muted/50 border border-indigo-50/50 dark:border-slate-800/80 rounded-2xl p-4 text-xs text-muted-foreground font-medium leading-relaxed">
                               <strong className="text-slate-800 dark:text-slate-200">Rationale:</strong> {
-                                selectedJdId && selectedJdId !== "all" && jdSavedText
-                                  ? `Matches profile requirements. Found ${calculateCandidateMatch(row, jdSavedText).matchingSkills.length} overlapping technical skills.`
+                                jdIsActiveForScoring
+                                  ? (row.matchRationale || (row.requiredCount
+                                      ? `Matched ${row.matchedCount}/${row.requiredCount} required JD skills (${row.score}% recruiter fit).`
+                                      : "No required JD skills to score against."))
                                   : (row.report?.jdMatchRationale || "Matches profile requirements.")
                               }
                             </div>
@@ -4515,37 +6188,27 @@ export default function AdminDashboard() {
                   <p className="text-[10px] text-slate-400 font-semibold mt-1">Folder-driven automation panel</p>
                 </div>
               </div>
-              <Badge className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 shrink-0 ${
-                  pipelineStatus.includes("Error") ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400" :
-                  pipelineStatus.includes("Idle") ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" :
-                  "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
-                }`}>
-                  {pipelineStatus.includes("Idle") ? "Active" : "Processing"}
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <Badge
+                  className={`border-0 font-extrabold uppercase tracking-wider text-[9px] px-2 py-0.5 ${
+                    pipelineStatus.includes("Error")
+                      ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400"
+                      : pipelineStatus.includes("Idle")
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 animate-pulse"
+                  }`}
+                  title={pipelineStatus}
+                >
+                  {pipelineStatus.includes("Error")
+                    ? "Error"
+                    : pipelineStatus.includes("Idle")
+                      ? "Idle"
+                      : "Scanning"}
                 </Badge>
+              </div>
             </div>
 
             <div className="space-y-4 flex-1 flex flex-col">
-              <div className="rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950/40 px-3 py-2.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="relative flex h-2 w-2 shrink-0">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                      pipelineStatus.includes("Error") ? "bg-rose-450" :
-                      pipelineStatus.includes("Idle") ? "bg-emerald-450" :
-                      "bg-amber-450"
-                    }`} />
-                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                      pipelineStatus.includes("Error") ? "bg-rose-500" :
-                      pipelineStatus.includes("Idle") ? "bg-emerald-500" :
-                      "bg-amber-500"
-                    }`} />
-                  </div>
-                  <span className="text-[11px] font-bold text-muted-foreground truncate">{pipelineStatus}</span>
-                </div>
-                {activityLogs.length > 0 && (
-                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider shrink-0">Auto-Syncing</span>
-                )}
-              </div>
-
               {jds.length > 0 && (
                 <div className="space-y-1.5">
                   <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider">
@@ -4626,7 +6289,7 @@ export default function AdminDashboard() {
                     </Badge>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <Button
                     variant="outline"
                     disabled={refreshingType !== null}
@@ -4683,6 +6346,34 @@ export default function AdminDashboard() {
                     <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Sync & Refresh Interviews</span>
                     <span className="text-[7px] text-slate-400 font-semibold uppercase">Database & CSV</span>
                   </Button>
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("employees")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "employees" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <RefreshCcw className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh Portal</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">Mapping & live tests</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={refreshingType !== null}
+                    onClick={() => handleRefresh("all")}
+                    className="flex flex-col items-center justify-center px-1.5 py-2 h-auto rounded-xl border-border hover:bg-indigo-50/30 dark:hover:bg-slate-950/40 gap-0.5 text-center group transition-all duration-200 disabled:opacity-60"
+                  >
+                    {refreshingType === "all" ? (
+                      <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    ) : (
+                      <Layers className="w-3.5 h-3.5 text-primary group-hover:scale-110 transition duration-200" />
+                    )}
+                    <span className="text-[9px] font-extrabold text-slate-855 dark:text-slate-200">Scan & Refresh All</span>
+                    <span className="text-[7px] text-slate-400 font-semibold uppercase">All sources + outbox</span>
+                  </Button>
                 </div>
               </div>
 
@@ -4710,8 +6401,8 @@ export default function AdminDashboard() {
                   <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click to select file for upload</span>
                   <span className="text-[9px] text-slate-400 font-semibold leading-snug">
                     {uploadCategory === 'resume' && "Saves to /docs/Resumes & auto-screens"}
-                    {uploadCategory === 'jd' && "Saves to /docs/JD & parses details"}
-                    {uploadCategory === 'br' && "Saves to /docs/BR as excel template row"}
+                    {uploadCategory === 'jd' && "Converts JD → BR row in BR_RawData 3.xlsx & saves to backend"}
+                    {uploadCategory === 'br' && "Appends BR rows into BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'employee' && "Saves to /docs/Corp Pool & updates match scores"}
                     {uploadCategory === 'interview' && "Syncs and parses candidate_interview_data.csv"}
                   </span>
@@ -5115,8 +6806,10 @@ export default function AdminDashboard() {
                   {deleteTargetId === "bulk" ? "Delete Selected Records" : 
                    deleteTargetId === "bulk-emails" ? "Delete Selected Email Logs" :
                    deleteTargetId === "bulk-employees-pool" ? "Delete Selected Employees" :
+                   deleteTargetId === "bulk-jds" ? "Delete Selected Requirements" :
+                   deleteTargetId === "bulk-portal-videos" ? "Delete Selected Proctoring Videos" :
                    deleteTargetId === "clear-outbox" ? "Clear Email Outbox" :
-                   deleteTargetId.startsWith("email-") ? "Delete Email Log" : 
+                   deleteTargetId.startsWith("outbox-log:") ? "Delete Email Log" : 
                    deleteTargetId.startsWith("emp-") ? "Delete Employee Record" : "Delete Candidate Record"}
                 </span>
               </div>
@@ -5137,9 +6830,13 @@ export default function AdminDashboard() {
                   ? `This action is permanent and will delete the ${selectedEmailIds.length} selected simulated invitation email outbox logs.`
                   : deleteTargetId === "bulk-employees-pool"
                   ? `This action is permanent and will delete the ${selectedEmployeeIds.length} selected corporate pool employee records.`
+                  : deleteTargetId === "bulk-jds"
+                  ? `This action is permanent and will delete the ${selectedJdIds.length} selected job requirements (BR / JD).`
+                  : deleteTargetId === "bulk-portal-videos"
+                  ? `This will permanently delete proctoring videos for ${selectedPortalVideoTargets.length} selected employee(s). Test scores, answers, and status will NOT be changed.`
                   : deleteTargetId === "clear-outbox"
                   ? "This action is permanent and will clear all simulated invitation email logs from the outbox."
-                  : deleteTargetId.startsWith("email-")
+                  : deleteTargetId.startsWith("outbox-log:")
                   ? "This action is permanent and will delete this simulated invitation email log."
                   : deleteTargetId.startsWith("emp-")
                   ? "This action is permanent and will delete the employee record from the corporate pool database."
@@ -5255,18 +6952,13 @@ export default function AdminDashboard() {
               </button>
             </div>
             <div className="bg-black rounded-b-3xl">
-              <video
-                key={videoPreview.url}
+              <PlyrVideoPlayer
+                key={`${videoPreview.url}-${videoPreview.mode}`}
                 src={videoPreview.url}
-                className="admin-native-video"
-                controls
+                title={videoPreview.title}
                 autoPlay
-                playsInline
-                preload="metadata"
                 onError={() => {
-                  setActionError(
-                    "Could not play this recording — file may be corrupt or missing. Reset the test and ask the employee to retake."
-                  );
+                  void handleVideoPlaybackError();
                 }}
               />
             </div>
@@ -5460,7 +7152,7 @@ export default function AdminDashboard() {
                 <div>
                   <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block mb-0.5">Skill Match Score</span>
                   <span className={`font-black text-sm ${
-                    activeEmployee.score >= 70 ? 'text-emerald-600 dark:text-emerald-400' : (activeEmployee.score >= 40 ? 'text-amber-500' : 'text-rose-500')
+                    Number(activeEmployee.score) >= 60 ? 'text-emerald-600 dark:text-emerald-400' : (Number(activeEmployee.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
                   }`}>
                     {activeEmployee.score || 0}%
                   </span>
@@ -5478,8 +7170,8 @@ export default function AdminDashboard() {
                 <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Matching Skills against JD</span>
                 <div className="flex flex-wrap gap-1">
                   {activeEmployee.matchingSkills && activeEmployee.matchingSkills.length > 0 ? (
-                    activeEmployee.matchingSkills.map((s: string) => (
-                      <Badge key={s} className="bg-indigo-50 border-0 text-indigo-700 text-[10px] px-2 py-0.5">
+                    activeEmployee.matchingSkills.map((s: string, i: number) => (
+                      <Badge key={`${s}-${i}`} className="bg-indigo-50 border-0 text-indigo-700 text-[10px] px-2 py-0.5">
                         {s}
                       </Badge>
                     ))
@@ -5672,7 +7364,7 @@ export default function AdminDashboard() {
                 <label className="block text-xs font-black text-slate-500 uppercase tracking-widest">
                   Assessment Focus
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <button
                     type="button"
                     onClick={() => setInviteType("technical")}
@@ -5682,8 +7374,8 @@ export default function AdminDashboard() {
                         : "border-border text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
                     }`}
                   >
-                    <span className="font-extrabold">Technical Assessment</span>
-                    <span className="text-[10px] opacity-75 font-normal">Includes coding & IDE challenges</span>
+                    <span className="font-extrabold">Technical</span>
+                    <span className="text-[10px] opacity-75 font-normal">Only technical questions</span>
                   </button>
 
                   <button
@@ -5695,8 +7387,21 @@ export default function AdminDashboard() {
                         : "border-border text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
                     }`}
                   >
-                    <span className="font-extrabold">Non-Technical Focus</span>
-                    <span className="text-[10px] opacity-75 font-normal">Behavioral & soft skills (No IDE)</span>
+                    <span className="font-extrabold">Non-Technical</span>
+                    <span className="text-[10px] opacity-75 font-normal">Only non-technical questions</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setInviteType("both")}
+                    className={`py-3 px-4 rounded-2xl border text-center font-bold text-xs transition-all flex flex-col items-center gap-1.5 ${
+                      inviteType === "both"
+                        ? "border-indigo-600 bg-indigo-50/50 text-indigo-700 dark:bg-indigo-950/20 dark:text-violet-400"
+                        : "border-border text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <span className="font-extrabold">Both</span>
+                    <span className="text-[10px] opacity-75 font-normal">Technical + non-technical</span>
                   </button>
                 </div>
               </div>
@@ -5707,101 +7412,117 @@ export default function AdminDashboard() {
                   Define Questions per Section
                 </span>
 
-                {inviteType === "technical" ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Overlapping (JD+CV)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countOverlapping}
-                        onChange={(e) => setCountOverlapping(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        JD Gaps Skill
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countGap}
-                        onChange={(e) => setCountGap(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        CV Projects Skill
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countProjects}
-                        onChange={(e) => setCountProjects(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Coding Challenges (IDE)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={10}
-                        value={countCoding}
-                        onChange={(e) => setCountCoding(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
+                {(inviteType === "technical" || inviteType === "both") && (
+                  <div className="space-y-3">
+                    {inviteType === "both" && (
+                      <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block">
+                        Technical Questions
+                      </span>
+                    )}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Overlapping (JD+CV)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countOverlapping}
+                          onChange={(e) => setCountOverlapping(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          JD Gaps Skill
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countGap}
+                          onChange={(e) => setCountGap(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          CV Projects Skill
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countProjects}
+                          onChange={(e) => setCountProjects(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Coding Challenges (IDE)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={countCoding}
+                          onChange={(e) => setCountCoding(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Behavioral Questions
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countBehavioral}
-                        onChange={(e) => setCountBehavioral(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Leadership & Collaboration
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countLeadership}
-                        onChange={(e) => setCountLeadership(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
-                        Problem Solving & Soft Skills
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={countSoftSkills}
-                        onChange={(e) => setCountSoftSkills(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
-                      />
+                )}
+
+                {(inviteType === "non-technical" || inviteType === "both") && (
+                  <div className={`space-y-3 ${inviteType === "both" ? "pt-2 border-t border-slate-200 dark:border-slate-800" : ""}`}>
+                    {inviteType === "both" && (
+                      <span className="text-[11px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block">
+                        Non-Technical Questions
+                      </span>
+                    )}
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Behavioral Questions
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countBehavioral}
+                          onChange={(e) => setCountBehavioral(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Leadership & Collaboration
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countLeadership}
+                          onChange={(e) => setCountLeadership(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <label className="text-[11px] font-bold text-slate-700 dark:text-slate-350">
+                          Problem Solving & Soft Skills
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={countSoftSkills}
+                          onChange={(e) => setCountSoftSkills(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="w-[120px] rounded-xl border border-border bg-card px-3 py-2 text-xs text-slate-905 dark:text-slate-100 focus:border-indigo-500 outline-none font-bold"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -6236,6 +7957,85 @@ export default function AdminDashboard() {
             </div>
 
           </div>
+        </div>
+      )}
+
+      {showPasswordModal && canChangePassword && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in text-foreground">
+          <Card className="w-full max-w-md bg-card border border-indigo-150 dark:border-slate-800 shadow-2xl rounded-3xl overflow-hidden animate-scale-up">
+            <div className="bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-white" />
+                <span className="font-bold text-sm tracking-wide">Change password</span>
+              </div>
+              <button
+                type="button"
+                onClick={closePasswordModal}
+                className="text-white/80 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-muted-foreground font-semibold leading-relaxed">
+                Update the admin password for {adminEmail}. You will use the new password the next time you sign in.
+              </p>
+              <div className="space-y-3">
+                <input
+                  type="password"
+                  value={currentPasswordInput}
+                  onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                  placeholder="Current password"
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-3 text-xs font-bold text-slate-850 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-400/50"
+                  autoFocus
+                />
+                <input
+                  type="password"
+                  value={newPasswordInput}
+                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  placeholder="New password (min 5 characters)"
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-3 text-xs font-bold text-slate-850 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-400/50"
+                />
+                <input
+                  type="password"
+                  value={confirmPasswordInput}
+                  onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                  placeholder="Confirm new password"
+                  className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-3 text-xs font-bold text-slate-850 dark:text-slate-100 outline-none focus:ring-2 focus:ring-indigo-400/50"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !passwordModalSaving) {
+                      handleChangeAdminPassword();
+                    }
+                  }}
+                />
+                {passwordModalError && (
+                  <p className="text-[10px] text-red-500 font-bold mt-1.5 flex items-center gap-1">
+                    ⚠️ {passwordModalError}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-950/20 border-t border-slate-100 dark:border-slate-800 px-6 py-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={closePasswordModal}
+                disabled={passwordModalSaving}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleChangeAdminPassword}
+                disabled={passwordModalSaving}
+                className="bg-primary hover:from-indigo-700 hover:to-violet-700 text-white rounded-xl font-bold shadow-md shadow-indigo-500/20 text-xs gap-2"
+              >
+                {passwordModalSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Save password
+              </Button>
+            </div>
+          </Card>
         </div>
       )}
     </div>

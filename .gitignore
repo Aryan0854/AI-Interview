@@ -14,8 +14,10 @@ build
 # Production
 dist
 
-# Misc
-.DS_Store
+# Generated / legacy question bank exports (use QB-new.xlsx only)
+Question Bank*.xlsx
+__pycache__/
+*.pyc
 *.pem
 *.bak
 
@@ -51,3 +53,6 @@ scratch/
 
 # Kilo audit tool directory
 .kilo/
+
+# Portal click-by-click overlay is generated locally; live data is in Supabase
+src/data/portal-question-answers.json

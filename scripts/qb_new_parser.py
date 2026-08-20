@@ -225,10 +225,12 @@ def _split_product_sections(rows: list[tuple]) -> list[tuple[str, list[tuple]]]:
 
 
 def _parse_category_section(product_key: str, section_rows: list[tuple]) -> list[McqRecord]:
+    """Parse stratified product blocks (Domain/Product/... or compact Category/Question/...)."""
     records: list[McqRecord] = []
     header: list[str] | None = None
-    q_idx = cat_idx = correct_idx = None
+    q_idx = cat_idx = correct_idx = domain_idx = product_idx = None
     opt_start = None
+    compact_format = False
 
     for row in section_rows:
         cells = [clean(c) for c in row]
@@ -236,15 +238,32 @@ def _parse_category_section(product_key: str, section_rows: list[tuple]) -> list
             continue
         if cells[:2] == ["Domain", "Product"]:
             header = cells
+            compact_format = False
+            domain_idx = header.index("Domain")
+            product_idx = header.index("Product")
             q_idx = header.index("Question")
             cat_idx = header.index("Category") if "Category" in header else None
             opt_start = q_idx + 1
             correct_idx = next((i for i, h in enumerate(header) if h.lower().startswith("correct")), None)
             continue
+        if cells[0] == "Category" and len(cells) > 1 and cells[1] == "Question":
+            header = cells
+            compact_format = True
+            domain_idx = product_idx = None
+            cat_idx = 0
+            q_idx = 1
+            opt_start = 2
+            correct_idx = next((i for i, h in enumerate(header) if h.lower().startswith("correct")), None)
+            continue
         if header is None or q_idx is None:
             continue
 
-        product = cells[1] if len(cells) > 1 else product_key
+        domain = cells[domain_idx] if domain_idx is not None and domain_idx < len(cells) else "SDM"
+        product = (
+            cells[product_idx]
+            if product_idx is not None and product_idx < len(cells)
+            else product_key
+        )
         category = cells[cat_idx] if cat_idx is not None and cat_idx < len(cells) else ""
         question = cells[q_idx] if q_idx < len(cells) else ""
         if not question or question == "Question":
@@ -262,7 +281,7 @@ def _parse_category_section(product_key: str, section_rows: list[tuple]) -> list
 
         records.append(
             McqRecord(
-                domain=cells[0],
+                domain=domain if not compact_format else "SDM",
                 product=resolve_qb_product_key(product) or product_key,
                 category=normalize_category_key(category),
                 question_text=question,
@@ -416,6 +435,37 @@ def assign_display_questions(
     else:
         display = display[:limit]
     return display, remark
+
+
+def normalize_lookup_key(text: str) -> str:
+    text = clean(text).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def build_alias_bank(qb_path: Path) -> dict[str, dict]:
+    """Build normalized-text lookup for MCQ records (used by import/reassign scripts)."""
+    _pools, records = parse_qb_new_xlsx(qb_path)
+    alias_bank: dict[str, dict] = {}
+    for rec in records:
+        plain = rec.question_text
+        display = rec.display_text
+        item = {
+            "question_text": display,
+            "plain_text": plain,
+            "options": list(rec.options),
+            "correct_option_index": rec.correct_option_index,
+            "explanation": "Imported from QB-new.xlsx.",
+            "difficulty": "medium",
+            "product": rec.product,
+            "category": rec.category,
+            "topic_title": rec.category or rec.product,
+        }
+        for text in (display, plain):
+            key = normalize_lookup_key(text)
+            if key not in alias_bank:
+                alias_bank[key] = item
+    return alias_bank
 
 
 def mcq_to_export_rows(records: Iterable[McqRecord]) -> list[list]:

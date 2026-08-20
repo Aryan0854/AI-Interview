@@ -4,6 +4,7 @@ import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { localTestsDb, LocalTestsDb } from "@/services/local-tests-db";
 import { allowLocalTestsFallback } from "@/lib/db-mode";
 import { reconcileEmployeeTestsFromLocalJson } from "@/services/employee-test-supabase-sync";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
 
 interface ResultItem {
   id: string;
@@ -91,10 +92,11 @@ async function loadResultsFromSupabase(employeeId: string): Promise<ResultItem[]
     return {
       id: test.id,
       topic_id: test.topic_id,
-      topic_title:
+      topic_title: formatTopicTitleForDisplay(
         topicTitle.get(test.topic_id) ??
         (test as { topic_title?: string }).topic_title ??
-        test.topic_id,
+        test.topic_id
+      ),
       subject_id: test.subject_id,
       subject_title:
         subjectTitle.get(test.subject_id) ??
@@ -133,7 +135,7 @@ async function loadResultsFromLocal(employeeId: string): Promise<ResultItem[]> {
     return {
       id: test.id,
       topic_id: test.topic_id,
-      topic_title: test.topic_title || test.topic_id,
+      topic_title: formatTopicTitleForDisplay(test.topic_title || test.topic_id),
       subject_id: test.subject_id,
       subject_title: test.subject_title || test.subject_id,
       difficulty: test.difficulty,

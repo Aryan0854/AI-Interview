@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Lock, FileText, ShieldAlert } from "lucide-react";
 import { usePathname } from "next/navigation";
+import { clearAdminAccessFlags, storeAdminAccessFlags } from "@/lib/admin-accounts";
 
 const STORAGE_KEY = "resume-admin-authenticated";
 
@@ -40,12 +41,17 @@ export default function AdminAuthGate({ children }: { children: React.ReactNode 
 
     if (token && storedEmail && stored === "true") {
       // Validate token on mount
-      fetch("/api/admin/auth/validate", {
+      fetch(`/api/admin/auth/validate?email=${encodeURIComponent(storedEmail)}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store"
       })
-      .then((res) => {
+      .then(async (res) => {
         if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          storeAdminAccessFlags({
+            canViewEmployeePortal: data.canViewEmployeePortal !== false,
+            canChangePassword: Boolean(data.canChangePassword),
+          });
           setAuthenticated(true);
           setEmail(storedEmail);
         } else {
@@ -75,6 +81,7 @@ export default function AdminAuthGate({ children }: { children: React.ReactNode 
       window.sessionStorage.removeItem(STORAGE_KEY);
       window.sessionStorage.removeItem("admin-email");
       window.sessionStorage.removeItem("admin_token");
+      clearAdminAccessFlags();
       setAuthenticated(false);
     }
   }, [pathname]);
@@ -100,6 +107,10 @@ export default function AdminAuthGate({ children }: { children: React.ReactNode 
         window.sessionStorage.setItem("admin_token", data.token);
         window.sessionStorage.setItem("admin-email", cleanEmail);
         window.sessionStorage.setItem(STORAGE_KEY, "true");
+        storeAdminAccessFlags({
+          canViewEmployeePortal: data.canViewEmployeePortal !== false,
+          canChangePassword: Boolean(data.canChangePassword),
+        });
         setAuthenticated(true);
         setEmail(cleanEmail);
         setError("");
@@ -126,6 +137,10 @@ export default function AdminAuthGate({ children }: { children: React.ReactNode 
         window.sessionStorage.setItem("admin_token", data.token);
         window.sessionStorage.setItem("admin-email", promptEmail);
         window.sessionStorage.setItem(STORAGE_KEY, "true");
+        storeAdminAccessFlags({
+          canViewEmployeePortal: data.canViewEmployeePortal !== false,
+          canChangePassword: Boolean(data.canChangePassword),
+        });
         setAuthenticated(true);
         setEmail(promptEmail);
         setShowStayLoggedInPrompt(false);
@@ -151,6 +166,7 @@ export default function AdminAuthGate({ children }: { children: React.ReactNode 
       window.sessionStorage.removeItem(STORAGE_KEY);
       window.sessionStorage.removeItem("admin-email");
       window.sessionStorage.removeItem("admin_token");
+      clearAdminAccessFlags();
     }
     setAuthenticated(false);
     setEmail("");

@@ -90,6 +90,27 @@ export async function getTestQuestionAttempts(
   return questions;
 }
 
+async function fetchAllByTestIds(table: "test_questions" | "test_attempts", testIds: string[]) {
+  const rows: any[] = [];
+  const pageSize = 1000;
+  for (let i = 0; i < testIds.length; i += 50) {
+    const chunk = testIds.slice(i, i + 50);
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from(table)
+        .select("*")
+        .in("test_id", chunk)
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+  return rows;
+}
+
 export async function getTestQuestionAttemptsBatch(
   testIds: string[]
 ): Promise<Map<string, AdminTestQuestionAttempt[]>> {
@@ -99,17 +120,13 @@ export async function getTestQuestionAttemptsBatch(
 
   if (useSupabasePrimary()) {
     try {
-      const [{ data: questionRows, error: qErr }, { data: attemptRows, error: aErr }] =
-        await Promise.all([
-          supabase.from("test_questions").select("*").in("test_id", uniqueIds),
-          supabase.from("test_attempts").select("*").in("test_id", uniqueIds),
-        ]);
-
-      if (qErr) throw qErr;
-      if (aErr) throw aErr;
+      const [questionRows, attemptRows] = await Promise.all([
+        fetchAllByTestIds("test_questions", uniqueIds),
+        fetchAllByTestIds("test_attempts", uniqueIds),
+      ]);
 
       const questionsByTest = new Map<string, LocalTestQuestion[]>();
-      for (const row of questionRows ?? []) {
+      for (const row of questionRows) {
         const list = questionsByTest.get(row.test_id) ?? [];
         list.push({
           id: row.id,
@@ -128,7 +145,7 @@ export async function getTestQuestionAttemptsBatch(
       }
 
       const attemptsByTest = new Map<string, LocalTestAttempt[]>();
-      for (const row of attemptRows ?? []) {
+      for (const row of attemptRows) {
         const list = attemptsByTest.get(row.test_id) ?? [];
         list.push({
           id: row.id,

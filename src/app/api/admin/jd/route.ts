@@ -10,6 +10,12 @@ import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { checkCsrf, getClientIp } from '@/lib/security';
 import { auditLogService } from '@/services/audit-log-service';
 import { writeLog } from '@/lib/structured-logger';
+import { allowLocalDataFallback } from '@/lib/db-mode';
+import {
+  isRequirementDeleted,
+  loadDeletedRequirements,
+  markRequirementsDeleted,
+} from '@/lib/deleted-requirements';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -75,7 +81,14 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false });
       
     if (!dbError && dbJds) {
-      jds = dbJds.map((row: any) => ({
+      const deleted = await loadDeletedRequirements();
+      jds = dbJds
+        .filter((row: any) => !isRequirementDeleted(deleted, {
+          id: row.id,
+          fileName: row.file_name,
+          jdText: row.jd_text,
+        }))
+        .map((row: any) => ({
         id: row.id,
         jdText: row.jd_text,
         rmEmail: row.rm_email,
@@ -86,15 +99,20 @@ export async function GET(request: NextRequest) {
       console.warn("Supabase JD fetch failed, falling back to file storage:", dbError.message);
     }
     
-    // 2. If database is empty or fails, check and load/migrate local backup
-    if (jds.length === 0) {
+    // 2. Local JSON only when explicitly allowed (offline) — Supabase is source of truth
+    if (jds.length === 0 && allowLocalDataFallback()) {
       await mkdir(getUploadsRoot(), { recursive: true });
       const localJds = await ensureJdsJson();
-      jds = localJds;
+      const deleted = await loadDeletedRequirements();
+      jds = localJds.filter((localJd: any) => !isRequirementDeleted(deleted, {
+        id: localJd.id,
+        fileName: localJd.fileName,
+        jdText: localJd.jdText,
+      }));
       
       // Auto-migrate local file JDs to Supabase in the background if database is working
       if (!dbError) {
-        for (const localJd of localJds) {
+        for (const localJd of jds) {
           try {
             await supabase.from('job_descriptions').insert({
               id: localJd.id,
@@ -108,6 +126,8 @@ export async function GET(request: NextRequest) {
           }
         }
       }
+    } else if (jds.length === 0 && dbError) {
+      console.warn("No job descriptions from Supabase and local fallback disabled.");
     }
 
     // Group and automatically de-duplicate duplicate JDs (keeping the latest one)
@@ -140,13 +160,16 @@ export async function GET(request: NextRequest) {
     // Sort uniqueJds by createdAt descending to preserve newest-first ordering
     uniqueJds.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     jds = uniqueJds;
-    
+
+    // Shared org JDs (admin@infinite.com) are visible to every admin login.
     if (!email || email === "admin@infinite.com") {
       return NextResponse.json({ jds });
-    } else {
-      const filtered = jds.filter((j: any) => j.rmEmail?.toLowerCase().trim() === email);
-      return NextResponse.json({ jds: filtered });
     }
+    const filtered = jds.filter((j: any) => {
+      const owner = (j.rmEmail || "").toLowerCase().trim();
+      return owner === email || owner === "admin@infinite.com" || !owner;
+    });
+    return NextResponse.json({ jds: filtered });
   } catch (error: any) {
     console.error("Failed to read JDs:", error);
     return NextResponse.json({ error: "Failed to read Job Descriptions" }, { status: 500 });
@@ -314,43 +337,70 @@ export async function DELETE(request: NextRequest) {
 
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
+  const body = await request.json().catch(() => ({}));
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(body.ids) ? body.ids : id ? [id] : [])
+        .map((value: unknown) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  );
 
   try {
-    if (!id) {
+    if (ids.length === 0) {
       return NextResponse.json({ error: "JD ID is required" }, { status: 400 });
     }
 
-    // 1. Delete from Supabase Database
+    const { data: existingRows } = await supabase
+      .from("job_descriptions")
+      .select("id, file_name, jd_text")
+      .in("id", ids);
+    await markRequirementsDeleted(
+      (existingRows || []).map((row: any) => ({
+        id: row.id,
+        fileName: row.file_name,
+        jdText: row.jd_text,
+      }))
+    );
+
     const { error: dbError } = await supabase
       .from('job_descriptions')
       .delete()
-      .eq('id', id);
+      .in('id', ids);
 
     if (dbError) {
       console.warn("Failed to delete JD from Supabase:", dbError.message);
     }
 
-    // 2. Fallback: Update local backup files
     try {
       let jds = await ensureJdsJson();
-      jds = jds.filter((j: any) => j.id !== id);
+      const deleted = await loadDeletedRequirements();
+      jds = jds.filter((j: any) =>
+        !ids.includes(j.id) &&
+        !isRequirementDeleted(deleted, { id: j.id, fileName: j.fileName, jdText: j.jdText })
+      );
       await writeFile(getJdsJsonPath(), JSON.stringify(jds, null, 2), "utf8");
     } catch (localErr) {}
 
     await auditLogService.addLog({
       actorEmail: "admin@infinite.com",
-      action: "ADMIN_DELETE_JD",
-      target: id,
-      details: `Successfully deleted JD ID: ${id}`,
+      action: ids.length > 1 ? "ADMIN_BATCH_DELETE_JD" : "ADMIN_DELETE_JD",
+      target: ids.join(", "),
+      details: `Successfully deleted JD ID${ids.length > 1 ? "s" : ""}: ${ids.join(", ")}`,
       ipAddress: ip
     });
 
-    await writeLog('requirements', 'DELETE_JD', 'success', `Successfully deleted JD ID: ${id}`);
+    await writeLog(
+      'requirements',
+      ids.length > 1 ? 'BATCH_DELETE_JD' : 'DELETE_JD',
+      'success',
+      `Successfully deleted JD ID${ids.length > 1 ? "s" : ""}: ${ids.join(", ")}`
+    );
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, deletedCount: ids.length });
   } catch (error: any) {
     console.error("Failed to delete JD:", error);
-    await writeLog('requirements', 'DELETE_JD_FAILED', 'failed', `Failed to delete Job Description ID ${id}: ${error.message}`);
+    await writeLog('requirements', 'DELETE_JD_FAILED', 'failed', `Failed to delete Job Description ID ${ids.join(", ")}: ${error.message}`);
     return NextResponse.json({ error: error.message || "Failed to delete Job Description" }, { status: 500 });
   }
 }

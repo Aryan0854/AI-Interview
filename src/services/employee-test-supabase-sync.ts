@@ -231,9 +231,9 @@ export async function reconcileEmployeeTestsFromLocalJson(
         .eq("id", test.id)
         .maybeSingle();
 
-      // Supabase is authoritative — never resurrect a completed local row after admin reset.
-      if (remote && remote.status !== "completed") continue;
       if (remote?.status === "completed") continue;
+      // Never overwrite an admin reset (remote pending) with stale local completed rows.
+      if (remote?.status === "pending" && test.status === "completed") continue;
 
       const questions = (db.test_questions ?? []).filter((q) => q.test_id === test.id);
       await syncTestToSupabase(test, employeeUuid, questions);

@@ -28,7 +28,12 @@ export async function POST(
 
     const { test } = owned;
     if (test.status === "completed") {
-      return NextResponse.json({ error: "Test already completed" }, { status: 409 });
+      return NextResponse.json({
+        success: true,
+        proctoring: normalizeProctoring(test.proctoring),
+        autoSubmit: false,
+        ignored: true,
+      });
     }
 
     const submitCheck = canSubmitTest(test);

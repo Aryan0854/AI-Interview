@@ -364,32 +364,114 @@ back to `src/lib/local-ai.ts` so the user experience is unaffected.
 
 ---
 
-## 📜 Historical / Deprecated Migration Notes
+## Employee assessment Excel → portal mapping (keep these files)
 
-### `DEPLOYMENT_GUIDE.md` — DEPRECATED
+These are **not** imported by Next.js on every page load for question text from `QB-new.xlsx`, but they are the **source of truth pipeline** used to build the portal mapping the app *does* read.
 
-> ⚠️ **DO NOT FOLLOW**
->
-> This document describes a SQLite → `@libsql/client` (Turso) database migration plan that
-> was **superseded** before production. The application no longer uses `@libsql/client`,
-> Turso, or any local SQLite database. All data is now persisted in **Supabase Postgres**.
-> See *Persistence Layer* and *System Architecture* above for the current setup.
+| File | Keep? | Role |
+|---|---|---|
+| `resources less than 3.5 rating - latest.xlsx` | **Yes** | Employee roster source (Emp ID, name, product, email, …) |
+| `QB-new.xlsx` | **Yes** | Question bank (MCQs by product) |
+| `Resource_Question_Mapping.xlsx` | **Yes (runtime)** | Output mapping: each employee + 25 assigned questions — read by `src/services/resource-mapping-service.ts` |
+| `Employee_User_Credentials.xlsx` | **Yes (runtime)** | Login credentials for employee portal |
+| `scripts/` | **Yes (ops)** | Automation that builds the mapping / syncs to Supabase |
 
-### `MIGRATION_COMPLETE.md` — DEPRECATED
+### How mapping works
 
-> ⚠️ **DO NOT FOLLOW**
->
-> This document describes the SQLite3 → LibSQL migration that was completed before the
-> project switched to **Supabase Postgres**. It is kept as historical reference only.
-> None of the steps described here apply to the current codebase:
->
-> - The current `src/lib/db.ts` imports `@supabase/supabase-js`, **not** `@libsql/client`
-> - There is no `TURSO_CONNECTION_URL` or `TURSO_AUTH_TOKEN` environment variable
-> - There is no `LibSqlDatabase` wrapper class
->
-> See the README intro and *Does It Do?* sections (above) for the current architecture.
+```
+resources less than 3.5 rating - latest.xlsx   QB-new.xlsx
+                 \                               /
+                  \                             /
+                   v                           v
+        scripts/update_portal_and_question_bank.py
+                   (uses qb_new_parser.py)
+                              |
+                              v
+              Resource_Question_Mapping.xlsx
+                 Emp ID + Product + Assigned Question 1..25
+                              |
+                              v
+         Admin Employee Portal / test assignment (Next.js + Supabase)
+```
+
+1. Read employees from the **resources** Excel.  
+2. For each employee’s **Product**, pull a pool from **QB-new.xlsx**.  
+3. Assign **25** display questions per employee (product-specific rules in `scripts/qb_new_parser.py`).  
+4. Write **`Resource_Question_Mapping.xlsx`**.  
+5. Runtime portal loads that mapping (and live test status from Supabase).
+
+### Automate (re-run whenever Excel changes)
+
+```bash
+# From project root (Python + openpyxl required)
+python scripts/update_portal_and_question_bank.py
+```
+
+Useful related scripts (do **not** delete `scripts/` if you need remapping):
+
+| Script | Purpose |
+|---|---|
+| `scripts/update_portal_and_question_bank.py` | Main: roster + QB → `Resource_Question_Mapping.xlsx` |
+| `scripts/qb_new_parser.py` | Parse QB-new pools / assignment rules |
+| `scripts/update_credentials_from_resources.py` | Rebuild `Employee_User_Credentials.xlsx` from resources sheet |
+| `scripts/import_resource_question_mapping.py` | Push mapping/questions toward DB-oriented import |
+| `scripts/reassign_test_questions_supabase.py` | Reassign live Supabase test questions from mapping + QB |
+| `scripts/sync-manifest-to-supabase.ts` / `sync-local-tests-to-supabase.ts` | Sync local/manifest data to Supabase |
+
+After regenerating the mapping Excel, run admin **Scan & Refresh Portal** (or redeploy with the new file) so hosted picks up updates via your usual sync path.
 
 ---
+
+## Supabase (ops reference)
+
+Clients live in `src/lib/db.ts`:
+
+- `supabase` — URL + anon/service key (server routes use service role when set)
+- `supabaseServer` — storage / privileged server work
+- Local JSON fallback under `uploads/` when cloud is unavailable (local/dev only)
+
+### Main domains
+
+- **Candidates:** `resumes`, `job_descriptions`, `interview_questions`, `interview_attempts`
+- **Employee assessments:** `employees`, `tests`, `test_questions`, `test_attempts`, learning_* tables
+- **Admin:** `audit_logs`, `simulated_emails`, `reset_logs`, `candidate_sessions`, `portal_settings`
+
+Schema / migrations: `docs/supabase-schema/` (especially `combined-migration.sql`, `seed-curriculum.sql`).  
+Reference dumps: `database/schema.sql`, `database/data.sql`.
+
+Required env:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+# Production identity (Render FaceNet) — recommended
+FACE_MATCH_SERVICE_URL=https://your-facenet.onrender.com
+FACE_MATCH_API_KEY=shared-secret
+# Optional assist for ID-type / spoof (not required for face match)
+GEMINI_API_KEY=...
+```
+
+See `faceproj/README.md` for deploying the FaceNet service on Render.
+
+---
+
+## Project layout (KT)
+
+```
+├── docs/                 # BR, JD, Corp Pool, Resumes (admin Scan & Refresh) + SQL schema
+├── faceproj/             # Optional local FaceNet (Gemini is primary on Vercel)
+├── scripts/              # Excel mapping / Supabase sync (ops — not next start)
+├── src/                  # Next.js app (runtime)
+├── public/               # Static assets
+├── uploads/              # Local runtime cache (gitignored) — resumes, tests, logs
+├── Resource_Question_Mapping.xlsx
+├── Employee_User_Credentials.xlsx
+├── QB-new.xlsx
+└── resources less than 3.5 rating - latest.xlsx
+```
+
+**Do not delete `uploads/` for local runs** — the app reads/writes `uploads/*.json`, resumes, and recordings locally. Hosted uses Supabase + `/tmp`. Git already ignores `uploads/*` except `.gitkeep`.
 
 ---
 

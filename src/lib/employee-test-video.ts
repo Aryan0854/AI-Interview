@@ -2,7 +2,12 @@ import { join } from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { supabaseServer } from "@/lib/db";
 import { ensureRuntimeUploadsDir, getRuntimeUploadsRoot } from "@/lib/runtime-data";
-import { fixWebmDurationBuffer, MAX_WEBM_DURATION_FIX_BYTES } from "@/lib/webm-duration-fix";
+import {
+  hasEbmlHeader,
+  hasWebmClusterData,
+  isPlayableWebmBuffer,
+} from "@/lib/webm-validate";
+import { fixWebmDurationBuffer } from "@/lib/webm-duration-fix";
 
 /** Avoid re-parsing WebM on every byte-range request during playback. */
 const preparedVideoCache = new Map<string, Buffer>();
@@ -17,12 +22,18 @@ function rememberPreparedVideo(testId: string, buffer: Buffer): Buffer {
   return buffer;
 }
 
-/** Repair header only — never mutate stored recordings for optional playback metadata. */
+/** Trim junk and add seekable duration metadata for browser `<video>` (serve path only). */
 export function prepareWebmForPlayback(buffer: Buffer): Buffer {
   const repaired = repairWebmBuffer(buffer);
-  if (!isValidWebmBuffer(repaired)) return repaired;
-  const withDuration = fixWebmDurationBuffer(repaired);
-  return isValidWebmBuffer(withDuration) ? withDuration : repaired;
+  if (!isPlayableWebmBuffer(repaired)) return repaired;
+  return fixWebmDurationBuffer(repaired);
+}
+
+/** Validate + trim before persisting to Supabase/local disk. */
+export function prepareWebmForStorage(buffer: Buffer): Buffer | null {
+  const cleaned = repairWebmBuffer(buffer);
+  if (!isPlayableWebmBuffer(cleaned)) return null;
+  return cleaned;
 }
 
 const RECORDINGS_BUCKET = "recordings";
@@ -65,14 +76,10 @@ const MIN_WEBM_BYTES = 4096;
 
 export function isValidWebmBuffer(buffer: Buffer): boolean {
   const repaired = repairWebmBuffer(buffer);
-  return (
-    repaired.length >= MIN_WEBM_BYTES &&
-    repaired[0] === 0x1a &&
-    repaired[1] === 0x45 &&
-    repaired[2] === 0xdf &&
-    repaired[3] === 0xa3
-  );
+  return isPlayableWebmBuffer(repaired, MIN_WEBM_BYTES);
 }
+
+export { isPlayableWebmBuffer, hasWebmClusterData, hasEbmlHeader };
 
 /** One storage list call — used to mark which tests have a real recording file. */
 export async function listEmployeeTestRecordingIds(): Promise<Set<string>> {
@@ -153,10 +160,55 @@ async function ensureRecordingsBucket() {
   }
 }
 
-export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
+async function removeFromStorage(path: string): Promise<void> {
+  try {
+    await supabaseServer.storage.from(RECORDINGS_BUCKET).remove([path]);
+  } catch {
+    // ignore
+  }
+}
+
+/** Save in-progress recording bytes (no score/status changes). Used during live tests. */
+export async function saveEmployeeTestVideoProgress(testId: string, buffer: Buffer): Promise<boolean> {
   const cleaned = repairWebmBuffer(buffer);
-  if (!isValidWebmBuffer(cleaned)) {
-    console.warn(`Employee test video rejected for ${testId}: invalid or too-small WebM (${cleaned.length} bytes)`);
+  if (!hasEbmlHeader(cleaned) || cleaned.length < 1024) return false;
+
+  try {
+    await ensureRecordingsBucket();
+    const path = employeeTestVideoStoragePath(testId);
+    const { error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).upload(path, cleaned, {
+      contentType: "video/webm",
+      upsert: true,
+      cacheControl: "3600",
+    });
+    if (error) throw error;
+    return true;
+  } catch (storageErr) {
+    console.warn(`Employee test video progress save failed for ${testId}:`, storageErr);
+    try {
+      await ensureRuntimeUploadsDir();
+      const dir = join(getRuntimeUploadsRoot(), "employee_test_recordings");
+      await mkdir(dir, { recursive: true });
+      await writeFile(localVideoPath(testId), cleaned);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/** Strict save first; fall back to lenient repair path (production-safe for in-flight WebM). */
+export async function saveEmployeeTestVideoLenient(testId: string, buffer: Buffer): Promise<boolean> {
+  if (await saveEmployeeTestVideo(testId, buffer)) return true;
+  return saveEmployeeTestVideoProgress(testId, buffer);
+}
+
+export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Promise<boolean> {
+  const cleaned = prepareWebmForStorage(buffer);
+  if (!cleaned) {
+    console.warn(
+      `Employee test video rejected for ${testId}: invalid or unplayable WebM (${buffer.length} bytes, cluster=${hasWebmClusterData(repairWebmBuffer(buffer))})`
+    );
     return false;
   }
 
@@ -166,14 +218,23 @@ export async function saveEmployeeTestVideo(testId: string, buffer: Buffer): Pro
     const { error } = await supabaseServer.storage.from(RECORDINGS_BUCKET).upload(path, cleaned, {
       contentType: "video/webm",
       upsert: true,
+      cacheControl: "3600",
     });
     if (error) throw error;
 
-    rememberPreparedVideo(testId, cleaned);
     const { data: verify, error: verifyErr } = await supabaseServer.storage
       .from(RECORDINGS_BUCKET)
       .download(path);
     if (verifyErr || !verify) throw verifyErr || new Error("Upload verification failed");
+
+    const verifyBuffer = prepareWebmForStorage(repairWebmBuffer(Buffer.from(await verify.arrayBuffer())));
+    if (!verifyBuffer || verifyBuffer.length < cleaned.length * 0.85) {
+      console.warn(`Employee test video verify failed for ${testId}: size or playback check`);
+      await removeFromStorage(path);
+      return false;
+    }
+
+    rememberPreparedVideo(testId, verifyBuffer);
     return true;
   } catch (storageErr) {
     console.warn("Employee test video Supabase upload failed, using local fallback:", storageErr);
@@ -285,16 +346,10 @@ export async function readEmployeeTestVideo(testId: string): Promise<Buffer | nu
   const raw = await readEmployeeTestVideoRaw(testId);
   if (!raw) return null;
 
-  const repaired = repairWebmBuffer(raw);
-  if (!isValidWebmBuffer(repaired)) return null;
+  const forPlayback = prepareWebmForPlayback(raw);
+  if (!isPlayableWebmBuffer(forPlayback)) return null;
 
-  // Long recordings skip EBML rewrite — serve original bytes for fast, reliable playback.
-  if (repaired.length > MAX_WEBM_DURATION_FIX_BYTES) {
-    return rememberPreparedVideo(testId, repaired);
-  }
-
-  const prepared = prepareWebmForPlayback(repaired);
-  return rememberPreparedVideo(testId, prepared);
+  return rememberPreparedVideo(testId, forPlayback);
 }
 
 export async function deleteEmployeeTestVideo(testId: string): Promise<void> {

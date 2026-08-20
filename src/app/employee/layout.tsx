@@ -5,7 +5,11 @@ import EmployeeAuthGate from "@/components/EmployeeAuthGate";
 
 export default function EmployeeLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isPublicRoute = pathname === "/employee" || pathname.startsWith("/employee/set-password");
+  const isPublicRoute =
+    pathname === "/employee" ||
+    pathname.startsWith("/employee/set-password") ||
+    pathname.startsWith("/employee/sso-complete") ||
+    pathname.startsWith("/employee/outlook-sso-popup");
 
   if (isPublicRoute) {
     return <>{children}</>;

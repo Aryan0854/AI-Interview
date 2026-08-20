@@ -1,7 +1,7 @@
 import { Decoder, Reader, tools } from "ts-ebml";
 
-/** Full-file EBML scan is too slow/memory-heavy for long proctoring recordings (~100MB+). */
-export const MAX_WEBM_DURATION_FIX_BYTES = 8 * 1024 * 1024;
+/** Full-file EBML scan — cap size to stay within serverless memory limits (~16 min @ 600kbps). */
+export const MAX_WEBM_DURATION_FIX_BYTES = 16 * 1024 * 1024;
 
 function isValidWebmHeader(buffer: Buffer): boolean {
   return (

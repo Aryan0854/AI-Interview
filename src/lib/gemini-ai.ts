@@ -257,80 +257,12 @@ export class GeminiAIEngine {
 
   async verifyFaceMatch(
     idImageBase64: string,
-    idMimeType: string,
+    _idMimeType: string,
     selfieImageBase64: string,
-    selfieMimeType: string
+    _selfieMimeType: string
   ): Promise<{ matched: boolean; confidence: number; reason: string }> {
-    const { exec } = require("child_process");
-    const { promisify } = require("util");
-    const { writeFile, unlink } = require("fs/promises");
-    const { join } = require("path");
-    const fs = require("fs");
-    const execPromise = promisify(exec);
-
-    const cleanBase64 = (base64Str: string) => {
-      const match = base64Str.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        return { mimeType: match[1], data: match[2] };
-      }
-      return { mimeType: null, data: base64Str };
-    };
-
-    const idData = cleanBase64(idImageBase64);
-    const selfieData = cleanBase64(selfieImageBase64);
-
-    const tempDir = join(process.cwd(), "uploads", "temp");
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-
-    const idTempPath = join(tempDir, `temp_id_${Date.now()}_${Math.random().toString(36).substring(7)}.png`);
-    const selfieTempPath = join(tempDir, `temp_selfie_${Date.now()}_${Math.random().toString(36).substring(7)}.png`);
-
-    try {
-      await writeFile(idTempPath, Buffer.from(idData.data, "base64"));
-      await writeFile(selfieTempPath, Buffer.from(selfieData.data, "base64"));
-
-      const pythonScriptPath = join(process.cwd(), "faceproj", "compare_images.py");
-      const cmd = `python "${pythonScriptPath}" "${idTempPath}" "${selfieTempPath}"`;
-      
-      console.log(`Executing local biometric check command: ${cmd}`);
-      const { stdout } = await execPromise(cmd);
-      console.log("Local biometric check result:", stdout);
-
-      // Clean up temp files
-      try {
-        await unlink(idTempPath);
-        await unlink(selfieTempPath);
-      } catch (e) {
-        console.warn("Failed to clean up temp files:", e);
-      }
-
-      // Parse JSON result from stdout
-      const jsonStart = stdout.indexOf("{");
-      const jsonEnd = stdout.lastIndexOf("}");
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        const jsonStr = stdout.substring(jsonStart, jsonEnd + 1);
-        const parsed = JSON.parse(jsonStr);
-        return {
-          matched: typeof parsed.matched === "boolean" ? parsed.matched : parsed.matched === "true" || parsed.confidence >= 70,
-          confidence: typeof parsed.confidence === "number" ? parsed.confidence : parseInt(parsed.confidence) || 0,
-          reason: parsed.reason || "Local face match complete."
-        };
-      } else {
-        throw new Error(`Python output did not contain valid JSON: ${stdout}`);
-      }
-
-    } catch (error: any) {
-      console.error("Local face match verification error:", error);
-      try {
-        if (fs.existsSync(idTempPath)) await unlink(idTempPath);
-        if (fs.existsSync(selfieTempPath)) await unlink(selfieTempPath);
-      } catch (cleanupErr) {
-        console.warn("Failed to clean up temp files on error:", cleanupErr);
-      }
-      throw new Error(`Local Biometric Match Failed: ${error.message || "Unknown error"}`);
-    }
+    const { verifyFaceBiometricsOnly } = await import("@/lib/identity-verification");
+    return verifyFaceBiometricsOnly(idImageBase64, selfieImageBase64);
   }
 }
 

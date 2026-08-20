@@ -12,7 +12,11 @@ import {
   listDocFiles,
   readDocFileBuffer,
   writeDocFile,
+  deleteDocFile,
 } from '@/lib/docs-storage';
+import { writePersistedJson } from '@/lib/runtime-data';
+import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
+import { isRequirementDeleted, loadDeletedRequirements, unmarkRequirementsDeleted } from '@/lib/deleted-requirements';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -24,6 +28,7 @@ export interface EmployeeRecord {
   email: string;
   department: string;
   skills: string;
+  product?: string;
   grade: string;
   designation: string;
   status: string;
@@ -37,119 +42,6 @@ export interface EmployeeRecord {
  */
 export async function ensureDocsDirectories() {
   await ensureDocsStorage();
-}
-
-/**
- * Helper to calculate skill match score based on keyword overlap
- */
-export function calculateSkillMatch(employeeSkills: string, jdSkills: string): { score: number; matchingSkills: string[] } {
-  if (!employeeSkills || !jdSkills) {
-    return { score: 0, matchingSkills: [] };
-  }
-
-  // Common technical skills catalog
-  const COMMON_TECH_SKILLS = [
-    // Languages
-    "javascript", "typescript", "python", "java", "c++", "c#", "c", "ruby", "golang", "php", "rust", "swift", "kotlin", "perl", "r", "scala",
-    // Web / Frontend / Backend
-    "react", "angular", "vue", "next.js", "nextjs", "nuxt", "node.js", "nodejs", "express", "django", "flask", "spring", "springboot", "asp.net", "laravel", "rails",
-    // Databases / Data Store
-    "sql", "postgresql", "postgres", "oracle", "mysql", "sql server", "sqlite", "mongodb", "mongo", "redis", "cassandra", "dynamodb", "mariadb", "couchdb", "neo4j",
-    // Cloud / DevOps
-    "aws", "amazon web services", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s", "jenkins", "ansible", "terraform", "ci/cd", "cicd", "git", "github", "gitlab",
-    // System / OS / Admin
-    "linux", "windows", "unix", "ubuntu", "centos", "redhat", "red hat", "debian", "macos", "shell", "bash", "powershell",
-    // Monitoring / Logging / Tools
-    "splunk", "datadog", "dynatrace", "appdynamics", "new relic", "prometheus", "grafana", "elk", "elasticsearch", "logstash", "kibana", "service now", "servicenow", "jira", "confluence",
-    // QA / Testing / Tools
-    "manual testing", "manual", "automation", "selenium", "postman", "jmeter", "cucumber", "testing",
-    // Architecture / Concepts
-    "microservices", "api", "apis", "rest", "graphql", "soap", "kafka", "rabbitmq", "mq", "activemq", "architecture", "architect", "estimation", "rca", "incident management", "problem management", "change management"
-  ];
-
-  const extractSkills = (text: string) => {
-    const lower = text.toLowerCase();
-    const found = new Set<string>();
-    for (const skill of COMMON_TECH_SKILLS) {
-      const escaped = skill.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(`(^|[^a-zA-Z0-9_#+])(${escaped})([^a-zA-Z0-9_#+]|$)`, 'i');
-      if (regex.test(lower)) {
-        // Normalize synonyms
-        if (skill === "postgres") found.add("postgresql");
-        else if (skill === "nodejs") found.add("node.js");
-        else if (skill === "nextjs") found.add("next.js");
-        else if (skill === "amazon web services") found.add("aws");
-        else if (skill === "google cloud") found.add("gcp");
-        else if (skill === "servicenow") found.add("service now");
-        else if (skill === "red hat") found.add("redhat");
-        else if (skill === "apis") found.add("api");
-        else found.add(skill);
-      }
-    }
-    return Array.from(found);
-  };
-
-  const empSkills = extractSkills(employeeSkills);
-  const jdSkillsList = extractSkills(jdSkills);
-
-  if (empSkills.length === 0 || jdSkillsList.length === 0) {
-    // Fallback to basic word boundary matching if no standard keywords found
-    const STOP_WORDS = new Set(["to", "and", "the", "for", "in", "of", "on", "with", "at", "by", "from", "an", "is", "as", "end", "be", "or", "exp", "year", "years", "total", "skills", "basics", "basic", "etc", "ex", "eg"]);
-    const cleanSkills = (str: string) => {
-      return str.toLowerCase()
-        .split(/[,;+\n/|]/)
-        .map(s => s.trim())
-        .flatMap(s => {
-          if (s === "end-to-end" || s === "ci-cd" || s === "ci/cd") return [s];
-          return s.split(/\s*-\s*/); // Split on hyphens with surrounding spaces (like "api - postman")
-        })
-        .map(s => s.trim())
-        .filter(s => s.length > 1 && !STOP_WORDS.has(s));
-    };
-    
-    const empSkillsList = cleanSkills(employeeSkills);
-    if (empSkillsList.length === 0) {
-      return { score: 0, matchingSkills: [] };
-    }
-    
-    const lowercaseJd = jdSkills.toLowerCase();
-    const matchingSkills: string[] = [];
-    
-    for (const empSkill of empSkillsList) {
-      const skillLower = empSkill.toLowerCase();
-      const escaped = skillLower.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(`(^|[^a-zA-Z0-9_#+])(${escaped})([^a-zA-Z0-9_#+]|$)`, 'i');
-      if (regex.test(lowercaseJd)) {
-        matchingSkills.push(empSkill);
-      }
-    }
-    const uniqueMatches = Array.from(new Set(matchingSkills));
-    const score = Math.min(100, Math.round((uniqueMatches.length / empSkillsList.length) * 100));
-    
-    // Map matches back to pretty uppercase format
-    const prettyMatches = uniqueMatches.map(s => {
-      return s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    });
-    
-    return { score, matchingSkills: prettyMatches };
-  }
-
-  // Intersection of keywords
-  const matchingSkills = empSkills.filter(skill => jdSkillsList.includes(skill));
-  
-  // Calculate a match score based on how many of the JD required skills the employee has. Capped at a divisor of 8.
-  const divisor = Math.min(8, jdSkillsList.length);
-  const score = Math.min(100, Math.round((matchingSkills.length / divisor) * 100));
-
-  // Map normalized skills back to their pretty counterparts
-  const prettyMatches = matchingSkills.map(s => {
-    return s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-  });
-
-  return {
-    score,
-    matchingSkills: prettyMatches
-  };
 }
 
 /**
@@ -189,285 +81,771 @@ export function brIdToUuid(brId: string): string {
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
+type ParsedBrRequirement = {
+  autoReqId: string;
+  designation: string;
+  skills: string;
+  jdBody: string;
+  rmEmail: string;
+  sourceFile: string;
+  composedText: string;
+};
+
+function normalizeBrId(raw: string): string {
+  const trimmed = String(raw || "").trim();
+  const match = trimmed.match(/(\d+)\s*BR/i);
+  if (match) return `${match[1]}BR`;
+  if (/^\d{4,}$/.test(trimmed)) return `${trimmed}BR`;
+  return "";
+}
+
+function cellText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value).trim();
+  if (typeof value === "object" && value && "text" in (value as any)) {
+    return String((value as any).text || "").trim();
+  }
+  if (typeof value === "object" && value && "richText" in (value as any)) {
+    return ((value as any).richText || []).map((t: any) => t.text || "").join("").trim();
+  }
+  return String(value).trim();
+}
+
+function isBrDataSheet(name: string): boolean {
+  const n = (name || "").toLowerCase();
+  if (!n.trim()) return false;
+  if (n.includes("pivot") || n.includes("summary")) return false;
+  return true;
+}
+
+const MASTER_BR_FILENAME = "BR_RawData 3.xlsx";
+
+function headerKey(name: string): string {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function getGradeFromExperience(expStr: string | undefined | null): string {
+  if (!expStr) return "E2";
+  const numbers = expStr.match(/\d+(\.\d+)?/g);
+  if (!numbers || numbers.length === 0) return "E2";
+  const years = parseFloat(numbers[0]);
+  if (years >= 0 && years < 1) return "E0";
+  if (years >= 1 && years < 3) return "E1";
+  if (years >= 3 && years < 6) return "E2";
+  if (years >= 6 && years < 9) return "E3";
+  if (years >= 9 && years < 12) return "E4";
+  if (years >= 12) return "E5/E6";
+  return "E2";
+}
+
+function readSheetHeaders(sheet: ExcelJS.Worksheet): Map<string, number> {
+  const byKey = new Map<string, number>();
+  sheet.getRow(1).eachCell({ includeEmpty: true }, (cell, col) => {
+    const name = cellText(cell.value);
+    if (name) byKey.set(headerKey(name), col);
+  });
+  return byKey;
+}
+
+function headerCol(byKey: Map<string, number>, ...aliases: string[]): number | undefined {
+  for (const alias of aliases) {
+    const col = byKey.get(headerKey(alias));
+    if (col) return col;
+  }
+  return undefined;
+}
+
+function lastUsedRow(sheet: ExcelJS.Worksheet): number {
+  let last = 1;
+  sheet.eachRow((row, n) => {
+    let has = false;
+    row.eachCell({ includeEmpty: false }, () => {
+      has = true;
+    });
+    if (has) last = Math.max(last, n);
+  });
+  return last;
+}
+
+function collectSheetAutoReqIds(sheet: ExcelJS.Worksheet, idCol?: number): Set<string> {
+  const ids = new Set<string>();
+  if (!idCol) return ids;
+  sheet.eachRow((row, n) => {
+    if (n === 1) return;
+    const id = normalizeBrId(cellText(row.getCell(idCol).value));
+    if (id) ids.add(id);
+  });
+  return ids;
+}
+
+function nextAutoReqId(existing: Set<string>): string {
+  let max = 40000;
+  for (const id of existing) {
+    const match = id.match(/(\d+)/);
+    if (!match) continue;
+    const num = parseInt(match[1], 10);
+    if (Number.isFinite(num) && num > max) max = num;
+  }
+  return `${max + 1}BR`;
+}
+
+function copyRowStyle(fromRow: ExcelJS.Row, toRow: ExcelJS.Row, colCount: number) {
+  for (let c = 1; c <= colCount; c++) {
+    const templateCell = fromRow.getCell(c);
+    const newCell = toRow.getCell(c);
+    if (!templateCell) continue;
+    try {
+      newCell.font = templateCell.font ? JSON.parse(JSON.stringify(templateCell.font)) : undefined;
+      newCell.fill = templateCell.fill ? JSON.parse(JSON.stringify(templateCell.fill)) : undefined;
+      newCell.border = templateCell.border ? JSON.parse(JSON.stringify(templateCell.border)) : undefined;
+      newCell.alignment = templateCell.alignment ? JSON.parse(JSON.stringify(templateCell.alignment)) : undefined;
+      newCell.numFmt = templateCell.numFmt;
+    } catch {
+      // style copy is best-effort
+    }
+  }
+}
+
+function writeMappedRow(
+  sheet: ExcelJS.Worksheet,
+  byKey: Map<string, number>,
+  values: Record<string, unknown>,
+  existingRow?: ExcelJS.Row
+): ExcelJS.Row {
+  const colCount = Math.max(sheet.columnCount || 25, 25);
+  const row =
+    existingRow ||
+    sheet.getRow(lastUsedRow(sheet) + 1);
+  const templateRow = sheet.getRow(Math.max(2, lastUsedRow(sheet)));
+  if (!existingRow) copyRowStyle(templateRow, row, colCount);
+
+  for (const [header, value] of Object.entries(values)) {
+    const col = headerCol(byKey, header);
+    if (!col) continue;
+    row.getCell(col).value = value as ExcelJS.CellValue;
+  }
+  row.commit();
+  return row;
+}
+
+function jdExtractedFieldMap(opts: {
+  autoReqId: string;
+  details: any;
+  jdText: string;
+  rmName?: string;
+}): Record<string, unknown> {
+  const { autoReqId, details, jdText, rmName } = opts;
+  const allSkills = [
+    ...(details.skills || []),
+    ...(details.monitoring_tools || []),
+    ...(details.cloud_platforms || []),
+    ...(details.tools || []),
+  ];
+  const uniqueSkills = [...new Set(allSkills.filter(Boolean))].join(", ");
+  return {
+    "Auto req ID": autoReqId,
+    "Current Req Status": "Open",
+    Grade: getGradeFromExperience(details.experience),
+    Designation: details.job_title || "Technical Role",
+    Recruiter: details.recruiter || "",
+    "Department Type": details.department || "Technical",
+    BU: "ITS - TMH - Delivery",
+    "Client Interview?": "Yes",
+    "Mandatory Skills": uniqueSkills,
+    Entity: "OFFSHORE",
+    "Client Name": "IRON MOUNTAIN",
+    "Billing Type": "Billable",
+    Project: "IM DXP-IDP 2025",
+    "Requester ID": "1026374",
+    "TAG Manager": "Antony, Nithin (1027544)",
+    "RM Name": rmName || "Hippargi, Anil (1017237)",
+    "Job description": String(jdText || "").substring(0, 5000),
+    "Joining Location": "Bangalore - Global Axis",
+    "Date Approved": new Date().toISOString().split("T")[0],
+    "No. of Positions": 1,
+    "Positions Remaining": 1,
+    "Sourcing Type": "External - India",
+    "Requirement Type": "New",
+    "ST (Bill Rate) Enter only numeric value and 0 for Non-Billable": 5.5,
+  };
+}
+
+function findMasterBrSheet(workbook: ExcelJS.Workbook): ExcelJS.Worksheet {
+  const preferred = ["BR _Raw Data", "BR_Raw Data", "Global TMH Demand"];
+  for (const name of preferred) {
+    const sheet = workbook.getWorksheet(name);
+    if (sheet) return sheet;
+  }
+  for (const sheet of workbook.worksheets) {
+    if (isBrDataSheet(sheet.name) && readSheetHeaders(sheet).has(headerKey("Auto req ID"))) {
+      return sheet;
+    }
+  }
+  return workbook.worksheets[0] || workbook.addWorksheet("BR _Raw Data");
+}
+
+async function loadMasterBrWorkbook(): Promise<{ workbook: ExcelJS.Workbook; filename: string }> {
+  const files = await listDocFiles("BR");
+  const filename =
+    files.find((f) => f.toLowerCase() === MASTER_BR_FILENAME.toLowerCase()) ||
+    files.find((f) => /br_rawdata/i.test(f.replace(/\s+/g, "_"))) ||
+    MASTER_BR_FILENAME;
+
+  const workbook = new ExcelJS.Workbook();
+  try {
+    const buffer = await readDocFileBuffer("BR", filename);
+    if (!buffer?.length) throw new Error("Master BR workbook is empty");
+    await workbook.xlsx.load(buffer as any);
+    const sheet = findMasterBrSheet(workbook);
+    if (!sheet || !readSheetHeaders(sheet).has(headerKey("Auto req ID"))) {
+      throw new Error("Master BR workbook is missing Auto req ID headers");
+    }
+    return { workbook, filename: MASTER_BR_FILENAME };
+  } catch {
+    const template = await loadTemplateWorkbook();
+    await saveMasterBrWorkbook(template, MASTER_BR_FILENAME);
+    return { workbook: template, filename: MASTER_BR_FILENAME };
+  }
+}
+
+async function saveMasterBrWorkbook(workbook: ExcelJS.Workbook, filename = MASTER_BR_FILENAME): Promise<void> {
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+  await writeDocFile("BR", filename, buffer);
+}
+
+function appendBrWorkbookRows(
+  source: ExcelJS.Workbook,
+  masterSheet: ExcelJS.Worksheet,
+  masterHeaders: Map<string, number>,
+  existingIds: Set<string>
+): number {
+  let added = 0;
+  const masterColCount = Math.max(masterSheet.columnCount || 25, 25);
+  const templateRow = masterSheet.getRow(Math.max(2, lastUsedRow(masterSheet)));
+
+  for (const sheet of source.worksheets) {
+    if (!isBrDataSheet(sheet.name)) continue;
+    const sourceHeaders = readSheetHeaders(sheet);
+    const idCol = headerCol(sourceHeaders, "auto req id", "br id", "id");
+    if (!idCol) continue;
+
+    sheet.eachRow((row, n) => {
+      if (n === 1) return;
+      const autoReqId = normalizeBrId(cellText(row.getCell(idCol).value));
+      if (!autoReqId || existingIds.has(autoReqId)) return;
+
+      const newRow = masterSheet.getRow(lastUsedRow(masterSheet) + 1);
+      copyRowStyle(templateRow, newRow, masterColCount);
+
+      sourceHeaders.forEach((srcCol, key) => {
+        const destCol = masterHeaders.get(key);
+        if (!destCol) return;
+        const value = row.getCell(srcCol).value;
+        if (value !== undefined && value !== null && value !== "") {
+          newRow.getCell(destCol).value = value as ExcelJS.CellValue;
+        }
+      });
+
+      const destIdCol = headerCol(masterHeaders, "auto req id", "br id", "id");
+      if (destIdCol) newRow.getCell(destIdCol).value = autoReqId;
+      newRow.commit();
+      existingIds.add(autoReqId);
+      added++;
+    });
+  }
+  return added;
+}
+
+function findRowByAutoReqId(sheet: ExcelJS.Worksheet, idCol: number, autoReqId: string): ExcelJS.Row | undefined {
+  let found: ExcelJS.Row | undefined;
+  sheet.eachRow((row, n) => {
+    if (n === 1 || found) return;
+    if (normalizeBrId(cellText(row.getCell(idCol).value)) === autoReqId) found = row;
+  });
+  return found;
+}
+
+function autoReqIdFromLabel(fileName?: string): string {
+  return normalizeBrId(String(fileName || "").split("|")[0] || "");
+}
+
+async function persistMasterRequirements(
+  workbook: ExcelJS.Workbook,
+  filename: string,
+  localJds: any[]
+): Promise<number> {
+  // BR/JD ingest only writes job_descriptions. Never delete employees, tests,
+  // test_questions, or test_attempts — Employee Portal data is independent.
+  const merged = mergeBrRequirements(parseBrWorkbook(workbook, filename));
+  const deleted = await loadDeletedRequirements();
+  const upsertRows = merged.flatMap((row) => {
+    const jdUuid = brIdToUuid(row.autoReqId);
+    if (
+      isRequirementDeleted(deleted, {
+        id: jdUuid,
+        brId: row.autoReqId,
+        fileName: `${row.autoReqId} | ${filename}`,
+        jdText: row.composedText,
+      })
+    ) {
+      const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
+      if (existingIdx !== -1) localJds.splice(existingIdx, 1);
+      return [];
+    }
+    const newLocalJd = {
+      id: jdUuid,
+      jdText: row.composedText,
+      rmEmail: row.rmEmail,
+      fileName: `${row.autoReqId} | ${filename}`,
+      createdAt: new Date().toISOString(),
+    };
+    const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
+    if (existingIdx !== -1) {
+      localJds[existingIdx] = {
+        ...localJds[existingIdx],
+        ...newLocalJd,
+        createdAt: localJds[existingIdx].createdAt || newLocalJd.createdAt,
+      };
+    } else {
+      localJds.push(newLocalJd);
+    }
+    return [{
+      id: jdUuid,
+      jd_text: newLocalJd.jdText,
+      rm_email: newLocalJd.rmEmail,
+      file_name: newLocalJd.fileName,
+      created_at: localJds.find((j: any) => j.id === jdUuid)?.createdAt || newLocalJd.createdAt,
+    }];
+  });
+
+  let processed = 0;
+  for (let i = 0; i < upsertRows.length; i += 50) {
+    const chunk = upsertRows.slice(i, i + 50);
+    const { error } = await supabase.from("job_descriptions").upsert(chunk);
+    if (error) {
+      await writeLog("requirements", "UPSERT_BR_ERROR", "failed", `Error saving BR batch ${i}: ${error.message}`);
+    } else {
+      processed += chunk.length;
+    }
+  }
+
+  const keepIds = new Set(upsertRows.map((row) => row.id));
+  try {
+    const { data: existing } = await supabase.from("job_descriptions").select("id, file_name");
+    const staleIds = (existing || [])
+      .filter((row: any) => {
+        if (keepIds.has(row.id)) return false;
+        const name = String(row.file_name || "");
+        return /\.xlsx|\.xls/i.test(name) || /^\s*\d+\s*BR\s*\|/i.test(name);
+      })
+      .map((row: any) => String(row.id));
+    for (let i = 0; i < staleIds.length; i += 50) {
+      const chunk = staleIds.slice(i, i + 50);
+      const { error } = await supabase.from("job_descriptions").delete().in("id", chunk);
+      if (error) {
+        await writeLog("requirements", "PRUNE_BR_ERROR", "failed", `Error pruning BR batch ${i}: ${error.message}`);
+      }
+    }
+    for (let i = localJds.length - 1; i >= 0; i--) {
+      const jd = localJds[i];
+      const name = String(jd.fileName || "");
+      const fromExcel = /\.xlsx|\.xls/i.test(name) || /^\s*\d+\s*BR\s*\|/i.test(name);
+      if (fromExcel && !keepIds.has(jd.id)) localJds.splice(i, 1);
+    }
+  } catch (err: any) {
+    await writeLog("requirements", "PRUNE_BR_ERROR", "failed", `Failed pruning stale BR rows: ${err.message}`);
+  }
+
+  return processed;
+}
+
+function composeRequirementText(designation: string, skills: string, jdBody: string): string {
+  const parts: string[] = [];
+  if (designation) parts.push(`Job Title: ${designation}`);
+  if (skills) parts.push(`Mandatory Skills: ${skills}`);
+  if (jdBody) parts.push(jdBody);
+  return parts.join("\n\n").trim();
+}
+
+function parseBrWorkbook(workbook: ExcelJS.Workbook, sourceFile: string): ParsedBrRequirement[] {
+  const parsed: ParsedBrRequirement[] = [];
+
+  for (const sheet of workbook.worksheets) {
+    if (!isBrDataSheet(sheet.name)) continue;
+
+    const sheetData: any[][] = [];
+    sheet.eachRow((row) => {
+      sheetData.push(row.values as any[]);
+    });
+    if (sheetData.length === 0) continue;
+
+    let headerRowIdx = -1;
+    for (let i = 0; i < Math.min(10, sheetData.length); i++) {
+      const r = sheetData[i];
+      if (!Array.isArray(r)) continue;
+      const hasHeaders = r.some((h) => {
+        if (!h) return false;
+        const str = String(h).trim().toLowerCase();
+        return str.includes("auto req id") || str.includes("br id");
+      });
+      if (hasHeaders) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+    if (headerRowIdx === -1) continue;
+
+    const headerRow = sheetData[headerRowIdx] || [];
+    const getColIndex = (names: string[]) => {
+      const normalizedNames = names.map((n) => n.trim().toLowerCase().replace(/[_-]/g, " "));
+      return headerRow.findIndex((h: any) => {
+        if (!h) return false;
+        const normalizedH = String(h).trim().toLowerCase().replace(/[_-]/g, " ");
+        return normalizedNames.includes(normalizedH);
+      });
+    };
+    const findColIdx = (namesInOrderOfPriority: string[]) => {
+      for (const name of namesInOrderOfPriority) {
+        const idx = getColIndex([name]);
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+
+    const idIdx = findColIdx(["auto req id", "br id", "id"]);
+    if (idIdx === -1) continue;
+    const titleIdx = findColIdx(["designation", "job title", "role", "position"]);
+    const skillsIdx = findColIdx(["mandatory skills", "skills", "detailed skills"]);
+    const jdIdx = findColIdx(["job description", "jd"]);
+    const rmIdx = findColIdx(["rm name", "reporting manager"]);
+
+    for (let r = headerRowIdx + 1; r < sheetData.length; r++) {
+      const row = sheetData[r];
+      if (!row) continue;
+      const autoReqId = normalizeBrId(cellText(row[idIdx]));
+      if (!autoReqId) continue;
+
+      const designation = titleIdx !== -1 ? cellText(row[titleIdx]) : "";
+      const skills = skillsIdx !== -1 ? cellText(row[skillsIdx]) : "";
+      const jdBody = jdIdx !== -1 ? cellText(row[jdIdx]) : "";
+      const rmRaw = rmIdx !== -1 ? cellText(row[rmIdx]) : "";
+      const composedText = composeRequirementText(designation || "Technical Role", skills, jdBody);
+      if (!composedText) continue;
+
+      parsed.push({
+        autoReqId,
+        designation: designation || "Technical Role",
+        skills,
+        jdBody,
+        rmEmail: rmRaw.includes("@") ? rmRaw.toLowerCase() : "admin@infinite.com",
+        sourceFile,
+        composedText,
+      });
+    }
+  }
+
+  return parsed;
+}
+
+function mergeBrRequirements(rows: ParsedBrRequirement[]): ParsedBrRequirement[] {
+  const byId = new Map<string, ParsedBrRequirement>();
+  for (const row of rows) {
+    const prev = byId.get(row.autoReqId);
+    if (!prev) {
+      byId.set(row.autoReqId, row);
+      continue;
+    }
+    const prevScore = prev.composedText.length + (prev.jdBody.length > 80 ? 500 : 0);
+    const nextScore = row.composedText.length + (row.jdBody.length > 80 ? 500 : 0);
+    if (nextScore > prevScore) {
+      byId.set(row.autoReqId, row);
+    }
+  }
+
+  const byText = new Map<string, ParsedBrRequirement[]>();
+  for (const row of byId.values()) {
+    const key = row.composedText.trim().toLowerCase().length < 40
+      ? `id:${row.autoReqId}`
+      : row.composedText.trim().toLowerCase();
+    const list = byText.get(key) || [];
+    list.push(row);
+    byText.set(key, list);
+  }
+  const merged: ParsedBrRequirement[] = [];
+  for (const list of byText.values()) {
+    list.sort((a, b) => {
+      const aScore = a.composedText.length + (a.jdBody.length > 80 ? 500 : 0);
+      const bScore = b.composedText.length + (b.jdBody.length > 80 ? 500 : 0);
+      return bScore - aScore;
+    });
+    merged.push(...list.slice(0, 2));
+  }
+  return merged;
+}
+
 /**
  * 1. Requirements Refresh: Scans /docs/BR and /docs/JD
+ * JD uploads are converted and appended into the master BR workbook.
+ * Other BR workbooks are merged into that same master file, then saved to storage + DB.
  */
-export async function refreshRequirements(): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
+export async function refreshRequirements(opts?: {
+  incomingBrFiles?: string[];
+  incomingJdFiles?: string[];
+}): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
   await ensureDocsStorage();
-  
+
   const brFiles = await listDocFiles("BR");
   const jdFiles = await listDocFiles("JD");
-  
+  const incomingBr = new Set((opts?.incomingBrFiles || []).map((f) => f.toLowerCase()));
+  const incomingJd = new Set((opts?.incomingJdFiles || []).map((f) => f.toLowerCase()));
+
   let processedBRs = 0;
   let convertedJDs = 0;
+  const restoredIncoming: Array<{
+    id: string;
+    jd_text: string;
+    rm_email: string;
+    file_name: string;
+    created_at: string;
+  }> = [];
 
   let localJds: any[] = [];
   const localJdPath = join(getUploadsRoot(), "job_descriptions.json");
   try {
     const raw = await readFile(localJdPath, "utf8");
     localJds = JSON.parse(raw);
-  } catch (e) {}
-  
-  const xlsxBrFiles = brFiles.filter(f => f.endsWith(".xlsx") || f.endsWith(".xls"));
-  const actualJdFiles = jdFiles.filter(f => f.endsWith(".pdf") || f.endsWith(".docx") || f.endsWith(".doc") || f.endsWith(".txt"));
-  
-  // Scenario A & C: Process available BR Excel files directly from docs/BR
+  } catch {}
+
+  const xlsxBrFiles = brFiles.filter((f) => f.endsWith(".xlsx") || f.endsWith(".xls"));
+  const actualJdFiles = jdFiles.filter(
+    (f) => f.endsWith(".pdf") || f.endsWith(".docx") || f.endsWith(".doc") || f.endsWith(".txt")
+  );
+
+  const { workbook: masterWorkbook, filename: masterFilename } = await loadMasterBrWorkbook();
+  const masterSheet = findMasterBrSheet(masterWorkbook);
+  const masterHeaders = readSheetHeaders(masterSheet);
+  const idCol = headerCol(masterHeaders, "auto req id", "br id", "id");
+  const existingIds = collectSheetAutoReqIds(masterSheet, idCol);
+
   for (const file of xlsxBrFiles) {
-    try {
-      const workbook = new ExcelJS.Workbook();
-      const buffer = await readDocFileBuffer("BR", file);
-      await workbook.xlsx.load(buffer as any);
-      
-      const sheet = workbook.getWorksheet("BR _Raw Data") || workbook.worksheets[0];
-      const sheetData: any[][] = [];
-      sheet.eachRow((row) => {
-        sheetData.push(row.values as any[]);
-      });
-      
-      if (sheetData.length <= 0) continue;
-      
-      // Dynamically find the header row
-      let headerRowIdx = -1;
-      for (let i = 0; i < Math.min(10, sheetData.length); i++) {
-        const r = sheetData[i];
-        if (Array.isArray(r)) {
-          const hasHeaders = r.some(h => {
-            if (!h) return false;
-            const str = String(h).trim().toLowerCase();
-            return str.includes("auto req id") || str.includes("br id") || str.includes("designation") || str.includes("job title");
-          });
-          if (hasHeaders) {
-            headerRowIdx = i;
-            break;
-          }
-        }
+    if (file.toLowerCase() === masterFilename.toLowerCase()) continue;
+    const isIncoming = incomingBr.has(file.toLowerCase());
+    if (!isIncoming) {
+      try {
+        await deleteDocFile("BR", file);
+        await writeLog(
+          "requirements",
+          "REMOVED_EXTRA_BR_FILE",
+          "success",
+          `Removed leftover BR file ${file}; master is ${masterFilename}`
+        );
+      } catch (err: any) {
+        await writeLog("requirements", "REMOVE_EXTRA_BR_FAILED", "failed", `Failed removing ${file}: ${err.message}`);
       }
-      
-      if (headerRowIdx === -1) {
-        headerRowIdx = 0;
-      }
-      
-      const headerRow = sheetData[headerRowIdx] || [];
-      const getColIndex = (names: string[]) => {
-        const normalizedNames = names.map(n => n.trim().toLowerCase().replace(/[_-]/g, ' '));
-        return headerRow.findIndex((h: any) => {
-          if (!h) return false;
-          const normalizedH = String(h).trim().toLowerCase().replace(/[_-]/g, ' ');
-          return normalizedNames.includes(normalizedH);
-        });
-      };
-      
-      const findColIdx = (namesInOrderOfPriority: string[]) => {
-        for (const name of namesInOrderOfPriority) {
-          const idx = getColIndex([name]);
-          if (idx !== -1) return idx;
-        }
-        return -1;
-      };
-      
-      const idIdx = findColIdx(["auto req id", "br id", "id"]);
-      const titleIdx = findColIdx(["designation", "job title", "role", "position"]);
-      const skillsIdx = findColIdx(["mandatory skills", "skills", "detailed skills"]);
-      const jdIdx = findColIdx(["job description", "jd"]);
-      const rmIdx = findColIdx(["rm name", "reporting manager"]);
-      
-      for (let r = headerRowIdx + 1; r < sheetData.length; r++) {
-        const row = sheetData[r];
-        if (!row) continue;
-        
-        const autoReqId = idIdx !== -1 && row[idIdx] ? String(row[idIdx]).trim() : "";
-        if (!autoReqId) continue;
-        
-        const designation = titleIdx !== -1 && row[titleIdx] ? String(row[titleIdx]).trim() : "Technical Role";
-        let skills = skillsIdx !== -1 && row[skillsIdx] ? String(row[skillsIdx]).trim() : "";
-        let jdText = jdIdx !== -1 && row[jdIdx] ? String(row[jdIdx]).trim() : "";
-        const rmEmail = rmIdx !== -1 && row[rmIdx] ? String(row[rmIdx]).trim() : "admin@infinite.com";
-
-        // Dynamic fallback heuristic for shifted/misaligned spreadsheet rows:
-        const looksLikeJd = (text: string) => {
-          const lower = text.toLowerCase();
-          return text.length > 150 && (
-            lower.includes("responsibilities") ||
-            lower.includes("experience") ||
-            lower.includes("skills") ||
-            lower.includes("troubleshooting") ||
-            lower.includes("qualification") ||
-            lower.includes("support")
-          );
-        };
-        
-        const looksLikeSkills = (text: string) => {
-          const commaCount = (text.match(/,/g) || []).length;
-          const lower = text.toLowerCase();
-          return commaCount >= 2 && (
-            lower.includes("sql") ||
-            lower.includes("unix") ||
-            lower.includes("linux") ||
-            lower.includes("java") ||
-            lower.includes("python") ||
-            lower.includes("aws") ||
-            lower.includes("azure")
-          );
-        };
-
-        // Scan all cells in the row for a better candidate if needed
-        for (let idx = 1; idx < row.length; idx++) {
-          const val = row[idx];
-          if (val && typeof val === "string") {
-            const trimmed = val.trim();
-            if (looksLikeJd(trimmed)) {
-              jdText = trimmed;
-            } else if (looksLikeSkills(trimmed) && trimmed.length > skills.length) {
-              skills = trimmed;
-            }
-          }
-        }
-        
-        const jdUuid = brIdToUuid(autoReqId);
-        const jdTextContent = jdText || skills;
-        const newLocalJd = {
-          id: jdUuid,
-          jdText: jdTextContent,
-          rmEmail: rmEmail.includes("@") ? rmEmail : "admin@infinite.com",
-          fileName: `${autoReqId} | ${file}`,
-          createdAt: new Date().toISOString()
-        };
-        const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
-        if (existingIdx !== -1) {
-          localJds[existingIdx] = newLocalJd;
-        } else {
-          localJds.push(newLocalJd);
-        }
-
-        let dbError: any = null;
-        try {
-          const { error } = await supabase.from('job_descriptions').upsert({
-            id: jdUuid,
-            jd_text: jdTextContent,
-            rm_email: newLocalJd.rmEmail,
-            file_name: newLocalJd.fileName,
-            created_at: newLocalJd.createdAt
-          });
-          dbError = error;
-        } catch (e) {
-          dbError = e;
-        }
-        
-        if (dbError) {
-          await writeLog('requirements', 'UPSERT_BR_ERROR', 'failed', `Error saving BR ${autoReqId}: ${dbError.message || dbError}`);
-        } else {
-          processedBRs++;
-          await writeLog('requirements', 'PARSED_BR_ROW', 'success', `Successfully loaded BR ID: ${autoReqId} (UUID: ${jdUuid}) from ${file}`);
-        }
-      }
-    } catch (err: any) {
-      await writeLog('requirements', 'PARSE_BR_FILE_FAILED', 'failed', `Failed parsing BR file ${file}: ${err.message}`);
-    }
-  }
-  
-  // Scenario B: If only JD exists in docs/JD, convert to BR and save to docs/BR
-  for (const file of actualJdFiles) {
-    // Check if BR already exists in docs/BR (same name ending with _BR.xlsx or same base name)
-    const base = file.replace(/\.[^/.]+$/, "");
-    const matchingBr = xlsxBrFiles.find(bf => bf.toLowerCase().startsWith(base.toLowerCase()) || bf.includes(base));
-    if (matchingBr) {
-      // Prioritize BR, skip JD conversion
       continue;
     }
-    
     try {
+      const source = new ExcelJS.Workbook();
+      const buffer = await readDocFileBuffer("BR", file);
+      await source.xlsx.load(buffer as any);
+      const added = appendBrWorkbookRows(source, masterSheet, masterHeaders, existingIds);
+      if (added > 0) {
+        await writeLog(
+          "requirements",
+          "MERGED_BR_INTO_MASTER",
+          "success",
+          `Appended ${added} BR row(s) from ${file} into ${masterFilename}`
+        );
+      }
+      await deleteDocFile("BR", file);
+    } catch (err: any) {
+      await writeLog("requirements", "PARSE_BR_FILE_FAILED", "failed", `Failed parsing BR file ${file}: ${err.message}`);
+    }
+  }
+
+  for (const file of actualJdFiles) {
+    try {
+      const alreadyLinked = localJds.some(
+        (j: any) => String(j.fileName || "").toLowerCase().includes(file.toLowerCase())
+      );
       const buffer = await readDocFileBuffer("JD", file);
       const jdText = await resumeService.extractTextFromBuffer(buffer);
-      
-      if (!jdText.trim()) continue;
-      
-      // Call JD to BR extraction
-      const details = await extractJdDetails(jdText, file);
-      
-      const newAutoReqId = details.auto_req_id || `${Math.floor(40000 + Math.random() * 9999)}BR`;
-      const allSkills = [
-        ...(details.skills || []),
-        ...(details.monitoring_tools || []),
-        ...(details.cloud_platforms || [])
-      ];
-      const uniqueSkills = [...new Set(allSkills)].join(', ');
-      
-      // Load spreadsheet template and append row
-      const workbook = await loadTemplateWorkbook();
-      const sheet = workbook.getWorksheet("BR _Raw Data") || workbook.worksheets[0];
-      
-      // Find last row
-      let lastRow = 1;
-      sheet.eachRow((row, rowNumber) => {
-        lastRow = Math.max(lastRow, rowNumber);
-      });
-      const newRowIdx = lastRow + 1;
-      const newRow = sheet.getRow(newRowIdx);
-      
-      // Standard BR Columns: ID, Status, Grade, Title, Recruiter, Dept, BU, Interview, Skills, Entity, Client, Billing, Project, Requester, TAG, RM, JD, Location
-      newRow.getCell(1).value = newAutoReqId;
-      newRow.getCell(2).value = "Open";
-      newRow.getCell(3).value = details.experience?.includes("5") ? "E2" : "E1";
-      newRow.getCell(4).value = details.job_title || "Technical Role";
-      newRow.getCell(6).value = "Technical";
-      newRow.getCell(7).value = "ITS - TMH - Delivery";
-      newRow.getCell(8).value = "Yes";
-      newRow.getCell(9).value = uniqueSkills;
-      newRow.getCell(10).value = "OFFSHORE";
-      newRow.getCell(11).value = "IRON MOUNTAIN";
-      newRow.getCell(12).value = "Billable";
-      newRow.getCell(13).value = "IM DXP-IDP 2025";
-      newRow.getCell(16).value = "Hippargi, Anil (1017237)";
-      newRow.getCell(17).value = jdText.substring(0, 5000);
-      newRow.getCell(18).value = "Bangalore - Global Axis";
-      newRow.commit();
-      
-      // Save converted BR spreadsheet back to BR folder
-      const outputBrName = `${base}_BR.xlsx`;
-      const finalBuffer = await workbook.xlsx.writeBuffer();
-      await writeDocFile("BR", outputBrName, Buffer.from(finalBuffer as ArrayBuffer));
-      
-      const jdUuid = brIdToUuid(newAutoReqId);
-      const newLocalJd = {
-        id: jdUuid,
-        jdText: jdText,
-        rmEmail: "admin@infinite.com",
-        fileName: `${newAutoReqId} | ${file}`,
-        createdAt: new Date().toISOString()
-      };
-      const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
-      if (existingIdx !== -1) {
-        localJds[existingIdx] = newLocalJd;
-      } else {
-        localJds.push(newLocalJd);
+      if (!jdText.trim()) {
+        await writeLog("requirements", "CONVERT_JD_EMPTY", "failed", `No text extracted from JD ${file}`);
+        continue;
       }
 
-      try {
-        await supabase.from('job_descriptions').upsert({
-          id: jdUuid,
-          jd_text: jdText,
-          rm_email: "admin@infinite.com",
-          file_name: `${newAutoReqId} | ${file}`,
-          created_at: newLocalJd.createdAt
-        });
-      } catch (dbErr) {
-        console.warn("Failed to save converted JD to Supabase:", dbErr);
+      const details = await extractJdDetails(jdText, file);
+      const linkedId = autoReqIdFromLabel(
+        localJds.find((j: any) => String(j.fileName || "").toLowerCase().includes(file.toLowerCase()))?.fileName
+      );
+      const autoReqId =
+        normalizeBrId(file) ||
+        (details.auto_req_id && normalizeBrId(details.auto_req_id)) ||
+        linkedId ||
+        (alreadyLinked ? "" : nextAutoReqId(existingIds));
+      if (!autoReqId) {
+        await writeLog("requirements", "CONVERT_JD_NO_ID", "failed", `Could not assign a BR ID for JD ${file}`);
+        continue;
       }
-      
+
+      if (incomingJd.has(file.toLowerCase())) {
+        await unmarkRequirementsDeleted([
+          {
+            id: brIdToUuid(autoReqId),
+            brId: autoReqId,
+            fileName: `${autoReqId} | ${file}`,
+            jdText,
+          },
+        ]);
+      }
+
+      const existingRow = idCol ? findRowByAutoReqId(masterSheet, idCol, autoReqId) : undefined;
+      writeMappedRow(
+        masterSheet,
+        masterHeaders,
+        jdExtractedFieldMap({ autoReqId, details, jdText }),
+        existingRow
+      );
+      existingIds.add(autoReqId);
       convertedJDs++;
-      await writeLog('requirements', 'CONVERTED_JD_TO_BR', 'success', `Automatically converted JD ${file} to BR ${outputBrName}`);
+      if (incomingJd.has(file.toLowerCase())) {
+        restoredIncoming.push({
+          id: brIdToUuid(autoReqId),
+          jd_text: composeRequirementText(
+            details.job_title || "Technical Role",
+            [...new Set([...(details.skills || []), ...(details.tools || [])].filter(Boolean))].join(", "),
+            jdText
+          ) || jdText,
+          rm_email: "admin@infinite.com",
+          file_name: `${autoReqId} | ${file}`,
+          created_at: new Date().toISOString(),
+        });
+      }
+      await writeLog(
+        "requirements",
+        "CONVERTED_JD_TO_BR",
+        "success",
+        `Converted JD ${file} into ${masterFilename} as ${autoReqId}`
+      );
     } catch (err: any) {
-      await writeLog('requirements', 'CONVERT_JD_FAILED', 'failed', `Error converting JD ${file}: ${err.message}`);
+      await writeLog("requirements", "CONVERT_JD_FAILED", "failed", `Error converting JD ${file}: ${err.message}`);
+    }
+  }
+
+  await saveMasterBrWorkbook(masterWorkbook, masterFilename);
+  processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds);
+
+  if (restoredIncoming.length) {
+    const { error } = await supabase.from("job_descriptions").upsert(restoredIncoming);
+    if (error) {
+      await writeLog("requirements", "RESTORE_JD_ERROR", "failed", error.message);
+    } else {
+      processedBRs = Math.max(processedBRs, restoredIncoming.length);
+      for (const row of restoredIncoming) {
+        const existingIdx = localJds.findIndex((j: any) => j.id === row.id);
+        const local = {
+          id: row.id,
+          jdText: row.jd_text,
+          rmEmail: row.rm_email,
+          fileName: row.file_name,
+          createdAt: row.created_at,
+        };
+        if (existingIdx !== -1) localJds[existingIdx] = { ...localJds[existingIdx], ...local };
+        else localJds.push(local);
+      }
     }
   }
 
   try {
-    await writeFile(localJdPath, JSON.stringify(localJds, null, 2), "utf8");
+    const serialized = JSON.stringify(localJds, null, 2);
+    await writeFile(localJdPath, serialized, "utf8");
+    await writePersistedJson("job_descriptions.json", serialized).catch((err) => {
+      console.warn("Failed to persist job_descriptions.json to app-data:", err);
+    });
   } catch (writeErr) {
     console.error("Failed to write local backup for requirements refresh:", writeErr);
   }
-  
+
   return { success: true, processedBRs, convertedJDs };
+}
+
+/**
+ * When an admin selects a requirement, append it into the master BR workbook if missing,
+ * then persist the workbook and job_descriptions row.
+ */
+export async function syncSelectedRequirementToMaster(jdId: string): Promise<{
+  success: boolean;
+  appended: boolean;
+  autoReqId: string;
+}> {
+  if (!jdId || jdId === "all" || jdId.includes("@")) {
+    return { success: true, appended: false, autoReqId: "" };
+  }
+
+  await ensureDocsStorage();
+  const { data: dbJd, error } = await supabase
+    .from("job_descriptions")
+    .select("id, jd_text, file_name, rm_email")
+    .eq("id", jdId)
+    .maybeSingle();
+  if (error || !dbJd) {
+    throw new Error(error?.message || "Requirement not found");
+  }
+
+  const jdText = String(dbJd.jd_text || "").trim();
+  if (!jdText) return { success: true, appended: false, autoReqId: "" };
+
+  const { workbook, filename } = await loadMasterBrWorkbook();
+  const sheet = findMasterBrSheet(workbook);
+  const headers = readSheetHeaders(sheet);
+  const idCol = headerCol(headers, "auto req id", "br id", "id");
+  const existingIds = collectSheetAutoReqIds(sheet, idCol);
+
+  let autoReqId = autoReqIdFromLabel(dbJd.file_name);
+  if (autoReqId && existingIds.has(autoReqId)) {
+    return { success: true, appended: false, autoReqId };
+  }
+
+  const details = await extractJdDetails(jdText, dbJd.file_name || "");
+  if (!autoReqId) autoReqId = nextAutoReqId(existingIds);
+
+  writeMappedRow(
+    sheet,
+    headers,
+    jdExtractedFieldMap({
+      autoReqId,
+      details,
+      jdText,
+      rmName: dbJd.rm_email,
+    })
+  );
+  await saveMasterBrWorkbook(workbook, filename);
+
+  let localJds: any[] = [];
+  const localJdPath = join(getUploadsRoot(), "job_descriptions.json");
+  try {
+    localJds = JSON.parse(await readFile(localJdPath, "utf8"));
+  } catch {}
+  await persistMasterRequirements(workbook, filename, localJds);
+  try {
+    const serialized = JSON.stringify(localJds, null, 2);
+    await writeFile(localJdPath, serialized, "utf8");
+    await writePersistedJson("job_descriptions.json", serialized).catch(() => {});
+  } catch {}
+
+  await writeLog(
+    "requirements",
+    "SYNC_SELECTED_BR_TO_MASTER",
+    "success",
+    `Appended selected requirement ${autoReqId} into ${filename}`
+  );
+  return { success: true, appended: true, autoReqId };
 }
 
 /**
@@ -679,7 +1057,10 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
         const email = mailIdx !== -1 && row[mailIdx] ? String(row[mailIdx]).trim() : "";
         const designation = roleIdx !== -1 && row[roleIdx] ? String(row[roleIdx]).trim() : "Support Engineer";
         
-        const matchResult = calculateSkillMatch(skills, jdSkills);
+        const matchResult = calculateSkillMatch(
+          employeeMatchText({ skills, designation, grade }),
+          jdSkills
+        );
         
         const record: EmployeeRecord = {
           employee_id: empNo,
@@ -752,7 +1133,10 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
         const email = mailIdx !== -1 && cells[mailIdx] ? cells[mailIdx] : "";
         const designation = roleIdx !== -1 && cells[roleIdx] ? cells[roleIdx] : "Support Engineer";
         
-        const matchResult = calculateSkillMatch(skills, jdSkills);
+        const matchResult = calculateSkillMatch(
+          employeeMatchText({ skills, designation, grade }),
+          jdSkills
+        );
         
         const record: EmployeeRecord = {
           employee_id: empNo,
@@ -789,6 +1173,18 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
   
   loaded = uniqueParsedEmployees.length;
 
+  // Never wipe the employee roster / portal accounts just because Corp Pool is empty.
+  // Employee Portal tests live on employees + tests tables and must stay independent of BR ingest.
+  if (uniqueParsedEmployees.length === 0) {
+    await writeLog(
+      "employee",
+      "SKIP_EMPTY_CORP_POOL",
+      "success",
+      "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
+    );
+    return { success: true, loaded: 0 };
+  }
+
   // Read existing employees from JSON to preserve shortlisted state
   let finalEmployees = uniqueParsedEmployees;
   const jsonPath = join(getUploadsRoot(), "employees.json");
@@ -804,8 +1200,12 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
     });
   } catch (e) {}
   
-  // Save enriched records
-  await writeFile(jsonPath, JSON.stringify(finalEmployees, null, 2), "utf8");
+  // Save enriched records (local + cloud app-data so Vercel keeps skills)
+  const serialized = JSON.stringify(finalEmployees, null, 2);
+  await writeFile(jsonPath, serialized, "utf8");
+  await writePersistedJson("employees.json", serialized).catch((err) => {
+    console.warn("Failed to persist employees.json to app-data:", err);
+  });
   await writeLog('employee', 'SYNC_EMPLOYEE_POOL', 'success', `Successfully loaded ${loaded} employees from /docs/Corp Pool`);
   
   return { success: true, loaded };

@@ -14,14 +14,21 @@ import {
   formatSubmittedAt,
   getTestQuestionAttemptsBatch,
 } from "@/services/employee-test-attempts-service";
-import { getPortalTestStatusLabel } from "@/lib/portal-test-status";
+import { getPortalTestStatusLabel, formatPortalScore, portalScorePercent, portalScoreExcelFontArgb } from "@/lib/portal-test-status";
+import { formatTopicTitleForDisplay, formatProductDisplayName } from "@/lib/product-display-name";
+import {
+  formatProctorViolationsForExport,
+  getPortalPrimaryProctoring,
+} from "@/lib/portal-proctor-display";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-function formatPortalScore(score: number | null | undefined, scoreMax = 25): string {
-  if (score === null || score === undefined) return "—";
-  return `${score}/${scoreMax}`;
+function formatExportCompletedAt(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 async function loadAllTestResults(): Promise<any[]> {
@@ -163,7 +170,10 @@ async function loadAllTestResults(): Promise<any[]> {
     }
   }
 
-  return allTestResults;
+  return allTestResults.map((test) => ({
+    ...test,
+    topicTitle: formatTopicTitleForDisplay(test.topicTitle),
+  }));
 }
 
 function styleHeaderRow(row: ExcelJS.Row) {
@@ -218,7 +228,10 @@ export async function GET(request: NextRequest) {
       "Email",
       "DDH",
       "Test Status",
+      "Completed On",
       "Score",
+      "Proctor Flags",
+      "Proctor Violations",
       "Remarks",
       "Assigned Questions & Answers",
     ];
@@ -235,7 +248,9 @@ export async function GET(request: NextRequest) {
               ? 25
               : header === "Remarks"
                 ? 30
-                : 16,
+                : header === "Proctor Violations"
+                  ? 50
+                  : 16,
     }));
     styleHeaderRow(summarySheet.getRow(1));
 
@@ -279,21 +294,38 @@ export async function GET(request: NextRequest) {
               ].join("\n")
             : "";
 
-      summarySheet.addRow([
+      const proctorInfo = getPortalPrimaryProctoring(account);
+
+      const scoreColumnIndex = summaryHeaders.indexOf("Score") + 1;
+      const dataRow = summarySheet.addRow([
         employeeName,
         account.employee_id,
         account.role || "—",
         account.domain || "—",
-        account.product || "—",
+        formatProductDisplayName(account.product) || "—",
         account.email || "—",
         account.ddh || "—",
         getPortalTestStatusLabel(account.test_status),
+        formatExportCompletedAt(account.completed_at),
         account.score !== null && account.score !== undefined
           ? formatPortalScore(account.score, scoreMax)
+          : "—",
+        proctorInfo ? String(proctorInfo.flagCount) : "—",
+        proctorInfo
+          ? formatProctorViolationsForExport(proctorInfo.violations)
           : "—",
         account.remarks?.trim() ? account.remarks : "—",
         answerBlock,
       ]);
+
+      if (account.score !== null && account.score !== undefined && scoreColumnIndex > 0) {
+        const pct = portalScorePercent(account.score, scoreMax);
+        const scoreCell = dataRow.getCell(scoreColumnIndex);
+        scoreCell.font = {
+          bold: true,
+          color: { argb: portalScoreExcelFontArgb(pct) },
+        };
+      }
 
       if (questionAttempts && questionAttempts.length > 0) {
         for (const q of questionAttempts) {

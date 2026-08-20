@@ -229,12 +229,102 @@
   color: inherit;
 }
 
-/* Admin proctoring player — native controls must not be clipped */
-.admin-native-video {
+/* Admin proctoring player — Plyr custom controls (no native browser UI) */
+.plyr-video-player {
+  --plyr-color-main: #818cf8;
+  --plyr-video-background: #000;
+  --plyr-menu-background: rgba(15, 23, 42, 0.96);
+  --plyr-menu-color: #f8fafc;
+  --plyr-control-icon-size: 18px;
+  --plyr-control-spacing: 10px;
+  --plyr-font-family: inherit;
+  --plyr-font-size-base: 14px;
+  --plyr-font-size-small: 12px;
+  --plyr-font-size-time: 13px;
+  --plyr-range-fill-background: #818cf8;
+  --plyr-range-track-background: rgba(255, 255, 255, 0.18);
+  --plyr-tooltip-background: rgba(15, 23, 42, 0.95);
+  --plyr-tooltip-color: #f8fafc;
+  --plyr-badge-background: #6366f1;
+  --plyr-badge-text-color: #fff;
+  --plyr-captions-background: rgba(0, 0, 0, 0.75);
+  --plyr-captions-text-color: #fff;
+  background: #000;
+  border-radius: 0 0 1.5rem 1.5rem;
+  overflow: hidden;
+}
+
+.plyr-video-player .plyr {
+  border-radius: 0 0 1.5rem 1.5rem;
+}
+
+.plyr-video-player .plyr__video-wrapper {
+  background: #000;
+  width: 100%;
+  max-height: min(75vh, calc(100vh - 10rem));
+}
+
+.plyr-video-player .plyr__sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.plyr-video-player .plyr__controls {
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+  padding: 12px 14px 14px;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.plyr-video-player .plyr__control--overlaid {
+  background: rgba(99, 102, 241, 0.92);
+  border: 0;
+  box-shadow: 0 8px 32px rgba(99, 102, 241, 0.45);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.plyr-video-player .plyr__control--overlaid:hover {
+  background: #6366f1;
+  transform: scale(1.06);
+}
+
+.plyr-video-player .plyr__progress__container:hover .plyr__progress {
+  height: 7px;
+}
+
+.plyr-video-player .plyr__progress input[type="range"] {
+  transition: height 0.15s ease;
+}
+
+.plyr-video-player .plyr__progress__buffer {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.plyr-video-player .plyr__menu__container .plyr__control {
+  transition: background 0.15s ease;
+}
+
+.plyr-video-player .plyr__menu__container .plyr__control:hover {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.plyr-video-player .plyr__time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.plyr-video-player__media,
+.plyr-video-player .plyr__video-wrapper video {
   display: block;
   width: 100%;
   height: auto;
   max-height: min(75vh, calc(100vh - 10rem));
+  object-fit: contain;
   background: #000;
-  vertical-align: top;
 }

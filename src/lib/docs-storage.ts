@@ -64,7 +64,29 @@ export async function ensureDocsStorage(): Promise<void> {
   await mkdir(getRuntimeUploadsRoot(), { recursive: true });
 }
 
+function isUsableDocName(name: string): boolean {
+  return Boolean(name) && !name.startsWith(".") && name !== ".gitkeep";
+}
+
+async function listLocalCategoryFiles(category: DocCategory): Promise<string[]> {
+  const dirs = [localDir(category), join(getRuntimeUploadsRoot(), "docs-cache", LOCAL_DIRS[category])];
+  const names = new Set<string>();
+  for (const dir of dirs) {
+    try {
+      const entries = await readdir(dir);
+      for (const name of entries) {
+        if (isUsableDocName(name)) names.add(name);
+      }
+    } catch {
+      // folder may not exist
+    }
+  }
+  return Array.from(names);
+}
+
 export async function listDocFiles(category: DocCategory): Promise<string[]> {
+  const names = new Set<string>();
+
   if (useCloudDocsStorage()) {
     await ensureDocsBucket();
     const prefix = LOCAL_DIRS[category];
@@ -73,25 +95,50 @@ export async function listDocFiles(category: DocCategory): Promise<string[]> {
       .list(prefix, { limit: 1000, sortBy: { column: "name", order: "asc" } });
     if (error) {
       console.warn(`listDocFiles cloud failed for ${category}:`, error.message);
-      return [];
+    } else {
+      for (const entry of data ?? []) {
+        if (entry.name && entry.id !== null && isUsableDocName(entry.name)) {
+          names.add(entry.name);
+        }
+      }
     }
-    return (data ?? [])
-      .filter((entry) => entry.name && entry.id !== null)
-      .map((entry) => entry.name);
   }
 
-  await ensureLocalDir(category);
-  try {
-    return await readdir(localDir(category));
-  } catch {
-    return [];
+  for (const name of await listLocalCategoryFiles(category)) {
+    names.add(name);
   }
+
+  if (names.size === 0 && !useCloudDocsStorage()) {
+    await ensureLocalDir(category);
+  }
+
+  return Array.from(names).sort((a, b) => a.localeCompare(b));
 }
 
 export async function readDocFileBuffer(
   category: DocCategory,
   filename: string
 ): Promise<Buffer> {
+  const localPath = join(localDir(category), filename);
+  const cached = cachePath(category, filename);
+
+  try {
+    if (fs.existsSync(localPath)) {
+      const localBuffer = await readFile(localPath);
+      if (localBuffer.length > 0) return localBuffer;
+    }
+  } catch {
+    // fall through
+  }
+  try {
+    if (fs.existsSync(cached)) {
+      const cachedBuffer = await readFile(cached);
+      if (cachedBuffer.length > 0) return cachedBuffer;
+    }
+  } catch {
+    // fall through
+  }
+
   if (useCloudDocsStorage()) {
     await ensureDocsBucket();
     const objectPath = cloudObjectPath(category, filename);
@@ -103,7 +150,6 @@ export async function readDocFileBuffer(
     }
     const buffer = Buffer.from(await data.arrayBuffer());
     try {
-      const cached = cachePath(category, filename);
       await mkdir(dirname(cached), { recursive: true });
       await writeFile(cached, buffer);
     } catch {
@@ -112,7 +158,7 @@ export async function readDocFileBuffer(
     return buffer;
   }
 
-  return readFile(join(localDir(category), filename));
+  throw new Error(`Local doc not found: ${localPath}`);
 }
 
 export async function writeDocFile(
@@ -142,6 +188,38 @@ export async function writeDocFile(
 
   await ensureLocalDir(category);
   await writeFile(join(localDir(category), filename), buffer);
+  try {
+    const cached = cachePath(category, filename);
+    await mkdir(dirname(cached), { recursive: true });
+    await writeFile(cached, buffer);
+  } catch {
+    // cache optional
+  }
+}
+
+export async function deleteDocFile(
+  category: DocCategory,
+  filename: string
+): Promise<void> {
+  const localPath = join(localDir(category), filename);
+  const cached = cachePath(category, filename);
+  try {
+    if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+  } catch {
+    // ignore
+  }
+  try {
+    if (fs.existsSync(cached)) fs.unlinkSync(cached);
+  } catch {
+    // ignore
+  }
+  if (useCloudDocsStorage()) {
+    try {
+      await supabaseServer.storage.from(DOCS_BUCKET).remove([cloudObjectPath(category, filename)]);
+    } catch (e) {
+      console.warn(`Failed to delete cloud doc ${category}/${filename}:`, e);
+    }
+  }
 }
 
 /** True when cloud bucket has at least one object (used for empty-state hints). */

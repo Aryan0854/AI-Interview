@@ -6,15 +6,18 @@ import {
   employeeTestVideoStoragePath,
   getEmployeeTestVideoAdminUrl,
   isValidWebmBuffer,
+  prepareWebmForStorage,
   repairWebmBuffer,
   saveEmployeeTestVideo,
+  saveEmployeeTestVideoLenient,
+  saveEmployeeTestVideoProgress,
 } from "@/lib/employee-test-video";
 import { markProctorVideoUploaded, normalizeProctoring } from "@/lib/employee-proctoring";
 import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
 import { supabaseServer } from "@/lib/db";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 async function markVideoReady(
   testId: string,
@@ -65,17 +68,40 @@ export async function POST(
             { status: 404 }
           );
         }
-        const buffer = repairWebmBuffer(Buffer.from(await data.arrayBuffer()));
-        if (!isValidWebmBuffer(buffer)) {
-          return NextResponse.json(
-            { error: "Recording file is missing or corrupt in storage." },
-            { status: 400 }
-          );
+        const raw = Buffer.from(await data.arrayBuffer());
+        const cleaned = prepareWebmForStorage(raw);
+        if (!cleaned) {
+          const lenientSaved = await saveEmployeeTestVideoProgress(testId, repairWebmBuffer(raw));
+          if (!lenientSaved) {
+            await supabaseServer.storage.from("recordings").remove([path]);
+            return NextResponse.json(
+              {
+                error:
+                  "Recording is corrupt or too short (missing video data). Please retake the test with Chrome/Edge and keep the camera on.",
+              },
+              { status: 400 }
+            );
+          }
+        } else if (cleaned.length !== raw.length || !isValidWebmBuffer(raw)) {
+          const saved = await saveEmployeeTestVideo(testId, cleaned);
+          if (!saved) {
+            const lenientSaved = await saveEmployeeTestVideoProgress(testId, cleaned);
+            if (!lenientSaved) {
+              await supabaseServer.storage.from("recordings").remove([path]);
+              return NextResponse.json(
+                { error: "Recording failed validation after upload." },
+                { status: 400 }
+              );
+            }
+          }
         }
 
-        // Direct client upload already stored the raw WebM — do not re-process/re-upload.
         const videoUrl = await markVideoReady(testId, auth.employee);
-        return NextResponse.json({ success: true, videoUrl });
+        return NextResponse.json({
+          success: true,
+          videoUrl,
+          bytes: cleaned?.length ?? raw.length,
+        });
       }
     }
 
@@ -90,7 +116,7 @@ export async function POST(
       return NextResponse.json({ error: "Recording file is empty" }, { status: 400 });
     }
 
-    const saved = await saveEmployeeTestVideo(testId, buffer);
+    const saved = await saveEmployeeTestVideoLenient(testId, buffer);
     if (!saved) {
       return NextResponse.json({ error: "Failed to store recording" }, { status: 500 });
     }

@@ -199,6 +199,7 @@ export interface ResumeReport {
   priorityImprovements: PriorityImprovement[];
   visualMetrics: VisualMetrics;
   suitability?: "suitable" | "unsuitable";
+  suitabilityOverridden?: boolean;
   jdMatchScore?: number | null;
   jdMatchRationale?: string | null;
   jdId?: string;

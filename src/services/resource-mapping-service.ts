@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { join } from "path";
 import { readFile } from "fs/promises";
 import { derivePortalTestStatus, type PortalTestStatus } from "@/lib/portal-test-status";
+import { formatProductDisplayName, formatTopicTitleForDisplay } from "@/lib/product-display-name";
 import { readPersistedJson } from "@/lib/runtime-data";
 
 export interface ResourcePortalEmployee {
@@ -20,6 +21,7 @@ export interface ResourcePortalEmployee {
   test_status: PortalTestStatus | null;
   score: number | null;
   score_max?: number;
+  completed_at?: string | null;
     tests: Array<{
     id: string;
     topicTitle: string;
@@ -314,28 +316,39 @@ function mergePortalProfileRow(rosterRow: PortalProfileRow, mappingRow?: PortalP
   };
 }
 
-export async function loadEmployeeTestManifest(): Promise<Record<string, string>> {
+async function readManifestJson(): Promise<
+  Array<{ employee_id: string; test_id: string; question_count?: number; product?: string; full_name?: string }>
+> {
+  const parse = (raw: string | null) => {
+    if (!raw) return [];
+    try {
+      const manifest = JSON.parse(raw);
+      return Array.isArray(manifest) ? manifest : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const persisted = parse(await readPersistedJson("employee_test_manifest.json"));
+  if (persisted.length > 0) return persisted;
+
   try {
-    const raw = await readPersistedJson("employee_test_manifest.json");
-    if (!raw) return {};
-    const manifest = JSON.parse(raw) as Array<{ employee_id: string; test_id: string; question_count?: number }>;
-    return Object.fromEntries(manifest.map((item) => [String(item.employee_id).trim(), item.test_id]));
+    const raw = await readFile(join(process.cwd(), "src", "data", "employee_test_manifest.json"), "utf8");
+    return parse(raw);
   } catch {
-    return {};
+    return [];
   }
+}
+
+export async function loadEmployeeTestManifest(): Promise<Record<string, string>> {
+  const manifest = await readManifestJson();
+  return Object.fromEntries(manifest.map((item) => [String(item.employee_id).trim(), item.test_id]));
 }
 
 async function loadManifestRows(): Promise<
   Array<{ employee_id: string; test_id: string; question_count?: number; product?: string; full_name?: string }>
 > {
-  try {
-    const raw = await readPersistedJson("employee_test_manifest.json");
-    if (!raw) return [];
-    const manifest = JSON.parse(raw);
-    return Array.isArray(manifest) ? manifest : [];
-  } catch {
-    return [];
-  }
+  return readManifestJson();
 }
 
 export function mergeResourcePortalData(
@@ -355,40 +368,60 @@ export function mergeResourcePortalData(
   return mappingRows.map((row) => {
     const empTests = testsByEmployee.get(normalizeEmployeeId(row.employee_id)) || [];
     const manifestTestId = manifest[row.employee_id] ?? manifest[normalizeEmployeeId(row.employee_id)] ?? null;
-    const primaryTest =
+    const completed = empTests.filter((test) => test.status === "completed");
+
+    // Keep the current assignment (manifest) as primary when present — do not hide Supabase rows.
+    // If that assignment is completed, use it; otherwise keep the live assignment and still
+    // expose every attempt under `tests` (including older completed ones).
+    const assignedTest =
       empTests.find((test) => test.id === manifestTestId) ??
       empTests.find((test) => test.topicId === "resource-product-assessment") ??
-      empTests[0] ??
       null;
-
-    const completed = empTests.filter((test) => test.status === "completed");
     const primaryCompleted =
-      completed.find((test) => test.id === primaryTest?.id) ?? completed[0] ?? null;
+      completed.find((test) => test.id === assignedTest?.id) ??
+      completed.find((test) => test.id === manifestTestId) ??
+      completed.find((test) => test.topicId === "resource-product-assessment") ??
+      null;
+    const primaryTest = primaryCompleted ?? assignedTest ?? completed[0] ?? empTests[0] ?? null;
+
     const score =
-      primaryCompleted && primaryCompleted.correctCount != null
-        ? primaryCompleted.correctCount
-        : primaryCompleted?.score ?? null;
+      primaryCompleted != null
+        ? (primaryCompleted.correctCount ??
+            primaryCompleted.score ??
+            primaryCompleted.answers_correct ??
+            null)
+        : null;
     const scoreMax = primaryTest?.totalQuestions ?? row.assigned_question_count ?? 25;
 
     const answeredCount = primaryTest?.answeredCount ?? 0;
     const totalQuestions = primaryTest?.totalQuestions ?? row.assigned_question_count ?? 0;
+    const completedAt =
+      primaryCompleted?.completedAt ??
+      (primaryTest?.status === "completed" ? primaryTest?.completedAt ?? null : null);
+
+    const rawStatus =
+      primaryCompleted?.status === "completed"
+        ? "completed"
+        : assignedTest?.status ?? primaryTest?.status ?? null;
 
     return {
       ...row,
-      test_id: primaryTest?.id ?? manifestTestId,
+      product: formatProductDisplayName(row.product),
+      test_id: primaryCompleted?.id ?? assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
       test_status: derivePortalTestStatus({
         assignedQuestionCount: row.assigned_question_count || (manifestTestId ? 25 : 0),
-        testId: primaryTest?.id ?? manifestTestId,
-        rawStatus: primaryTest?.status ?? null,
+        testId: assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
+        rawStatus,
         answeredCount,
         totalQuestions,
-        startedAt: primaryTest?.startedAt ?? null,
+        startedAt: assignedTest?.startedAt ?? primaryTest?.startedAt ?? null,
       }),
-      score,
+      score: score ?? (rawStatus === "completed" ? primaryTest?.correctCount ?? primaryTest?.score ?? null : null),
       score_max: scoreMax,
+      completed_at: completedAt,
       tests: empTests.map((test) => ({
         id: test.id,
-        topicTitle: test.topicTitle,
+        topicTitle: formatTopicTitleForDisplay(test.topicTitle),
         subjectTitle: test.subjectTitle,
         difficulty: test.difficulty,
         totalQuestions: test.totalQuestions,
@@ -459,5 +492,12 @@ export async function buildResourcePortalEmployees(
     }
   }
 
-  return mergeResourcePortalData(profileRows, allTestResults, manifest);
+  return mergeResourcePortalData(profileRows, allTestResults, manifest).sort((a, b) => {
+    const nameCmp = String(a.full_name || "").localeCompare(String(b.full_name || ""), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+    if (nameCmp !== 0) return nameCmp;
+    return String(a.employee_id || "").localeCompare(String(b.employee_id || ""), undefined, { numeric: true });
+  });
 }

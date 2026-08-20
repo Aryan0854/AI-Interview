@@ -8,8 +8,32 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Mic, MicOff, CheckCircle, ArrowRight, ShieldAlert, Loader2, Sparkles, Bot, Volume2, RotateCcw, ChevronDown, ChevronUp, Code2, AlertCircle, Camera, Upload, ShieldCheck } from 'lucide-react';
+import { Mic, MicOff, CheckCircle, ArrowRight, ShieldAlert, Loader2, Sparkles, Bot, Volume2, RotateCcw, ChevronDown, ChevronUp, Code2, AlertCircle, AlertTriangle, Camera, Upload, ShieldCheck } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
+import {
+  GOVERNMENT_ID_TYPES,
+  getIdTypeLabel,
+  type GovernmentIdType,
+} from '@/lib/identity-verification-shared';
+import {
+  FACE_MISSING_SECONDS,
+  isInterviewAdminOnlyProctorType,
+  LOOK_AWAY_SECONDS,
+  LOOKING_DOWN_SECONDS,
+  SILENT_PROCTOR_COOLDOWN_MS,
+} from '@/lib/interview-silent-proctor';
+
+const CODING_LANGUAGES = [
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'python', label: 'Python' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'java', label: 'Java' },
+] as const;
+
+const LANGUAGE_LABELS: Record<string, string> = Object.fromEntries(
+  CODING_LANGUAGES.map((l) => [l.value, l.label])
+);
 
 const DEFAULT_TEMPLATES: Record<string, string> = {
   javascript: `// JavaScript Code Template\n\nfunction solution() {\n  // Write your code here\n  \n  return;\n}`,
@@ -18,6 +42,17 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   cpp: `// C++ Code Template\n#include <iostream>\nusing namespace std;\n\nvoid solution() {\n    // Write your code here\n}`,
   java: `// Java Code Template\npublic class Solution {\n    public static void solution() {\n        // Write your code here\n    }\n}`
 };
+
+/** Infer the language named in the coding challenge prompt (if any). */
+function detectChallengeTargetLanguage(question: string): string | null {
+  const q = question.toLowerCase();
+  if (/\btypescript\b/.test(q)) return 'typescript';
+  if (/\bjavascript\b/.test(q) || /\bnode\.?js\b/.test(q)) return 'javascript';
+  if (/\bpython\b/.test(q)) return 'python';
+  if (/\bc\+\+\b/.test(q) || /\bcpp\b/.test(q)) return 'cpp';
+  if (/\bjava\b/.test(q)) return 'java';
+  return null;
+}
 
 const TOTAL_SECONDS = 15 * 60;
 const COMPLETION_TEXT = "The interview has concluded. Your responses have been securely shared with the recruitment team for review. We will contact you regarding the next steps.";
@@ -81,11 +116,22 @@ export default function CandidatePortal() {
 
   // Identity Verification States
   const [showIdVerification, setShowIdVerification] = useState(false);
+  const [selectedIdType, setSelectedIdType] = useState<GovernmentIdType | ''>('');
   const [idImageBase64, setIdImageBase64] = useState<string | null>(null);
   const [selfieImageBase64, setSelfieImageBase64] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
-  const [verificationResult, setVerificationResult] = useState<{ matched: boolean; confidence: number; reason: string } | null>(null);
+  const [verificationResult, setVerificationResult] = useState<{
+    matched: boolean;
+    confidence: number;
+    reason: string;
+    selectedIdType?: string | null;
+    detectedIdType?: string | null;
+    idTypeMatched?: boolean;
+    faceMatched?: boolean;
+    failureCode?: string | null;
+    isSystemError?: boolean;
+  } | null>(null);
   const [showSubmitSuccess, setShowSubmitSuccess] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -150,6 +196,7 @@ export default function CandidatePortal() {
       secondsLeft,
       warningCount,
       violations,
+      selectedIdType,
       idImageBase64,
       selfieImageBase64,
       verificationResult,
@@ -170,6 +217,7 @@ export default function CandidatePortal() {
     secondsLeft,
     warningCount,
     violations,
+    selectedIdType,
     idImageBase64,
     selfieImageBase64,
     verificationResult,
@@ -266,6 +314,7 @@ export default function CandidatePortal() {
         setViolations(saved.violations || []);
         setIdImageBase64(saved.idImageBase64);
         setSelfieImageBase64(saved.selfieImageBase64);
+        setSelectedIdType(saved.selectedIdType || '');
         setVerificationResult(saved.verificationResult);
         setHasAgreed(saved.hasAgreed);
         setSelectedLanguage(saved.selectedLanguage || 'javascript');
@@ -448,10 +497,13 @@ export default function CandidatePortal() {
   ) => {
     if (interviewEnded || currentStep === 'setup') return;
 
-    // Apply 3-second cooldown per violation type to prevent spam/duplicate logs
+    const adminOnly = isInterviewAdminOnlyProctorType(violationType);
+
+    // Apply cooldown per violation type (longer for silent behavioral events)
     const nowMs = Date.now();
     const lastTimeMs = lastTriggeredViolationsRef.current[violationType] || 0;
-    if (nowMs - lastTimeMs < 3000) {
+    const cooldownMs = adminOnly ? SILENT_PROCTOR_COOLDOWN_MS : 3000;
+    if (nowMs - lastTimeMs < cooldownMs) {
       return;
     }
     lastTriggeredViolationsRef.current[violationType] = nowMs;
@@ -460,15 +512,11 @@ export default function CandidatePortal() {
       ? Math.max(0, (Date.now() - recordingStartTimeRef.current) / 1000)
       : 0;
 
-    // Let's determine if this violation should count as a warning strikes:
-    const isWarningStrike = [
+    // Integrity strikes (fullscreen/tab/etc.) — NOT silent face/voice/gaze events
+    const isWarningStrike = !adminOnly && [
       "Fullscreen Exit Detected",
       "Tab Switch Detected",
       "Window Lost Focus",
-      "Face Missing",
-      "Multiple People Detected",
-      "Multiple Voices Detected",
-      "Background Conversation",
       "Mobile Phone Detected",
       "Right Click Attempted",
       "DevTools Shortcut Blocked",
@@ -476,12 +524,12 @@ export default function CandidatePortal() {
     ].includes(violationType);
 
     setWarningCount(prevCount => {
-      const newCount = typeof customWarningCount === 'number'
+      const newCount = typeof customWarningCount === 'number' && !adminOnly
         ? customWarningCount
         : (isWarningStrike ? prevCount + 1 : prevCount);
       const timestamp = new Date().toISOString();
 
-      // Post violation event to backend
+      // Always persist for admin audit (silent for candidate when adminOnly)
       fetch(`/api/interview/${resumeId}/proctor_violation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -492,17 +540,18 @@ export default function CandidatePortal() {
           duration: parseFloat(duration.toFixed(1)),
           confidence: parseFloat(confidence.toFixed(2)),
           description,
-          videoTimestamp: parseFloat(elapsedSeconds.toFixed(1))
+          videoTimestamp: parseFloat(elapsedSeconds.toFixed(1)),
+          silent: adminOnly,
         })
       }).catch(err => console.error("Failed to log proctor violation:", err));
 
-      // Append to local state array
       setViolations(prev => [
         ...prev,
         { type: violationType, timestamp, warningCount: newCount }
       ]);
 
-      if (newCount >= 3) {
+      // Auto-submit only on integrity strikes, never on silent behavioral logs
+      if (!adminOnly && newCount >= 3) {
         setTimeout(() => {
           finalizeInterview();
           setShowEndConfirm(false);
@@ -775,18 +824,17 @@ export default function CandidatePortal() {
     };
   }, []);
 
-  // Proctor State checks using clmtrackr face tracking & head-pose gaze estimation
+  // Silent face / gaze / multi-person monitoring (admin report only — no candidate UI)
   useEffect(() => {
     if (currentStep === 'setup' || interviewEnded) return;
 
     let trackerInstance: any = null;
     let intervalId: any = null;
-    let lastState: 'one' | 'none' | 'left' | 'right' | 'up' | 'down' | 'multiple' | 'phone' = 'one';
+    let multiFaceIntervalId: ReturnType<typeof setInterval> | null = null;
+    let lastState: 'one' | 'none' | 'left' | 'right' | 'up' | 'down' = 'one';
     let stateStartTime = Date.now();
-    let hasIncrementedWarning = false;
     let isTracking = false;
-
-    // History for smoothing/debouncing state transitions
+    let cancelled = false;
     const stateHistory: string[] = [];
 
     const startTracking = () => {
@@ -806,93 +854,73 @@ export default function CandidatePortal() {
       startTracking();
     }
 
-    const flushPending = () => {
-      if (hasIncrementedWarning && lastState !== 'one') {
-        const duration = (Date.now() - stateStartTime) / 1000;
-        let type = "Face Missing";
-        let desc = "Face completely leaves the frame, is obscured, or camera blocked.";
-        let confidence = 0.90;
+    const logGazeEvent = (
+      type: string,
+      duration: number,
+      confidence: number,
+      description: string
+    ) => {
+      // Fire immediately for admin; do not bump candidate strike counter
+      triggerProctorEvent(type, duration, confidence, description);
+      stateStartTime = Date.now();
+    };
 
-        if (lastState === 'left') { type = "Looking Left"; desc = "Candidate looked away to the left."; confidence = 0.85; }
-        else if (lastState === 'right') { type = "Looking Right"; desc = "Candidate looked away to the right."; confidence = 0.85; }
-        else if (lastState === 'up') { type = "Looking Up"; desc = "Candidate looked up excessively."; confidence = 0.80; }
-        else if (lastState === 'down') { type = "Looking Down"; desc = "Candidate looked down (possible phone usage)."; confidence = 0.85; }
-        else if (lastState === 'multiple') { type = "Multiple People Detected"; desc = "Multiple people detected in webcam feed."; confidence = 0.95; }
-        else if (lastState === 'phone') { type = "Mobile Phone Detected"; desc = "Mobile phone detected in webcam feed."; confidence = 0.98; }
-
-        triggerProctorEvent(type, duration, confidence, desc, warningCountRef.current);
-        hasIncrementedWarning = false;
+    flushPendingViolationRef.current = () => {
+      // On interview end, flush any long-running gaze state still active
+      if (lastState === 'one') return;
+      const duration = (Date.now() - stateStartTime) / 1000;
+      if (lastState === 'down' && duration >= LOOKING_DOWN_SECONDS) {
+        logGazeEvent(
+          "Looking Down",
+          duration,
+          0.88,
+          `Candidate looked down for ${duration.toFixed(1)}s (possible phone usage).`
+        );
+      } else if (lastState === 'none' && duration >= FACE_MISSING_SECONDS) {
+        logGazeEvent(
+          "Face Missing",
+          duration,
+          0.9,
+          `No face detected for ${duration.toFixed(1)}s.`
+        );
+      } else if (['left', 'right', 'up'].includes(lastState) && duration >= LOOK_AWAY_SECONDS) {
+        const label =
+          lastState === 'left' ? "Looking Left" : lastState === 'right' ? "Looking Right" : "Looking Up";
+        logGazeEvent(label, duration, 0.82, `Candidate gaze ${lastState} for ${duration.toFixed(1)}s.`);
       }
     };
 
-    flushPendingViolationRef.current = flushPending;
-
     intervalId = setInterval(() => {
-      // Check developer mode overrides
-      if (proctorState === 'none') {
+      // Dev overrides still supported for QA without changing candidate UI
+      if (proctorState === 'none' || proctorState === 'multiple' || proctorState === 'phone') {
         const now = Date.now();
-        if (lastState !== 'none') {
-          flushPending();
-          lastState = 'none';
-          stateStartTime = now;
-          hasIncrementedWarning = false;
-        } else if (now - stateStartTime >= 2000 && !hasIncrementedWarning) {
-          setWarningCount(prev => {
-            const next = prev + 1;
-            warningCountRef.current = next;
-            return next;
-          });
-          hasIncrementedWarning = true;
+        if (proctorState === 'none') {
+          if (lastState !== 'none') {
+            lastState = 'none';
+            stateStartTime = now;
+          } else if ((now - stateStartTime) / 1000 >= FACE_MISSING_SECONDS) {
+            logGazeEvent("Face Missing", (now - stateStartTime) / 1000, 0.95, "Dev override: face missing.");
+          }
+        } else if (proctorState === 'multiple') {
+          triggerProctorEvent(
+            "Multiple People Detected",
+            2,
+            0.98,
+            "Dev override: multiple people in frame."
+          );
+        } else if (proctorState === 'phone') {
+          triggerProctorEvent(
+            "Mobile Phone Detected",
+            2,
+            0.98,
+            "Dev override: mobile phone detected."
+          );
         }
         return;
       }
 
-      if (proctorState === 'multiple') {
-        const now = Date.now();
-        if (lastState !== 'multiple') {
-          flushPending();
-          lastState = 'multiple';
-          stateStartTime = now;
-          hasIncrementedWarning = false;
-        } else if (now - stateStartTime >= 2000 && !hasIncrementedWarning) {
-          setWarningCount(prev => {
-            const next = prev + 1;
-            warningCountRef.current = next;
-            return next;
-          });
-          hasIncrementedWarning = true;
-        }
-        return;
-      }
-
-      if (proctorState === 'phone') {
-        const now = Date.now();
-        if (lastState !== 'phone') {
-          flushPending();
-          lastState = 'phone';
-          stateStartTime = now;
-          hasIncrementedWarning = false;
-        } else if (now - stateStartTime >= 2000 && !hasIncrementedWarning) {
-          setWarningCount(prev => {
-            const next = prev + 1;
-            warningCountRef.current = next;
-            return next;
-          });
-          hasIncrementedWarning = true;
-        }
-        return;
-      }
-
-      if (!clmReady || !isTracking || !trackerInstance || !(window as any).clm || !(window as any).pModel) {
-        if (lastState !== 'one') {
-          flushPending();
-          lastState = 'one';
-          stateStartTime = Date.now();
-          hasIncrementedWarning = false;
-        }
-        if (clmReady) {
-          startTracking();
-        }
+      if (!clmReady || !isTracking || !trackerInstance) {
+        if (clmReady) startTracking();
         return;
       }
 
@@ -900,11 +928,9 @@ export default function CandidatePortal() {
       const score = trackerInstance.getScore();
 
       let detectedState: typeof lastState = 'one';
-      let confidence = score || 0;
 
       if (!positions || positions.length < 70 || score < 0.35) {
         detectedState = 'none';
-        confidence = score || 0.15;
       } else {
         const noseX = positions[62][0];
         const noseY = positions[62][1];
@@ -913,32 +939,18 @@ export default function CandidatePortal() {
         const noseBridgeY = positions[33][1];
         const chinY = positions[7][1];
 
-        const leftDist = noseX - leftFaceX;
-        const rightDist = rightFaceX - noseX;
-        const horizontalRatio = leftDist / (rightDist || 1);
+        const horizontalRatio = (noseX - leftFaceX) / (rightFaceX - noseX || 1);
+        const verticalRatio = (noseY - noseBridgeY) / (chinY - noseY || 1);
 
-        const noseLen = noseY - noseBridgeY;
-        const chinLen = chinY - noseY;
-        const verticalRatio = noseLen / (chinLen || 1);
-
-        if (horizontalRatio < 0.78) {
-          detectedState = 'right';
-        } else if (horizontalRatio > 1.28) {
-          detectedState = 'left';
-        } else if (verticalRatio < 0.48) {
-          detectedState = 'up';
-        } else if (verticalRatio > 0.82) {
-          detectedState = 'down';
-        } else {
-          detectedState = 'one';
-        }
+        if (horizontalRatio < 0.78) detectedState = 'right';
+        else if (horizontalRatio > 1.28) detectedState = 'left';
+        else if (verticalRatio < 0.48) detectedState = 'up';
+        else if (verticalRatio > 0.82) detectedState = 'down';
+        else detectedState = 'one';
       }
 
-      // Smooth the raw detectedState with a majority vote filter
       stateHistory.push(detectedState);
-      if (stateHistory.length > 5) {
-        stateHistory.shift();
-      }
+      if (stateHistory.length > 5) stateHistory.shift();
 
       const counts: Record<string, number> = {};
       let maxCount = 0;
@@ -947,51 +959,96 @@ export default function CandidatePortal() {
         counts[s] = (counts[s] || 0) + 1;
         if (counts[s] > maxCount) {
           maxCount = counts[s];
-          smoothedState = s as any;
+          smoothedState = s as typeof lastState;
         }
       }
 
       const now = Date.now();
       if (smoothedState !== lastState) {
-        flushPending();
         lastState = smoothedState;
         stateStartTime = now;
-        hasIncrementedWarning = false;
       } else {
         const duration = (now - stateStartTime) / 1000;
-        const isCodingPhase = questions[currentIndex]?.startsWith("Coding Challenge:");
-        const lookAwayDurationThreshold = isCodingPhase ? 10.0 : 4.0;
-        const faceMissingDurationThreshold = isCodingPhase ? 15.0 : 6.0;
-
-        if (!hasIncrementedWarning) {
-          if (lastState === 'none' && duration >= faceMissingDurationThreshold) {
-            setWarningCount(prev => {
-              const next = prev + 1;
-              warningCountRef.current = next;
-              return next;
-            });
-            hasIncrementedWarning = true;
-          } else if (['left', 'right', 'up', 'down'].includes(lastState) && duration >= lookAwayDurationThreshold) {
-            setWarningCount(prev => {
-              const next = prev + 1;
-              warningCountRef.current = next;
-              return next;
-            });
-            hasIncrementedWarning = true;
-          }
+        if (lastState === 'none' && duration >= FACE_MISSING_SECONDS) {
+          logGazeEvent(
+            "Face Missing",
+            duration,
+            Math.max(0.5, score || 0.4),
+            `No face detected for ${duration.toFixed(1)}s.`
+          );
+        } else if (lastState === 'down' && duration >= LOOKING_DOWN_SECONDS) {
+          logGazeEvent(
+            "Looking Down",
+            duration,
+            0.88,
+            `Candidate looked down for ${duration.toFixed(1)}s (possible phone usage).`
+          );
+        } else if (
+          (lastState === 'left' || lastState === 'right' || lastState === 'up') &&
+          duration >= LOOK_AWAY_SECONDS
+        ) {
+          const label =
+            lastState === 'left'
+              ? "Looking Left"
+              : lastState === 'right'
+                ? "Looking Right"
+                : "Looking Up";
+          logGazeEvent(
+            label,
+            duration,
+            0.82,
+            `Candidate gaze ${lastState} for ${duration.toFixed(1)}s.`
+          );
         }
       }
-    }, 200);
+    }, 250);
+
+    // Multi-person detection (Chrome/Edge FaceDetector) — silent admin log
+    const FaceDetectorCtor = (window as any).FaceDetector as
+      | (new (opts?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+          detect: (image: CanvasImageSource) => Promise<Array<{ boundingBox: DOMRectReadOnly }>>;
+        })
+      | undefined;
+
+    if (typeof FaceDetectorCtor === "function") {
+      let detector: InstanceType<typeof FaceDetectorCtor> | null = null;
+      try {
+        detector = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 5 });
+      } catch {
+        detector = null;
+      }
+
+      if (detector) {
+        multiFaceIntervalId = setInterval(async () => {
+          if (cancelled || !videoRef.current || videoRef.current.readyState < 2) return;
+          try {
+            const faces = await detector!.detect(videoRef.current);
+            if (faces.length >= 2) {
+              triggerProctorEvent(
+                "Multiple People Detected",
+                2,
+                0.95,
+                `${faces.length} faces visible in the camera frame.`
+              );
+            }
+          } catch {
+            // Transient FaceDetector failures are ignored
+          }
+        }, 2000);
+      }
+    }
 
     return () => {
+      cancelled = true;
       clearInterval(intervalId);
+      if (multiFaceIntervalId) clearInterval(multiFaceIntervalId);
       flushPendingViolationRef.current = null;
       if (trackerInstance) {
         try {
           trackerInstance.stop();
-        } catch(e){}
+        } catch (e) {}
       }
-    }
+    };
   }, [currentStep, interviewEnded, clmReady, proctorState, triggerProctorEvent]);
 
   // Sync stream with verification video element
@@ -1007,7 +1064,36 @@ export default function CandidatePortal() {
     }
   }, [showIdVerification, idImageBase64, selfieImageBase64]);
 
-  const captureImageFromWebcam = (target: 'id' | 'selfie') => {
+  const compressImageDataUrl = async (
+    dataUrl: string,
+    maxWidth = 1280,
+    quality = 0.72
+  ): Promise<string> => {
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / Math.max(img.width, 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  const captureImageFromWebcam = async (target: 'id' | 'selfie') => {
+    if (target === 'id' && !selectedIdType) {
+      setVerificationError('Select the government ID type before capturing.');
+      return;
+    }
     if (!verificationVideoRef.current) {
       console.warn("No verification video element found to capture image.");
       return;
@@ -1018,8 +1104,12 @@ export default function CandidatePortal() {
       canvas.height = verificationVideoRef.current.videoHeight || 480;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        // Mirror-corrected capture for natural orientation
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
         ctx.drawImage(verificationVideoRef.current, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
+        const raw = canvas.toDataURL('image/jpeg', 0.92);
+        const dataUrl = await compressImageDataUrl(raw);
         if (target === 'id') {
           setIdImageBase64(dataUrl);
         } else {
@@ -1033,19 +1123,33 @@ export default function CandidatePortal() {
     }
   };
 
-  const handleIdFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleIdFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!selectedIdType) {
+      setVerificationError('Select the government ID type before uploading.');
+      e.target.value = '';
+      return;
+    }
+
     if (file.size > 5 * 1024 * 1024) {
       setVerificationError("File is too large (max 5MB)");
+      e.target.value = '';
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setVerificationError('Please upload a PNG or JPG image of your ID.');
+      e.target.value = '';
       return;
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       if (event.target?.result) {
-        setIdImageBase64(event.target.result as string);
+        const compressed = await compressImageDataUrl(event.target.result as string);
+        setIdImageBase64(compressed);
         setVerificationError(null);
       }
     };
@@ -1053,6 +1157,10 @@ export default function CandidatePortal() {
   };
 
   const handleVerifyIdentity = async () => {
+    if (!selectedIdType) {
+      setVerificationError('Select the government ID type used for capture.');
+      return;
+    }
     if (!idImageBase64 || !selfieImageBase64) {
       setVerificationError("Both Government ID and Selfie snapshot are required.");
       return;
@@ -1067,7 +1175,7 @@ export default function CandidatePortal() {
       window.clearTimeout(verificationTimeoutRef.current);
     }
 
-    // Set 7-minute timeout (7 * 60 * 1000 = 420000ms)
+    // Hosted Gemini path should finish far sooner; keep a hard client ceiling.
     verificationTimeoutRef.current = window.setTimeout(() => {
       setShowManualCheckNotice(true);
       setVerificationResult({
@@ -1075,17 +1183,44 @@ export default function CandidatePortal() {
         confidence: 0,
         reason: "Timeout: Manual check will be conducted.",
         isSystemError: true
-      } as any);
+      });
       setIsVerifying(false);
-    }, 7 * 60 * 1000);
+      verificationTimeoutRef.current = null;
+    }, 2 * 60 * 1000);
 
     try {
+      // Browser face embeddings — works on Vercel without GEMINI_API_KEY.
+      let idDescriptor: number[] | null = null;
+      let selfieDescriptor: number[] | null = null;
+      try {
+        const { extractIdAndSelfieDescriptors } = await import(
+          "@/lib/client-face-descriptors"
+        );
+        const descriptors = await extractIdAndSelfieDescriptors(
+          idImageBase64,
+          selfieImageBase64
+        );
+        idDescriptor = descriptors.idDescriptor;
+        selfieDescriptor = descriptors.selfieDescriptor;
+      } catch (faceErr: any) {
+        console.warn("Client face-api embedding failed:", faceErr);
+        const msg = String(faceErr?.message || "");
+        // Hard fail when no face is detectable — Gemini optional path can't help much either.
+        if (/No clear face/i.test(msg)) {
+          throw new Error(msg);
+        }
+        // Otherwise continue — server may still use Gemini if configured.
+      }
+
       const res = await fetch(`/api/interview/${resumeId}/verify_id`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          idType: selectedIdType,
           idImage: idImageBase64,
-          selfieImage: selfieImageBase64
+          selfieImage: selfieImageBase64,
+          idDescriptor,
+          selfieDescriptor,
         })
       });
 
@@ -1094,16 +1229,14 @@ export default function CandidatePortal() {
         throw new Error(data.error || "Biometric verification failed.");
       }
 
-      // If the timeout has already triggered and handled it, do nothing
-      if (verificationTimeoutRef.current === null) return;
+      if (verificationTimeoutRef.current === null && !data.matched) return;
 
       setVerificationResult(data);
-      if (!data.matched) {
+      if (!data.matched && !data.isSystemError) {
         setVerificationError(`Verification Failed: ${data.reason}`);
       }
     } catch (err: any) {
       console.error(err);
-      // If the timeout has already triggered and handled it, do nothing
       if (verificationTimeoutRef.current === null) return;
       setVerificationError(err.message || "An unexpected error occurred during verification.");
     } finally {
@@ -1474,7 +1607,7 @@ export default function CandidatePortal() {
       const audioContext = new AudioContextClass();
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 512;
       source.connect(analyser);
 
       audioContextRef.current = audioContext;
@@ -1490,60 +1623,86 @@ export default function CandidatePortal() {
       const checkVolume = () => {
         if (!analyserRef.current) return;
         analyserRef.current.getByteFrequencyData(dataArray);
-        
+
         let sum = 0;
+        let low = 0;
+        let mid = 0;
+        let high = 0;
+        const third = Math.floor(bufferLength / 3);
         for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
+          const v = dataArray[i];
+          sum += v;
+          if (i < third) low += v;
+          else if (i < third * 2) mid += v;
+          else high += v;
         }
         const average = sum / bufferLength;
-        // Map average amplitude to a readable 0-100 scale
         const volume = Math.min(100, Math.round((average / 128) * 100));
         setUserVolume(volume);
-        
+
         const activeListening = isMicListeningRef.current;
         setIsUserSpeaking(volume > 5 && activeListening);
 
-        if (activeListening) {
-          const now = Date.now();
+        // Always monitor during the interview (not only while STT is listening)
+        const now = Date.now();
+        const lowAvg = low / Math.max(1, third);
+        const midAvg = mid / Math.max(1, third);
+        const highAvg = high / Math.max(1, bufferLength - third * 2);
 
-          // Excessive Noise check (volume > 85, duration >= 2.5s)
-          if (volume > 85) {
-            if (!excessiveNoiseStart) excessiveNoiseStart = now;
-            const duration = (now - excessiveNoiseStart) / 1000;
-            if (duration >= 2.5) {
-              triggerProctorEvent("Excessive Noise", duration, 0.95, "Excessive ambient noise or sound levels detected.");
-              excessiveNoiseStart = now; // reset start time to prevent spamming
-            }
-          } else {
-            excessiveNoiseStart = 0;
-          }
-
-          // Multiple Voices check (volume > 65, duration >= 3.5s)
-          if (volume > 65) {
-            if (!multipleVoicesStart) multipleVoicesStart = now;
-            const duration = (now - multipleVoicesStart) / 1000;
-            if (duration >= 3.5) {
-              triggerProctorEvent("Multiple Voices Detected", duration, 0.90, "Multiple distinct speaking voices detected in candidate vicinity.");
-              multipleVoicesStart = now;
-            }
-          } else {
-            multipleVoicesStart = 0;
-          }
-
-          // Background Conversation check (volume > 25, duration >= 5s)
-          if (volume > 25) {
-            if (!backgroundConversationStart) backgroundConversationStart = now;
-            const duration = (now - backgroundConversationStart) / 1000;
-            if (duration >= 5.0) {
-              triggerProctorEvent("Background Conversation", duration, 0.80, "Sustained secondary talking or background conversation detected.");
-              backgroundConversationStart = now;
-            }
-          } else {
-            backgroundConversationStart = 0;
+        // Excessive Noise (very loud sustained)
+        if (volume > 85) {
+          if (!excessiveNoiseStart) excessiveNoiseStart = now;
+          const duration = (now - excessiveNoiseStart) / 1000;
+          if (duration >= 2.5) {
+            triggerProctorEvent(
+              "Excessive Noise",
+              duration,
+              0.9,
+              `Sustained high ambient volume (${volume}/100) for ${duration.toFixed(1)}s.`
+            );
+            excessiveNoiseStart = now;
           }
         } else {
           excessiveNoiseStart = 0;
+        }
+
+        // Multiple voices heuristic:
+        // concurrent energy in mid + high bands (two speech-like sources) OR
+        // loud audio while candidate is not the one speaking into the mic UI.
+        const dualBandSpeech = midAvg > 45 && highAvg > 35 && lowAvg > 20 && volume > 40;
+        const backgroundSpeaker = !activeListening && volume > 45 && midAvg > 40;
+        if (dualBandSpeech || backgroundSpeaker) {
+          if (!multipleVoicesStart) multipleVoicesStart = now;
+          const duration = (now - multipleVoicesStart) / 1000;
+          if (duration >= 3.5) {
+            triggerProctorEvent(
+              "Multiple Voices Detected",
+              duration,
+              dualBandSpeech ? 0.86 : 0.8,
+              dualBandSpeech
+                ? `Concurrent speech-like energy across frequency bands for ${duration.toFixed(1)}s (possible second speaker).`
+                : `Elevated speech audio while candidate mic turn was inactive for ${duration.toFixed(1)}s.`
+            );
+            multipleVoicesStart = now;
+          }
+        } else {
           multipleVoicesStart = 0;
+        }
+
+        // Background conversation: moderate sustained speech when not answering
+        if (!activeListening && volume > 28 && midAvg > 25) {
+          if (!backgroundConversationStart) backgroundConversationStart = now;
+          const duration = (now - backgroundConversationStart) / 1000;
+          if (duration >= 5.0) {
+            triggerProctorEvent(
+              "Background Conversation",
+              duration,
+              0.78,
+              `Sustained secondary talking / background conversation for ${duration.toFixed(1)}s.`
+            );
+            backgroundConversationStart = now;
+          }
+        } else if (activeListening || volume <= 20) {
           backgroundConversationStart = 0;
         }
 
@@ -2261,11 +2420,39 @@ export default function CandidatePortal() {
                 <div className="text-left">
                   <h3 className="text-sm font-black text-slate-855 dark:text-slate-200 uppercase tracking-wider mb-2">Step 1: Capture or Upload Government ID</h3>
                   <p className="text-xs text-muted-foreground leading-relaxed font-semibold">
-                    Please hold your Government ID (Driver's License, Passport, or National ID card) up to the camera or upload a scanned image file. Ensure all details are clearly legible and the face photo on the ID is fully visible.
+                    Select your ID type, then hold the physical card to the camera or upload a clear scan. The face photo on the ID must be fully visible — the system verifies both the card type and that the selfie matches the ID photo.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2 text-left">
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                    Select Government ID Type
+                  </label>
+                  <select
+                    value={selectedIdType}
+                    onChange={(e) => {
+                      setSelectedIdType(e.target.value as GovernmentIdType | '');
+                      setVerificationError(null);
+                    }}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl px-3 py-2.5 text-sm font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Choose ID type…</option>
+                    {GOVERNMENT_ID_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {verificationError && !idImageBase64 && (
+                  <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p className="text-[11px] font-semibold leading-relaxed">{verificationError}</p>
+                  </div>
+                )}
+
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${!selectedIdType ? 'opacity-50 pointer-events-none' : ''}`}>
                   {/* Webcam Snap Panel */}
                   <div className="flex flex-col gap-3">
                     <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest text-left">Camera Capture</span>
@@ -2282,6 +2469,7 @@ export default function CandidatePortal() {
                       </div>
                       <Button
                         onClick={() => captureImageFromWebcam('id')}
+                        disabled={!selectedIdType}
                         className="absolute bottom-3 bg-indigo-600/90 hover:bg-indigo-700 text-white font-bold rounded-xl px-4 py-2 gap-2 text-xs backdrop-blur-sm z-10 shadow-lg"
                       >
                         <Camera className="w-3.5 h-3.5" /> Capture ID Photo
@@ -2298,9 +2486,10 @@ export default function CandidatePortal() {
                       <span className="text-[9px] text-muted-foreground mt-1 font-semibold">Accepts PNG, JPG, JPEG (Max 5MB)</span>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/png,image/jpeg,image/jpg,image/webp"
                         onChange={handleIdFileUpload}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        disabled={!selectedIdType}
+                        className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
                       />
                     </div>
                   </div>
@@ -2354,8 +2543,10 @@ export default function CandidatePortal() {
                   <div className="flex items-center gap-3">
                     <img src={idImageBase64} className="w-14 h-10 object-cover rounded-lg border border-slate-250 dark:border-slate-700" alt="Captured ID" />
                     <div className="text-left">
-                      <span className="block text-xs font-black text-slate-800 dark:text-slate-200">Government ID Saved</span>
-                      <span className="block text-[9px] text-emerald-500 dark:text-emerald-400 font-extrabold uppercase tracking-wider mt-0.5">Ready for verification</span>
+                      <span className="block text-xs font-black text-slate-800 dark:text-slate-200">
+                        {getIdTypeLabel(selectedIdType) || 'Government ID'} Saved
+                      </span>
+                      <span className="block text-[9px] text-emerald-500 dark:text-emerald-400 font-extrabold uppercase tracking-wider mt-0.5">Ready for selfie match</span>
                     </div>
                   </div>
                   <Button
@@ -2382,9 +2573,9 @@ export default function CandidatePortal() {
                       <Loader2 className="w-14 h-14 text-primary animate-spin" />
                       <Sparkles className="w-6 h-6 text-purple-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
                     </div>
-                    <h3 className="text-lg font-black text-slate-855 dark:text-slate-100">Comparing Biometric Signatures...</h3>
+                    <h3 className="text-lg font-black text-slate-855 dark:text-slate-100">Verifying Identity…</h3>
                     <p className="text-xs text-slate-550 dark:text-slate-400 mt-2 max-w-sm font-semibold leading-relaxed">
-                      AI is evaluating facial geometry, mapping features from the ID card to the live selfie, and checking authenticity. This will take just a few seconds.
+                      Checking that the document matches the selected ID type, then matching the face on the card to your live selfie. This usually takes a few seconds.
                     </p>
                   </div>
                 )}
@@ -2498,10 +2689,15 @@ export default function CandidatePortal() {
                     <span className="text-xs bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 px-3.5 py-0.5 rounded-full font-black mt-1">
                       Biometric Match Confidence: {verificationResult.confidence}%
                     </span>
+                    {(verificationResult.selectedIdType || selectedIdType) && (
+                      <span className="text-[10px] text-slate-500 font-bold mt-2 uppercase tracking-wider">
+                        ID type confirmed: {getIdTypeLabel(verificationResult.selectedIdType || selectedIdType)}
+                      </span>
+                    )}
 
                     <div className="my-4 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-150 dark:border-emerald-900/30 text-emerald-800 dark:text-emerald-355 text-xs font-semibold leading-relaxed text-left w-full">
                       <strong className="block mb-1 text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-450">Biometric Matching Rationale:</strong>
-                      {verificationResult.reason}
+                      {verificationResult.reason || 'Your identity has been verified successfully.'}
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 my-6 w-full max-w-md">
@@ -3713,11 +3909,11 @@ export default function CandidatePortal() {
                             onChange={(e) => setSelectedLanguage(e.target.value)}
                             className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl px-2.5 py-1 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer shadow-sm animate-none"
                           >
-                            <option value="javascript">JavaScript</option>
-                            <option value="typescript">TypeScript</option>
-                            <option value="python">Python</option>
-                            <option value="cpp">C++</option>
-                            <option value="java">Java</option>
+                            {CODING_LANGUAGES.map((lang) => (
+                              <option key={lang.value} value={lang.value}>
+                                {lang.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
 
@@ -3750,7 +3946,32 @@ export default function CandidatePortal() {
                         </div>
                       </div>
 
-
+                      {(() => {
+                        const challengeTargetLanguage = detectChallengeTargetLanguage(
+                          questions[currentIndex] || ''
+                        );
+                        if (!challengeTargetLanguage || challengeTargetLanguage === selectedLanguage) {
+                          return null;
+                        }
+                        const targetLabel =
+                          LANGUAGE_LABELS[challengeTargetLanguage] || challengeTargetLanguage;
+                        const selectedLabel =
+                          LANGUAGE_LABELS[selectedLanguage] || selectedLanguage;
+                        return (
+                          <div
+                            role="alert"
+                            className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-300/80 bg-amber-50 px-3.5 py-3 text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
+                          >
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                            <p className="text-[11px] leading-relaxed font-semibold">
+                              <span className="font-black">Language Mismatch Warning: </span>
+                              This coding challenge appears to target {targetLabel}, but you have
+                              selected {selectedLabel}. The evaluation will still run in the
+                              selected language and may affect scoring.
+                            </p>
+                          </div>
+                        );
+                      })()}
 
                       {/* Editor Workspace Container */}
                       <div className="relative flex-1 flex border border-border rounded-2xl overflow-hidden bg-slate-950 text-slate-100 font-mono text-[13px] leading-relaxed min-h-[280px]">

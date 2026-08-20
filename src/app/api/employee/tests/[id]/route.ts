@@ -3,8 +3,10 @@ import { supabase } from "@/lib/db";
 import { authenticateRequest, isAssessmentOnlyEmployee, isProductQbEmployee, PRODUCT_ASSESSMENT_TOPIC_ID } from "@/lib/employee-auth";
 import { localTestsDb } from "@/services/local-tests-db";
 import { writeLog } from "@/lib/structured-logger";
-import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
+import { syncLocalTestStateToSupabase, syncQuestionsToSupabase } from "@/services/employee-test-supabase-sync";
 import { useSupabasePrimary } from "@/lib/db-mode";
+import { employeeTestVideoExists } from "@/lib/employee-test-video";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
 
 import { fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
 import {
@@ -121,7 +123,34 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    return NextResponse.json({ test: testRow, questions });
+    if (questions.length === 0) {
+      const localQuestions = await localTestsDb.getQuestions(id);
+      if (localQuestions.length > 0) {
+        questions = localQuestions;
+        try {
+          await syncQuestionsToSupabase(localQuestions);
+        } catch (syncErr) {
+          console.warn("Failed to sync missing test questions to Supabase:", syncErr);
+        }
+      }
+    }
+
+    if (questions.length === 0) {
+      return NextResponse.json(
+        { error: "This assessment has no questions assigned yet. Please contact your administrator." },
+        { status: 400 }
+      );
+    }
+
+    const has_recording = await employeeTestVideoExists(id);
+    return NextResponse.json({
+      test: {
+        ...testRow,
+        topic_title: formatTopicTitleForDisplay(testRow.topic_title),
+      },
+      questions,
+      has_recording,
+    });
   } catch (e) {
     console.error("GET /employee/tests/[id] error:", e);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

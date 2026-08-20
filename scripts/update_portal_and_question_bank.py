@@ -2,8 +2,7 @@
 Update Employee Portal mapping from resources spreadsheet, then assign questions from QB-new.xlsx.
 
 Step 1: Merge employee records into Resource_Question_Mapping.xlsx
-Step 2: Build Question Bank from QB-new.xlsx and assign 25 questions per employee product
-        using product-specific random / stratified sampling rules.
+Step 2: Assign 25 questions per employee product from QB-new.xlsx using product-specific rules.
 """
 from __future__ import annotations
 
@@ -21,7 +20,6 @@ from openpyxl import Workbook
 from qb_new_parser import (
     QUESTIONS_PER_EMPLOYEE,
     assign_display_questions,
-    mcq_to_export_rows,
     parse_qb_new_xlsx,
     resolve_qb_product_key,
 )
@@ -32,7 +30,6 @@ ROOT = Path(__file__).resolve().parents[1]
 RESOURCES_FILE = ROOT / "resources less than 3.5 rating - latest.xlsx"
 QB_FILE = ROOT / "QB-new.xlsx"
 MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
-QUESTION_BANK_FILE = ROOT / "Question Bank-20th July '26.xlsx"
 LOG_FILE = ROOT / "uploads" / "portal_qb_update_log.json"
 
 ASSIGNED_COLS = [f"Assigned Question {i}" for i in range(1, QUESTIONS_PER_EMPLOYEE + 1)]
@@ -165,21 +162,6 @@ def get_question_pool(emp_product: str, pools: dict) -> tuple[list, str | None]:
     return [], f"Product '{emp_product}' not found in {QB_FILE.name}."
 
 
-def write_question_bank(mcq_records) -> int:
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Question Bank"
-    ws.append(["Domain", "Product", "Category", "Question", "Option", "Correct"])
-
-    rows_written = 0
-    for row in mcq_to_export_rows(mcq_records):
-        ws.append(row)
-        rows_written += 1
-
-    wb.save(QUESTION_BANK_FILE)
-    return rows_written
-
-
 def write_mapping(rows: list[dict]) -> None:
     wb = Workbook()
     ws = wb.active
@@ -231,7 +213,7 @@ def main() -> int:
         "resources_file": RESOURCES_FILE.name,
         "qb_file": QB_FILE.name,
         "portal_updated": 0,
-        "qb_records_written": 0,
+        "qb_record_count": 0,
         "question_assignments_updated": 0,
         "skipped": [],
         "validation_issues": [],
@@ -280,11 +262,10 @@ def main() -> int:
     log["portal_updated"] = portal_updated
     log["skipped"].extend(skipped_portal)
 
-    print("=== Step 2: Question Bank + assignments (QB-new.xlsx) ===")
+    print("=== Step 2: Question assignments (QB-new.xlsx) ===")
     pools, mcq_records = parse_qb_new_xlsx(QB_FILE)
-    qb_rows = write_question_bank(mcq_records)
-    log["qb_records_written"] = qb_rows
-    print(f"Wrote {qb_rows} option rows to {QUESTION_BANK_FILE.name}.")
+    log["qb_record_count"] = len(mcq_records)
+    print(f"Parsed {len(mcq_records)} unique MCQs from {QB_FILE.name}.")
     print(f"QB products: {', '.join(f'{k}({len(v)})' for k, v in sorted(pools.items()))}")
 
     assignments_updated = 0
@@ -326,7 +307,7 @@ def main() -> int:
 
     print("\n=== SUMMARY ===")
     print(f"Employee Portal records updated: {portal_updated}")
-    print(f"Question Bank option rows written: {qb_rows}")
+    print(f"QB-new unique MCQs parsed: {log['qb_record_count']}")
     print(f"Question assignments updated: {assignments_updated}")
     print(f"Skipped / failed records: {len(log['skipped'])}")
     if log["skipped"]:

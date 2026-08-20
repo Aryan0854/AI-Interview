@@ -112,3 +112,34 @@ export function matchesPortalTestStatusFilter(
   if (filter === "all") return true;
   return status === filter;
 }
+
+export function portalScorePercent(
+  score: number | null | undefined,
+  scoreMax = 25
+): number {
+  if (score === null || score === undefined || scoreMax <= 0) return 0;
+  return Math.round((score / scoreMax) * 100);
+}
+
+/** Score color: 85%+ green, 50–84% yellow, below 50% red. */
+export function portalScoreColorClass(percent: number): string {
+  if (percent >= 85) return "text-emerald-600 dark:text-emerald-400";
+  if (percent >= 50) return "text-amber-500";
+  return "text-rose-500";
+}
+
+/** Excel font color (ARGB) matching portalScoreColorClass thresholds. */
+export function portalScoreExcelFontArgb(percent: number): string {
+  if (percent >= 85) return "FF059669";
+  if (percent >= 50) return "FFD97706";
+  return "FFE11D48";
+}
+
+export function formatPortalScore(
+  score: number | null | undefined,
+  scoreMax = 25
+): string {
+  if (score === null || score === undefined) return "—";
+  const pct = portalScorePercent(score, scoreMax);
+  return `${score}/${scoreMax} (${pct}%)`;
+}

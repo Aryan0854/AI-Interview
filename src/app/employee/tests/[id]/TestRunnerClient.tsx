@@ -2,44 +2,27 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { ResultsView, ConfirmModal } from "@/components/test-view";
-import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw, HelpCircle,
+import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw,
   Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Test, TestQuestion } from "@/types/learning";
 import { useEmployeeProctoring, isFullscreenActive } from "@/hooks/useEmployeeProctoring";
 import type { EmployeeProctoringState } from "@/lib/employee-proctoring";
+import { EMPLOYEE_PROCTOR_MAX_VIOLATIONS } from "@/lib/employee-proctoring";
+import {
+  createMediaRecorder,
+  flushRecorderAndStop,
+  uploadProctoringBlob,
+  uploadProctoringProgress,
+} from "@/lib/proctoring-recorder-client";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIME_LIMIT_SECONDS = 1800;
-
-function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
-  if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
-  // Prefer VP8 — more compatible than VP9 for Chrome/Edge playback after download.
-  const mimeTypes = [
-    "video/webm;codecs=vp8",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
-    "video/webm;codecs=vp9",
-  ];
-  for (const type of mimeTypes) {
-    if (MediaRecorder.isTypeSupported?.(type)) {
-      return new MediaRecorder(stream, {
-        mimeType: type,
-        videoBitsPerSecond: 600_000,
-      });
-    }
-  }
-  try {
-    return new MediaRecorder(stream, { videoBitsPerSecond: 600_000 });
-  } catch {
-    return null;
-  }
-}
 
 function durationToLabel(d: number): string {
   const m = Math.floor(d / 60);
@@ -83,24 +66,6 @@ function DifficultyBadge({ d }: { d: string }) {
   return <span className={`text-[10px] px-2.5 py-1 rounded-full border ${cls} font-bold uppercase tracking-wider`}>{d}</span>;
 }
 
-// ── Finish button — disabled until all questions answered ───────────────
-
-function ConfettiButton({ quizDone, onClick }: { quizDone: boolean; onClick?: () => void }) {
-  if (!quizDone) {
-    return (
-      <Button disabled className="gap-1 bg-indigo-100 text-indigo-300 cursor-not-allowed" title="Finish test">
-        <HelpCircle className="w-4 h-4" /> Finish
-      </Button>
-    );
-  }
-
-  return (
-    <Button onClick={onClick} className="gap-1 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-md shadow-emerald-500/25">
-      <CheckCircle2 className="w-4 h-4" /> Finish
-    </Button>
-  );
-}
-
 // =====================================================================
 // CLIENT SUB-COMPONENT
 // =====================================================================
@@ -109,7 +74,8 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const router = useRouter();
 
   // ── state ──────────────────────────────────────────────────────
-  type Phase = "loading" | "ready" | "running" | "retake-confirm" | "submitted" | "error";
+  type Phase = "loading" | "ready" | "running" | "submitting" | "retake-confirm" | "submitted" | "error";
+  type VideoUploadState = "pending" | "uploading" | "done" | "failed";
 
   const [phase,       setPhase]       = useState<Phase>("loading");
   const [err,         setErr]         = useState<string | null>(null);
@@ -121,6 +87,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const [timeLeft,    setTimeLeft]    = useState<number | null>(null);
   const [msg,         setMsg]         = useState<string | null>(null);
   const [submitted,   setSubmitted]   = useState<{ correct: number; total: number; accuracy_pct: number; ai_analysis?: string; topic_title: string } | null>(null);
+  const [videoUploadState, setVideoUploadState] = useState<VideoUploadState>("pending");
 
   const savedRef     = useRef(false);
   const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -138,6 +105,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStartRef = useRef<number | null>(null);
   const intentionalRecorderStopRef = useRef(false);
+  const lastProgressUploadRef = useRef(0);
 
   useEffect(() => {
     setToken(window.localStorage.getItem("employee_token") ?? "");
@@ -194,7 +162,15 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           },
         });
         if (!r.ok) {
-          throw new Error("Failed to load test");
+          const errBody = await r.text();
+          let message = "Failed to load test";
+          try {
+            const parsed = JSON.parse(errBody);
+            message = parsed.error ?? message;
+          } catch {
+            if (errBody?.trim()) message = errBody;
+          }
+          throw new Error(message);
         }
         const { test: testData, questions: questionsData } = await r.json();
         if (cancelled) return;
@@ -217,6 +193,23 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           const lastIdx = Math.max(...Object.keys(saved).map(Number), 0) + 1;
           setCurrentIdx(Math.min(lastIdx, (questionsData ?? []).length - 1));
         }
+
+        if (testData.status === "completed") {
+          const total = testData.total_questions ?? questionsData?.length ?? 25;
+          const correct = testData.score_correct ?? 0;
+          const accuracy =
+            testData.score_percent ??
+            (total > 0 ? Math.round((correct / total) * 100) : 0);
+          setSubmitted({
+            correct,
+            total,
+            accuracy_pct: accuracy,
+            topic_title: testData.topic_title ?? "",
+          });
+          setPhase("submitted");
+          return;
+        }
+
         setPhase("ready");
       } catch (e: any) {
         if (!cancelled) {
@@ -267,7 +260,9 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   }, [phase, timeLeft]);
 
   const answersRef = useRef(answers);
-  const handleSubmitRef = useRef<(ans: Record<number, number>) => void>(() => {});
+  const handleSubmitRef = useRef<
+    (ans: Record<number, number>, opts?: { autoSubmitted?: boolean; timeExpired?: boolean }) => void
+  >(() => {});
 
   useEffect(() => {
     answersRef.current = answers;
@@ -276,7 +271,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   // Auto-submit when time expires
   useEffect(() => {
     if (timeLeft === 0 && phase === "running") {
-      handleSubmitRef.current(answersRef.current);
+      handleSubmitRef.current(answersRef.current, { autoSubmitted: true, timeExpired: true });
     }
   }, [timeLeft, phase]);
 
@@ -360,134 +355,60 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     intentionalRecorderStopRef,
   });
 
-  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
+  const uploadProgressSnapshot = useCallback(async () => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === "inactive") {
-      console.warn("Proctoring recorder was not active at submit time.");
-      return false;
-    }
+    if (!token || !recorder || recordingChunksRef.current.length === 0) return;
+    const now = Date.now();
+    if (now - lastProgressUploadRef.current < 45000) return;
+    lastProgressUploadRef.current = now;
+    const blob = new Blob(recordingChunksRef.current, {
+      type: recorder.mimeType || "video/webm",
+    });
+    await uploadProctoringProgress(testId, token, blob).catch(() => {});
+  }, [testId, token]);
 
-    const uploadBlob = async (blob: Blob): Promise<boolean> => {
-      if (blob.size <= 0 || !token) return false;
-
-      const authHeaders = {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      };
-
-      // Production: direct upload to Supabase Storage (serverless-safe)
-      try {
-        const urlRes = await fetch(`/api/employee/tests/${testId}/video-upload-url`, {
-          method: "POST",
-          headers: authHeaders,
-        });
-        if (urlRes.ok) {
-          const { signedUrl } = await urlRes.json();
-          if (signedUrl) {
-            const putRes = await fetch(signedUrl, {
-              method: "PUT",
-              headers: { "Content-Type": blob.type || "video/webm" },
-              body: blob,
-            });
-            if (putRes.ok) {
-              const completeRes = await fetch(`/api/employee/tests/${testId}/upload_video`, {
-                method: "POST",
-                headers: authHeaders,
-                body: JSON.stringify({ complete: true }),
-              });
-              if (completeRes.ok) {
-                const payload = await completeRes.json().catch(() => ({}));
-                return Boolean(payload?.success);
-              }
-            }
-          }
-        }
-      } catch (directErr) {
-        console.warn("Direct Supabase video upload failed, trying chunk fallback:", directErr);
-      }
-
-      // Fallback: chunked server upload (local dev only)
-      const CHUNK_SIZE = 2 * 1024 * 1024;
-      const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
-
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const slice = blob.slice(
-          chunkIndex * CHUNK_SIZE,
-          Math.min(blob.size, (chunkIndex + 1) * CHUNK_SIZE)
-        );
-        const formData = new FormData();
-        formData.append("chunkIndex", String(chunkIndex));
-        formData.append("totalChunks", String(totalChunks));
-        formData.append(
-          "chunk",
-          new File([slice], `${testId}-chunk-${chunkIndex}.webm`, {
-            type: blob.type || "video/webm",
-          })
-        );
-
-        const res = await fetch(`/api/employee/tests/${testId}/upload_video/chunk`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-
-        if (!res.ok) {
-          console.warn("Video chunk upload failed:", await res.text().catch(() => ""));
-          return false;
-        }
-
-        const payload = await res.json().catch(() => ({}));
-        if (payload?.complete && payload?.success) {
-          return true;
-        }
-      }
-
-      return false;
-    };
-
-    return await new Promise<boolean>((resolve) => {
-      recorder.onstop = async () => {
-        try {
-          // Prefer a single contiguous WebM from all chunks (must include first init segment).
-          const blob = new Blob(recordingChunksRef.current, {
-            type: recorder.mimeType || "video/webm;codecs=vp8",
-          });
-          if (blob.size <= 0) {
-            console.warn("Proctoring recording blob is empty.");
-            resolve(false);
-            return;
-          }
-
-          let ok = await uploadBlob(blob);
-          if (!ok) {
-            await new Promise((r) => setTimeout(r, 800));
-            ok = await uploadBlob(blob);
-          }
-          resolve(ok);
-        } catch (err) {
-          console.warn("Failed to upload proctoring video:", err);
-          resolve(false);
-        }
-      };
-
+  const finalizeRecordingBlob = useCallback(async (): Promise<Blob | null> => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
       intentionalRecorderStopRef.current = true;
       try {
-        if (recorder.state === "recording") {
-          recorder.requestData();
-        }
+        await flushRecorderAndStop(recorder);
       } catch {
-        // ignore
+        /* use whatever chunks we have */
       }
-      // Stop after a short tick so the final requestData chunk is flushed first.
-      setTimeout(() => {
-        try {
-          if (recorder.state !== "inactive") recorder.stop();
-        } catch {
-          resolve(false);
-        }
-      }, 120);
+    }
+    if (recordingChunksRef.current.length === 0) return null;
+    return new Blob(recordingChunksRef.current, {
+      type: recorder?.mimeType || "video/webm",
     });
-  }, [testId, token]);
+  }, []);
+
+  const uploadRecordingBlob = useCallback(
+    async (blob: Blob): Promise<boolean> => {
+      if (blob.size <= 0) return false;
+      let ok = await uploadProctoringBlob(testId, token, blob);
+      if (!ok) {
+        await new Promise((r) => setTimeout(r, 1000));
+        ok = await uploadProctoringBlob(testId, token, blob);
+      }
+      return ok;
+    },
+    [testId, token]
+  );
+
+  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
+    try {
+      const blob = await finalizeRecordingBlob();
+      if (!blob || blob.size <= 0) {
+        console.warn("Proctoring recording blob is empty at submit time.");
+        return false;
+      }
+      return uploadRecordingBlob(blob);
+    } catch (err) {
+      console.warn("Failed to upload proctoring video:", err);
+      return false;
+    }
+  }, [finalizeRecordingBlob, uploadRecordingBlob]);
 
   const handleStartTest = async () => {
     // Camera permission UI must finish before fullscreen can activate reliably.
@@ -507,6 +428,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         recordingChunksRef.current = [];
         recorder.ondataavailable = (event) => {
           if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
+          void uploadProgressSnapshot();
         };
         // Collect periodic chunks, but always keep every chunk from t=0 so the EBML header is present.
         recorder.start(2000);
@@ -525,6 +447,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     }
 
     // If starting fresh (pending), update status and started_at in backend
+    const limit = test?.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS;
     if (test && test.status === "pending") {
       const startTime = new Date().toISOString();
       try {
@@ -542,7 +465,25 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       } catch (err) {
         console.warn("Failed to update test start time in database:", err);
       }
-      setTimeLeft(test.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS);
+      setTimeLeft(limit);
+    } else if (test && test.status === "in_progress") {
+      const remaining = timeLeft ?? limit;
+      if (remaining <= 0) {
+        const startTime = new Date().toISOString();
+        try {
+          await fetch(`/api/employee/tests/${testId}`, {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ started_at: startTime }),
+          });
+        } catch (err) {
+          console.warn("Failed to refresh test timer in database:", err);
+        }
+        setTimeLeft(limit);
+      }
     }
 
     setPhase("running");
@@ -554,21 +495,29 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const hasPrevious = currentIdx > 0;
   const hasNext     = currentIdx < (questions?.length ?? 0) - 1;
 
-  async function handleSubmit(ans: Record<number, number>, opts?: { autoSubmitted?: boolean }) {
+  async function handleSubmit(
+    ans: Record<number, number>,
+    opts?: { autoSubmitted?: boolean; timeExpired?: boolean }
+  ) {
     if (submittingRef.current) return;
+    const answerEntries = Object.entries(ans);
+    const isAuto = opts?.autoSubmitted === true || opts?.timeExpired === true;
+    if (answerEntries.length === 0 && !isAuto) {
+      setErr("Please answer at least one question before submitting.");
+      return;
+    }
     submittingRef.current = true;
-    setMsg("Submitting…");
+    setPhase("submitting");
+    setMsg(null);
     try {
-      await stopRecordingAndUpload();
-      if (camStream) {
-        camStream.getTracks().forEach((track) => track.stop());
-      }
-
-      const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
+      const responseList = answerEntries.map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,
         selected_index: selected,
         time_seconds: 0,
       }));
+
+      // Stop recorder first so the final WebM blob is complete before upload.
+      const recordingBlob = await finalizeRecordingBlob();
 
       const r = await fetch(`/api/employee/tests/${testId}/submit`, {
         method: "POST",
@@ -578,16 +527,39 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         },
         body: JSON.stringify({
           answers: responseList,
-          autoSubmitted: opts?.autoSubmitted === true || warningCount >= 3,
+          autoSubmitted: isAuto || warningCount >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS,
         }),
       });
 
       if (!r.ok) {
         const errorText = await r.text();
-        throw new Error(errorText || "Submit failed");
+        let message = "Submit failed";
+        try {
+          const parsed = JSON.parse(errorText);
+          message = parsed.error ?? message;
+        } catch {
+          if (errorText?.trim()) message = errorText;
+        }
+        throw new Error(message);
       }
 
       const res = await r.json();
+      if (res.alreadyCompleted) {
+        setSubmitted({
+          correct: res.correct ?? 0,
+          total: res.total ?? questions?.length ?? 25,
+          accuracy_pct: res.accuracy ?? 0,
+          topic_title: (test as any)?.topic_title ?? "",
+        });
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+        setPhase("submitted");
+        setMsg(null);
+        setVideoUploadState("done");
+        submittingRef.current = false;
+        return;
+      }
       setSubmitted({
         correct: res.correct,
         total: res.total,
@@ -599,6 +571,16 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         document.exitFullscreen().catch(() => {});
       }
       setPhase("submitted");
+      setMsg(null);
+      setVideoUploadState("uploading");
+
+      const uploaded = recordingBlob
+        ? await uploadRecordingBlob(recordingBlob)
+        : await stopRecordingAndUpload();
+      if (camStream) {
+        camStream.getTracks().forEach((track) => track.stop());
+      }
+      setVideoUploadState(uploaded ? "done" : "failed");
     } catch (e: any) {
       submittingRef.current = false;
       setErr(e.message ?? "Submit failed"); setPhase("error");
@@ -621,7 +603,29 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const answeredCount  = Object.keys(answers).length;
   const allAnswered    = questions ? answeredCount >= questions.length : false;
 
-  if (!currentQ) {
+  // ── phase: loading ─────────────────────────────────────────────
+  if (phase === "loading") {
+    return (
+      <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
+        <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
+        <p className="font-medium">Preparing your test…</p>
+      </div>
+    );
+  }
+
+  if ((phase === "ready" || phase === "running") && (!questions || questions.length === 0)) {
+    return (
+      <div className="py-16 mx-auto max-w-md text-center space-y-6">
+        <XCircle className="w-10 h-10 text-red-500 mx-auto" />
+        <p className="text-red-600 font-medium">
+          No questions are available for this assessment. Please contact your administrator.
+        </p>
+        <Button onClick={() => router.push("/employee/dashboard")}>Back to Dashboard</Button>
+      </div>
+    );
+  }
+
+  if (!currentQ && phase === "running") {
     return (
       <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
         <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
@@ -630,9 +634,29 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     );
   }
 
+  // ── phase: submitting ───────────────────────────────────────────
+  if (phase === "submitting") {
+    return (
+      <div className="fixed inset-0 z-[300] flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm px-6">
+        <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
+        <h2 className="text-lg font-bold text-foreground">Submitting your assessment</h2>
+        <p className="text-sm text-muted-foreground mt-2 text-center max-w-sm">
+          Saving your answers… Please do not close or refresh this page.
+        </p>
+      </div>
+    );
+  }
+
   // ── phase: submitted ────────────────────────────────────────────
   if (phase === "submitted" && submitted) {
-    return <ResultsView result={submitted} onRetake={() => { setPhase("retake-confirm"); setSubmitted(null); setAnswers({}); setCurrentIdx(0); }} onGoDashboard={() => window.location.href = "/employee/dashboard"} />;
+    return (
+      <ResultsView
+        result={submitted}
+        videoUploadState={videoUploadState}
+        onRetake={() => { setPhase("retake-confirm"); setSubmitted(null); setAnswers({}); setCurrentIdx(0); setVideoUploadState("pending"); }}
+        onGoDashboard={() => window.location.href = "/employee/dashboard"}
+      />
+    );
   }
 
   // ── phase: retake confirm ───────────────────────────────────────
@@ -709,7 +733,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
             </li>
             <li>Tab switch, minimize, refresh, copy/paste, and DevTools are blocked.</li>
             <li>Session may be video-recorded when camera access is granted.</li>
-            <li>5 strikes auto-submits your assessment.</li>
+            <li>{EMPLOYEE_PROCTOR_MAX_VIOLATIONS} strikes auto-submits your assessment.</li>
           </ul>
         </div>
 
@@ -721,16 +745,6 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           {test?.status === "in_progress" ? "Resume Assessment" : "Start Assessment"}{" "}
           <ArrowRight className="w-4 h-4" />
         </Button>
-      </div>
-    );
-  }
-
-  // ── phase: loading ─────────────────────────────────────────────
-  if (phase === "loading") {
-    return (
-      <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
-        <p className="font-medium">Preparing your test…</p>
       </div>
     );
   }
@@ -763,10 +777,16 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           variant="outline"
           size="sm"
           className={`gap-1.5 rounded-lg border ${allAnswered ? "border-indigo-500 dark:border-indigo-700 text-primary bg-indigo-50 dark:bg-slate-900 font-semibold" : "border-border text-muted-foreground hover:bg-secondary"}`}
-          disabled={!allAnswered}
+          disabled={!allAnswered || submittingRef.current}
           onClick={() => handleSubmit(answers)}
         >
-          {allAnswered ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          {submittingRef.current ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : allAnswered ? (
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          ) : (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          )}
           Submit
         </Button>
       </header>
@@ -875,18 +895,18 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           })}
         </div>
 
-        {/* Next / Finish */}
+        {/* Next — submit is only via the header button */}
         {hasNext ? (
           <Button className="gap-1 bg-primary hover:from-indigo-700 hover:to-violet-700 text-white shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/30 transition-all rounded-xl" onClick={() => setCurrentIdx((i) => i + 1)}>
             Next <ArrowRight className="w-4 h-4" />
           </Button>
         ) : (
-          <ConfettiButton quizDone={allAnswered} onClick={() => handleSubmit(answers)} />
+          <div className="w-[88px]" aria-hidden="true" />
         )}
       </div>
 
-      {/* Message toast */}
-      {msg && (
+      {/* Message toast (non-submit notices) */}
+      {msg && phase === "running" && (
         <div className="text-center">
           <p className="text-sm text-slate-500 italic">{msg}</p>
         </div>
@@ -930,12 +950,12 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
               {showProctorWarning}
             </p>
             <div className="bg-red-50 dark:bg-red-950/20 py-2 px-4 rounded-xl text-xs font-bold text-red-700 dark:text-rose-400 inline-block">
-              Warning Strike: {warningCount} / 3
+              Warning Strike: {warningCount} / {EMPLOYEE_PROCTOR_MAX_VIOLATIONS}
             </div>
             <p className="text-xs text-slate-400">
-              Note: Reaching 5 strikes will automatically submit your assessment.
+              Note: Reaching {EMPLOYEE_PROCTOR_MAX_VIOLATIONS} strikes will automatically submit your assessment.
             </p>
-            {warningCount >= 3 ? (
+            {warningCount >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS ? (
               <Button
                 disabled
                 className="w-full bg-red-600 text-white rounded-xl py-3 font-semibold text-sm flex items-center justify-center gap-2"

@@ -1,0 +1,16 @@
+# Deploy this folder as a separate Render Web Service (Docker).
+# Dashboard: New → Web Service → root directory = faceproj → Docker
+services:
+  - type: web
+    name: ai-interview-facenet
+    runtime: docker
+    rootDir: faceproj
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: FACE_MATCH_API_KEY
+        sync: false
+      - key: FACE_MATCH_TOLERANCE
+        value: "0.85"
+      - key: PYTHONUNBUFFERED
+        value: "1"

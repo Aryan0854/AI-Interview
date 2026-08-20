@@ -4,7 +4,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import openpyxl
 import re
 
-wb_qb = openpyxl.load_workbook("Question Bank-20th July '26.xlsx", data_only=True)
+wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
 
 print("=== QUESTION BANK ANALYSIS ===")
 qb_pools = {} # normalized_prod_key -> list of questions

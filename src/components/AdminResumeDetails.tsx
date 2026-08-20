@@ -825,6 +825,18 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                             'face-none': 'Face Tracking Lost (No Face Detected)',
                             'face-multiple': 'Multiple Persons in Frame',
                             'voice-loud': 'Acoustic Violation (Loud voice/sound)',
+                            'Looking Down': 'Looking Down (>10s — possible phone)',
+                            'Looking Left': 'Looking Left',
+                            'Looking Right': 'Looking Right',
+                            'Looking Up': 'Looking Up',
+                            'Face Missing': 'Face Missing from Camera',
+                            'Multiple People Detected': 'Multiple People in Frame',
+                            'Multiple Voices Detected': 'Multiple Voices Detected',
+                            'Background Conversation': 'Background Conversation',
+                            'Excessive Noise': 'Excessive Noise',
+                            'Tab Switch Detected': 'Tab Switch Detected',
+                            'Fullscreen Exit Detected': 'Fullscreen Exit Detected',
+                            'Window Lost Focus': 'Window Lost Focus',
                           };
 
                           const typeColors: Record<string, string> = {
@@ -833,6 +845,11 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                             'face-none': 'border-amber-500 bg-amber-50 dark:bg-amber-950/30 text-amber-500',
                             'face-multiple': 'border-rose-500 bg-rose-50 dark:bg-rose-950/30 text-rose-500',
                             'voice-loud': 'border-indigo-500 bg-indigo-50 dark:bg-slate-950/30 text-primary',
+                            'Looking Down': 'border-amber-500 bg-amber-50 dark:bg-amber-950/30 text-amber-600',
+                            'Face Missing': 'border-amber-500 bg-amber-50 dark:bg-amber-950/30 text-amber-600',
+                            'Multiple People Detected': 'border-rose-500 bg-rose-50 dark:bg-rose-950/30 text-rose-600',
+                            'Multiple Voices Detected': 'border-rose-500 bg-rose-50 dark:bg-rose-950/30 text-rose-600',
+                            'Background Conversation': 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600',
                           };
 
                           const iconMap: Record<string, React.ReactNode> = {
@@ -841,6 +858,11 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                             'face-none': <UserMinus className="w-3.5 h-3.5" />,
                             'face-multiple': <Users className="w-3.5 h-3.5" />,
                             'voice-loud': <Volume2 className="w-3.5 h-3.5" />,
+                            'Looking Down': <UserMinus className="w-3.5 h-3.5" />,
+                            'Face Missing': <UserMinus className="w-3.5 h-3.5" />,
+                            'Multiple People Detected': <Users className="w-3.5 h-3.5" />,
+                            'Multiple Voices Detected': <Volume2 className="w-3.5 h-3.5" />,
+                            'Background Conversation': <Volume2 className="w-3.5 h-3.5" />,
                           };
 
                           const detailsMap: Record<string, string> = {
@@ -849,16 +871,28 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                             'face-none': 'Webcam feedback reported no active face detection for longer than 5 seconds. Indicates leaving seat or covering webcam.',
                             'face-multiple': 'Multiple faces detected in camera view. Indicates external assistance/collaboration.',
                             'voice-loud': 'Continuous vocal noise amplitude exceeded safe limits representing environmental verbal help.',
+                            'Looking Down': 'Candidate continuously looked down for 10+ seconds — often associated with phone use.',
+                            'Face Missing': 'No face was visible in the webcam for several seconds.',
+                            'Multiple People Detected': 'Two or more faces were visible in the camera frame.',
+                            'Multiple Voices Detected': 'Audio analysis indicated a possible second speaker or concurrent speech energy.',
+                            'Background Conversation': 'Sustained background talking was detected while the candidate was not actively answering.',
                           };
 
-                          const friendlyName = userFriendlyTypes[violation.type] || violation.type.toUpperCase();
+                          const friendlyName = userFriendlyTypes[violation.type] || violation.type;
                           const styleStr = typeColors[violation.type] || 'border-indigo-500 bg-indigo-50 text-primary';
-                          const detailsStr = detailsMap[violation.type] || 'Suspicious user pattern logged by the system.';
+                          const detailsStr =
+                            violation.description ||
+                            detailsMap[violation.type] ||
+                            'Suspicious user pattern logged by the system.';
                           const iconEl = iconMap[violation.type] || <ShieldAlert className="w-3.5 h-3.5" />;
 
                           const dateStr = violation.timestamp 
                             ? new Date(violation.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
                             : 'Unknown Time';
+                          const videoTs =
+                            typeof violation.videoTimestamp === 'number'
+                              ? `${Math.floor(violation.videoTimestamp / 60)}:${String(Math.floor(violation.videoTimestamp % 60)).padStart(2, '0')}`
+                              : null;
 
                           return (
                             <div key={idx} className="relative">
@@ -879,15 +913,23 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                                     <p className="text-xs text-muted-foreground font-bold flex items-center gap-1 mt-0.5">
                                       <Clock className="w-3.5 h-3.5" />
                                       Timestamp: {dateStr}
+                                      {videoTs ? ` · Video ${videoTs}` : ''}
+                                      {typeof violation.duration === 'number' ? ` · ${violation.duration}s` : ''}
                                     </p>
                                   </div>
                                   <Badge className={cn(
                                     "border-0 font-extrabold text-[10px] px-2 py-0.5",
-                                    violation.warningCount >= 3 
+                                    violation.silent
+                                      ? "bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                                      : violation.warningCount >= 3 
                                       ? "bg-red-100 dark:bg-rose-950/65 text-red-800 dark:text-red-400" 
                                       : "bg-amber-100 dark:bg-amber-955/65 text-amber-800 dark:text-amber-300"
                                   )}>
-                                    {violation.warningCount >= 3 ? "Warning 3/3 (Disqualified)" : `Warning ${violation.warningCount}/3`}
+                                    {violation.silent
+                                      ? "Admin audit event"
+                                      : violation.warningCount >= 3
+                                        ? "Warning 3/3 (Disqualified)"
+                                        : `Warning ${violation.warningCount}/3`}
                                   </Badge>
                                 </div>
                                 <p className="text-xs text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
@@ -980,6 +1022,26 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                                   {report.verification.confidence || 0}%
                                 </div>
                               </div>
+                              <div>
+                                <span className="block text-[10px] text-muted-foreground uppercase font-black tracking-wider">Selected ID Type</span>
+                                <div className="text-sm font-black mt-1 text-foreground">
+                                  {report.verification.selectedIdType || "—"}
+                                </div>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] text-muted-foreground uppercase font-black tracking-wider">Detected ID Type</span>
+                                <div className={cn(
+                                  "text-sm font-black mt-1",
+                                  report.verification.idTypeMatched === false ? "text-rose-500" : "text-foreground"
+                                )}>
+                                  {report.verification.detectedIdType || "—"}
+                                  {typeof report.verification.idTypeMatched === "boolean" && (
+                                    <span className="ml-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                      ({report.verification.idTypeMatched ? "match" : "mismatch"})
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </div>
 
@@ -987,6 +1049,16 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block text-left">Biometric Match Rationale</span>
                             <div className="p-4 rounded-2xl border border-border bg-indigo-50/15 dark:bg-slate-900/30 text-xs font-semibold leading-relaxed text-muted-foreground">
                               {report.verification.reason || "No detail provided by the matching engine."}
+                              {report.verification.failureCode ? (
+                                <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                  Failure code: {report.verification.failureCode}
+                                  {report.verification.engine ? ` · Engine: ${report.verification.engine}` : ""}
+                                </div>
+                              ) : report.verification.engine ? (
+                                <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                  Engine: {report.verification.engine}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
 

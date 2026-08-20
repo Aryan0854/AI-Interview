@@ -134,13 +134,22 @@ export async function POST(
     // Ensure session is registered / created
     await sessionService.createCandidateSession(email, id);
 
-    const isTech = !interviewConfig || interviewConfig.interviewType !== 'non-technical';
+    const interviewType = interviewConfig?.interviewType || "technical";
+    const assessmentLabel =
+      interviewType === "both"
+        ? "combined technical and non-technical"
+        : interviewType === "non-technical"
+          ? "non-technical"
+          : "technical";
     const origin = 'https://ai-interview-ahkoe7hof-aryan0854s-projects.vercel.app';
 
     const fullName = resume.parsed?.personal?.fullName || 'Candidate';
-    const subject = isTech
-      ? `Invitation to Technical Interview Assessment - ${fullName.toUpperCase()}`
-      : `Invitation to Interview Assessment - ${fullName.toUpperCase()}`;
+    const subject =
+      interviewType === "non-technical"
+        ? `Invitation to Interview Assessment - ${fullName.toUpperCase()}`
+        : interviewType === "both"
+          ? `Invitation to Technical & Behavioral Assessment - ${fullName.toUpperCase()}`
+          : `Invitation to Technical Interview Assessment - ${fullName.toUpperCase()}`;
 
     // Premium responsive HTML email template
     const htmlBody = `
@@ -154,7 +163,7 @@ export async function POST(
   <div style="color: #374151; font-size: 14px; line-height: 1.6; font-weight: 500; font-family: sans-serif;">
     <p>Dear <strong>${fullName}</strong>,</p>
     <p>Congratulations! Our HR team evaluated your profile against one of our open position's Job, and classified you as a <strong>Highly Suitable</strong> candidate.</p>
-    <p>We are excited to invite you to the next step of our recruitment process: a secure, voice-assisted ${isTech ? 'technical' : 'non-technical'} evaluation on our screening portal.</p>
+    <p>We are excited to invite you to the next step of our recruitment process: a secure, voice-assisted ${assessmentLabel} evaluation on our screening portal.</p>
     
     <div style="margin: 28px 0; text-align: center;">
       <a href="${origin}" target="_blank" style="display: inline-block; padding: 12px 32px; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 4px 10px rgba(79, 70, 229, 0.25);">Start Assessment</a>
@@ -165,7 +174,7 @@ export async function POST(
       <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #475569;">
         <li style="margin-bottom: 4px;">Go to: <a href="${origin}" style="color: #4f46e5; text-decoration: underline;">${origin}</a></li>
         <li style="margin-bottom: 4px;">Login email address: <strong>${email}</strong></li>
-        <li>You will have exactly <strong>one attempt</strong> to take the ${isTech ? 'technical' : 'non-technical'} evaluation. Please make sure you are in a quiet room with a working microphone.</li>
+        <li>You will have exactly <strong>one attempt</strong> to take the ${assessmentLabel} evaluation. Please make sure you are in a quiet room with a working microphone.</li>
       </ul>
     </div>
     
