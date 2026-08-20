@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { join } from 'path';
 import { readFile, writeFile } from 'fs/promises';
-import { refreshEmployees, EmployeeRecord } from '@/services/automation-service';
+import { EmployeeRecord } from '@/services/automation-service';
 import { supabase } from '@/lib/db';
 import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
@@ -80,13 +80,7 @@ export async function GET(request: NextRequest) {
       return parseList(raw);
     } catch (e: any) {
       if (e.code === "ENOENT") {
-        await refreshEmployees(activeJdId);
-        try {
-          const raw = await readFile(jsonPath, "utf8");
-          return parseList(raw);
-        } catch {
-          return [];
-        }
+        return [];
       }
       return [];
     }
@@ -137,51 +131,14 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  const mergeEmployeeRosters = (primary: EmployeeRecord[], secondary: EmployeeRecord[]) => {
-    const byId = new Map<string, EmployeeRecord>();
-    for (const emp of secondary) {
-      const key = String(emp.employee_id || "").trim().toUpperCase();
-      if (!key) continue;
-      byId.set(key, emp);
-    }
-    for (const emp of primary) {
-      const key = String(emp.employee_id || "").trim().toUpperCase();
-      if (!key) continue;
-      const prev = byId.get(key);
-      if (!prev) {
-        byId.set(key, emp);
-        continue;
-      }
-      const skills = (prev.skills && prev.skills.length >= (emp.skills || "").length)
-        ? prev.skills
-        : (emp.skills || prev.skills || "");
-      byId.set(key, {
-        ...prev,
-        ...emp,
-        skills,
-        product: emp.product || prev.product,
-        designation: emp.designation && emp.designation !== "employee" ? emp.designation : prev.designation,
-        matchingSkills: emp.matchingSkills?.length ? emp.matchingSkills : prev.matchingSkills,
-      });
-    }
-    return Array.from(byId.values());
-  };
-
   const [employeesFromFile, employeesFromDb, manifest] = await Promise.all([
     loadEmployeesFromFile(),
     loadEmployeesFromSupabase(),
     loadEmployeeTestManifest(),
   ]);
 
-  // Supabase roster is source of truth; persisted corp-pool JSON overlays skills.
-  let employees =
-    employeesFromDb.length > 0
-      ? mergeEmployeeRosters(employeesFromDb, employeesFromFile)
-      : employeesFromFile;
-
-  if (employeesFromDb.length === 0 && employeesFromFile.length === 0) {
-    console.warn("[employees] No employees from Supabase or local sources.");
-  }
+  // Corp Pool is screening-only. Employee Portal accounts/tests must never appear here.
+  let employees = employeesFromFile;
 
   // Query MCQ test results from Supabase (production source of truth),
   // with a hard timeout so a slow DB cannot block the portal indefinitely.

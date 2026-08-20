@@ -61,7 +61,9 @@ export async function POST(request: NextRequest) {
 
     let refreshResult: Record<string, unknown> = {};
     if (mapping.refresh === 'requirements') {
-      refreshResult = await refreshRequirements();
+      refreshResult = await refreshRequirements(
+        category === "br" ? { incomingBrFiles: [filename] } : undefined
+      );
     } else if (mapping.refresh === 'candidates') {
       refreshResult = await refreshCandidates(activeJdId);
     } else if (mapping.refresh === 'employees') {

@@ -46,7 +46,7 @@ function normalizeRecord(raw: any): { record: NamedAdminRecord; strippedPlaintex
     record: {
       hash: secretLooksValid(raw) ? raw.hash : hashed?.hash,
       salt: secretLooksValid(raw) ? raw.salt : hashed?.salt,
-      canViewEmployeePortal: raw?.canViewEmployeePortal === true,
+      canViewEmployeePortal: raw?.canViewEmployeePortal !== false,
       canChangePassword: raw?.canChangePassword !== false,
       canViewOrgScreeningData: raw?.canViewOrgScreeningData !== false,
     },

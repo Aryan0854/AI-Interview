@@ -12,6 +12,7 @@ import {
   listDocFiles,
   readDocFileBuffer,
   writeDocFile,
+  deleteDocFile,
 } from '@/lib/docs-storage';
 import { writePersistedJson } from '@/lib/runtime-data';
 import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
@@ -298,13 +299,17 @@ async function loadMasterBrWorkbook(): Promise<{ workbook: ExcelJS.Workbook; fil
   const workbook = new ExcelJS.Workbook();
   try {
     const buffer = await readDocFileBuffer("BR", filename);
+    if (!buffer?.length) throw new Error("Master BR workbook is empty");
     await workbook.xlsx.load(buffer as any);
-    if (workbook.worksheets.length === 0) {
-      return { workbook: await loadTemplateWorkbook(), filename: MASTER_BR_FILENAME };
+    const sheet = findMasterBrSheet(workbook);
+    if (!sheet || !readSheetHeaders(sheet).has(headerKey("Auto req ID"))) {
+      throw new Error("Master BR workbook is missing Auto req ID headers");
     }
     return { workbook, filename: MASTER_BR_FILENAME };
   } catch {
-    return { workbook: await loadTemplateWorkbook(), filename: MASTER_BR_FILENAME };
+    const template = await loadTemplateWorkbook();
+    await saveMasterBrWorkbook(template, MASTER_BR_FILENAME);
+    return { workbook: template, filename: MASTER_BR_FILENAME };
   }
 }
 
@@ -374,6 +379,8 @@ async function persistMasterRequirements(
   filename: string,
   localJds: any[]
 ): Promise<number> {
+  // BR/JD ingest only writes job_descriptions. Never delete employees, tests,
+  // test_questions, or test_attempts — Employee Portal data is independent.
   const merged = mergeBrRequirements(parseBrWorkbook(workbook, filename));
   const deleted = await loadDeletedRequirements();
   const upsertRows = merged.flatMap((row) => {
@@ -426,6 +433,34 @@ async function persistMasterRequirements(
       processed += chunk.length;
     }
   }
+
+  const keepIds = new Set(upsertRows.map((row) => row.id));
+  try {
+    const { data: existing } = await supabase.from("job_descriptions").select("id, file_name");
+    const staleIds = (existing || [])
+      .filter((row: any) => {
+        if (keepIds.has(row.id)) return false;
+        const name = String(row.file_name || "");
+        return /\.xlsx|\.xls/i.test(name) || /^\s*\d+\s*BR\s*\|/i.test(name);
+      })
+      .map((row: any) => String(row.id));
+    for (let i = 0; i < staleIds.length; i += 50) {
+      const chunk = staleIds.slice(i, i + 50);
+      const { error } = await supabase.from("job_descriptions").delete().in("id", chunk);
+      if (error) {
+        await writeLog("requirements", "PRUNE_BR_ERROR", "failed", `Error pruning BR batch ${i}: ${error.message}`);
+      }
+    }
+    for (let i = localJds.length - 1; i >= 0; i--) {
+      const jd = localJds[i];
+      const name = String(jd.fileName || "");
+      const fromExcel = /\.xlsx|\.xls/i.test(name) || /^\s*\d+\s*BR\s*\|/i.test(name);
+      if (fromExcel && !keepIds.has(jd.id)) localJds.splice(i, 1);
+    }
+  } catch (err: any) {
+    await writeLog("requirements", "PRUNE_BR_ERROR", "failed", `Failed pruning stale BR rows: ${err.message}`);
+  }
+
   return processed;
 }
 
@@ -558,11 +593,14 @@ function mergeBrRequirements(rows: ParsedBrRequirement[]): ParsedBrRequirement[]
  * JD uploads are converted and appended into the master BR workbook.
  * Other BR workbooks are merged into that same master file, then saved to storage + DB.
  */
-export async function refreshRequirements(): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
+export async function refreshRequirements(opts?: {
+  incomingBrFiles?: string[];
+}): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
   await ensureDocsStorage();
 
   const brFiles = await listDocFiles("BR");
   const jdFiles = await listDocFiles("JD");
+  const incomingBr = new Set((opts?.incomingBrFiles || []).map((f) => f.toLowerCase()));
 
   let processedBRs = 0;
   let convertedJDs = 0;
@@ -587,6 +625,21 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
 
   for (const file of xlsxBrFiles) {
     if (file.toLowerCase() === masterFilename.toLowerCase()) continue;
+    const isIncoming = incomingBr.has(file.toLowerCase());
+    if (!isIncoming) {
+      try {
+        await deleteDocFile("BR", file);
+        await writeLog(
+          "requirements",
+          "REMOVED_EXTRA_BR_FILE",
+          "success",
+          `Removed leftover BR file ${file}; master is ${masterFilename}`
+        );
+      } catch (err: any) {
+        await writeLog("requirements", "REMOVE_EXTRA_BR_FAILED", "failed", `Failed removing ${file}: ${err.message}`);
+      }
+      continue;
+    }
     try {
       const source = new ExcelJS.Workbook();
       const buffer = await readDocFileBuffer("BR", file);
@@ -600,6 +653,7 @@ export async function refreshRequirements(): Promise<{ success: boolean; process
           `Appended ${added} BR row(s) from ${file} into ${masterFilename}`
         );
       }
+      await deleteDocFile("BR", file);
     } catch (err: any) {
       await writeLog("requirements", "PARSE_BR_FILE_FAILED", "failed", `Failed parsing BR file ${file}: ${err.message}`);
     }
@@ -1057,6 +1111,18 @@ export async function refreshEmployees(activeJdId?: string): Promise<{ success: 
   }
   
   loaded = uniqueParsedEmployees.length;
+
+  // Never wipe the employee roster / portal accounts just because Corp Pool is empty.
+  // Employee Portal tests live on employees + tests tables and must stay independent of BR ingest.
+  if (uniqueParsedEmployees.length === 0) {
+    await writeLog(
+      "employee",
+      "SKIP_EMPTY_CORP_POOL",
+      "success",
+      "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
+    );
+    return { success: true, loaded: 0 };
+  }
 
   // Read existing employees from JSON to preserve shortlisted state
   let finalEmployees = uniqueParsedEmployees;

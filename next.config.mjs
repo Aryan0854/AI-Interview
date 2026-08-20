@@ -17,7 +17,12 @@ const nextConfig = {
   output: "standalone",
   serverExternalPackages: ['sqlite3', 'pdf-parse', 'mammoth', 'pdfjs-dist'],
   outputFileTracingIncludes: {
-    '/api/**/*': ['./node_modules/pdf-parse/**/*'],
+    '/api/**/*': [
+      './node_modules/pdf-parse/**/*',
+      './src/data/employee-accounts.json',
+      './src/data/employee_test_manifest.json',
+      './src/data/portal-question-answers.json',
+    ],
   },
   turbopack: {
     root: __dirname,

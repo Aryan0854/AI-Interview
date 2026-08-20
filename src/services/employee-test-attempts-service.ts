@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/db";
 import { allowLocalTestsFallback, useSupabasePrimary } from "@/lib/db-mode";
 import { formatAttemptResult, formatPortalTimestamp } from "@/lib/portal-format";
+import { portalExcelAnswersToAttempts } from "@/lib/portal-excel-answers";
 import { localTestsDb, type LocalTestAttempt, type LocalTestQuestion } from "@/services/local-tests-db";
 
 export interface AdminTestQuestionAttempt {
@@ -99,14 +100,20 @@ export async function getTestQuestionAttemptsBatch(
 
   if (useSupabasePrimary()) {
     try {
-      const [{ data: questionRows, error: qErr }, { data: attemptRows, error: aErr }] =
+      const [{ data: questionRows, error: qErr }, { data: attemptRows, error: aErr }, { data: testRows, error: tErr }] =
         await Promise.all([
           supabase.from("test_questions").select("*").in("test_id", uniqueIds),
           supabase.from("test_attempts").select("*").in("test_id", uniqueIds),
+          supabase.from("tests").select("id, employee_code").in("id", uniqueIds),
         ]);
 
       if (qErr) throw qErr;
       if (aErr) throw aErr;
+      if (tErr) throw tErr;
+
+      const testCodeById = new Map(
+        (testRows ?? []).map((row) => [String(row.id), String(row.employee_code || "")])
+      );
 
       const questionsByTest = new Map<string, LocalTestQuestion[]>();
       for (const row of questionRows ?? []) {
@@ -147,7 +154,15 @@ export async function getTestQuestionAttemptsBatch(
       for (const testId of uniqueIds) {
         const questions = questionsByTest.get(testId) ?? [];
         const attempts = attemptsByTest.get(testId) ?? [];
-        result.set(testId, buildAttemptsForTest(questions, attempts));
+        const built = buildAttemptsForTest(questions, attempts);
+        const answered = built.filter((q) => q.selected_option_text).length;
+        if (answered === 0) {
+          const code = testCodeById.get(testId);
+          const excel = code ? portalExcelAnswersToAttempts(code) : [];
+          result.set(testId, excel.length > 0 ? excel : built);
+        } else {
+          result.set(testId, built);
+        }
       }
       return result;
     } catch (err) {
@@ -160,7 +175,15 @@ export async function getTestQuestionAttemptsBatch(
   for (const testId of uniqueIds) {
     const questions = db.test_questions.filter((q) => q.test_id === testId);
     const attempts = db.test_attempts.filter((a) => a.test_id === testId);
-    result.set(testId, buildAttemptsForTest(questions, attempts));
+    const built = buildAttemptsForTest(questions, attempts);
+    const answered = built.filter((q) => q.selected_option_text).length;
+    if (answered === 0) {
+      const test = db.tests.find((t) => t.id === testId);
+      const excel = test?.employee_id ? portalExcelAnswersToAttempts(test.employee_id) : [];
+      result.set(testId, excel.length > 0 ? excel : built);
+    } else {
+      result.set(testId, built);
+    }
   }
   return result;
 }

@@ -316,28 +316,39 @@ function mergePortalProfileRow(rosterRow: PortalProfileRow, mappingRow?: PortalP
   };
 }
 
-export async function loadEmployeeTestManifest(): Promise<Record<string, string>> {
+async function readManifestJson(): Promise<
+  Array<{ employee_id: string; test_id: string; question_count?: number; product?: string; full_name?: string }>
+> {
+  const parse = (raw: string | null) => {
+    if (!raw) return [];
+    try {
+      const manifest = JSON.parse(raw);
+      return Array.isArray(manifest) ? manifest : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const persisted = parse(await readPersistedJson("employee_test_manifest.json"));
+  if (persisted.length > 0) return persisted;
+
   try {
-    const raw = await readPersistedJson("employee_test_manifest.json");
-    if (!raw) return {};
-    const manifest = JSON.parse(raw) as Array<{ employee_id: string; test_id: string; question_count?: number }>;
-    return Object.fromEntries(manifest.map((item) => [String(item.employee_id).trim(), item.test_id]));
+    const raw = await readFile(join(process.cwd(), "src", "data", "employee_test_manifest.json"), "utf8");
+    return parse(raw);
   } catch {
-    return {};
+    return [];
   }
+}
+
+export async function loadEmployeeTestManifest(): Promise<Record<string, string>> {
+  const manifest = await readManifestJson();
+  return Object.fromEntries(manifest.map((item) => [String(item.employee_id).trim(), item.test_id]));
 }
 
 async function loadManifestRows(): Promise<
   Array<{ employee_id: string; test_id: string; question_count?: number; product?: string; full_name?: string }>
 > {
-  try {
-    const raw = await readPersistedJson("employee_test_manifest.json");
-    if (!raw) return [];
-    const manifest = JSON.parse(raw);
-    return Array.isArray(manifest) ? manifest : [];
-  } catch {
-    return [];
-  }
+  return readManifestJson();
 }
 
 export function mergeResourcePortalData(
@@ -396,7 +407,7 @@ export function mergeResourcePortalData(
     return {
       ...row,
       product: formatProductDisplayName(row.product),
-      test_id: assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
+      test_id: primaryCompleted?.id ?? assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
       test_status: derivePortalTestStatus({
         assignedQuestionCount: row.assigned_question_count || (manifestTestId ? 25 : 0),
         testId: assignedTest?.id ?? primaryTest?.id ?? manifestTestId,

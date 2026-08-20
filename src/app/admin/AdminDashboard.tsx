@@ -67,16 +67,6 @@ import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
 import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT } from "@/lib/skill-match";
 import { clearAdminAccessFlags, readAdminAccessFlags, storeAdminAccessFlags } from "@/lib/admin-accounts";
 
-function formatSyncAge(date: Date): string {
-  const sec = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (sec < 5) return "just now";
-  if (sec < 60) return `${sec}s ago`;
-  return `${Math.floor(sec / 60)}m ago`;
-}
-
-const AUTO_SYNC_EMPLOYEES_MS = 15_000;
-const AUTO_SYNC_OTHER_MS = 30_000;
-
 function portalEmployeeName(account: { full_name?: string | null; employee_id?: string | null }): string {
   const name = account.full_name?.trim();
   if (name) return name;
@@ -578,10 +568,6 @@ export default function AdminDashboard() {
   const jdFileInputRef = useRef<HTMLInputElement>(null);
   const isInitialLoadRef = useRef(true);
   const [dashboardReady, setDashboardReady] = useState(false);
-  const [lastEmployeeSyncAt, setLastEmployeeSyncAt] = useState<Date | null>(null);
-  const [syncAgeTick, setSyncAgeTick] = useState(0);
-  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
-  const employeeSyncInFlightRef = useRef(false);
   const emailsFetchSeqRef = useRef(0);
   const deletedEmailIdsRef = useRef<Set<string>>(new Set());
   const [isJdDragging, setIsJdDragging] = useState(false);
@@ -1092,14 +1078,8 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadEmployees = useCallback(async (opts?: { silent?: boolean; fresh?: boolean }) => {
-    if (employeeSyncInFlightRef.current && opts?.silent) return;
-    employeeSyncInFlightRef.current = true;
-    if (!opts?.silent) {
-      setIsEmployeesLoading(true);
-    } else {
-      setIsBackgroundSyncing(true);
-    }
+  const loadEmployees = useCallback(async (opts?: { fresh?: boolean }) => {
+    setIsEmployeesLoading(true);
     try {
       const sendJdId = selectedJdId && !selectedJdId.includes("@") ? selectedJdId : "all";
       const freshQuery = opts?.fresh ? "&fresh=1" : "";
@@ -1121,16 +1101,10 @@ export default function AdminDashboard() {
       if (Array.isArray(data.resourcePortalEmployees)) {
         setResourcePortalEmployees(data.resourcePortalEmployees);
       }
-      setLastEmployeeSyncAt(new Date());
     } catch (err) {
       console.error("Failed to fetch employees", err);
     } finally {
-      employeeSyncInFlightRef.current = false;
-      if (!opts?.silent) {
-        setIsEmployeesLoading(false);
-      } else {
-        setIsBackgroundSyncing(false);
-      }
+      setIsEmployeesLoading(false);
     }
   }, [selectedJdId]);
 
@@ -1142,51 +1116,6 @@ export default function AdminDashboard() {
       loadEmployees();
     }
   }, [authenticated, adminEmail, selectedJdId, loadEmployees]);
-
-  // Live auto-sync: poll Supabase-backed portal data without manual refresh
-  useEffect(() => {
-    if (!authenticated || !adminEmail || !dashboardReady) return;
-
-    const syncEmployees = () => {
-      if (document.hidden) return;
-      void loadEmployees({ silent: true, fresh: true });
-    };
-
-    syncEmployees();
-    const employeeInterval = window.setInterval(syncEmployees, AUTO_SYNC_EMPLOYEES_MS);
-
-    let otherInterval: number | undefined;
-    if (activeTab === "suitable" || activeTab === "unsuitable") {
-      const syncResumes = () => {
-        if (!document.hidden) void loadResumes(undefined, { silent: true });
-      };
-      syncResumes();
-      otherInterval = window.setInterval(syncResumes, AUTO_SYNC_OTHER_MS);
-    } else if (activeTab === "outbox") {
-      const syncOutbox = () => {
-        if (!document.hidden) void loadEmails(undefined, { silent: true });
-      };
-      syncOutbox();
-      otherInterval = window.setInterval(syncOutbox, AUTO_SYNC_OTHER_MS);
-    }
-
-    const onVisible = () => {
-      if (!document.hidden) syncEmployees();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      window.clearInterval(employeeInterval);
-      if (otherInterval) window.clearInterval(otherInterval);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [authenticated, adminEmail, dashboardReady, activeTab, loadEmployees]);
-
-  useEffect(() => {
-    if (!lastEmployeeSyncAt) return;
-    const id = window.setInterval(() => setSyncAgeTick((t) => t + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [lastEmployeeSyncAt]);
 
   const loadAssignedQuestions = async (employeeId: string) => {
     let shouldFetch = true;
@@ -1264,10 +1193,12 @@ export default function AdminDashboard() {
           loadAssignedQuestions(account.employee_id);
         }
         if (
-          account.test_id &&
           account.test_status === "completed"
         ) {
-          loadTestAttemptDetails(account.test_id);
+          const completedTestId =
+            account.tests?.find((test: any) => test.status === "completed")?.id ??
+            account.test_id;
+          if (completedTestId) loadTestAttemptDetails(completedTestId);
         }
       }
     }
@@ -2023,13 +1954,6 @@ export default function AdminDashboard() {
       }
       if (Array.isArray(employeesData.resourcePortalEmployees)) {
         setResourcePortalEmployees(employeesData.resourcePortalEmployees);
-      }
-      if (
-        Array.isArray(employeesData.employees) ||
-        Array.isArray(employeesData.resourcePortalEmployees) ||
-        Array.isArray(employeesData.allTestResults)
-      ) {
-        setLastEmployeeSyncAt(new Date());
       }
 
       if (Array.isArray(resetLogsData.logs)) {
@@ -3932,26 +3856,6 @@ export default function AdminDashboard() {
               Upload job descriptions, screen candidate CVs in bulk, override suitability categories, and reset test sessions.
             </p>
           </div>
-          {dashboardReady && (
-            <div
-              className="flex items-center gap-2 rounded-xl border border-border bg-card/80 px-3 py-2 text-[11px] font-bold text-muted-foreground shadow-sm"
-              data-sync-tick={syncAgeTick}
-            >
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  isBackgroundSyncing ? "bg-amber-400 animate-pulse" : "bg-emerald-500"
-                }`}
-                aria-hidden
-              />
-              <span>
-                {isBackgroundSyncing
-                  ? "Syncing live data…"
-                  : lastEmployeeSyncAt
-                    ? `Live · updated ${formatSyncAge(lastEmployeeSyncAt)}`
-                    : "Live sync on"}
-              </span>
-            </div>
-          )}
         </div>
 
         {/* Global Action Toasts */}
@@ -5462,8 +5366,13 @@ export default function AdminDashboard() {
                                                   );
                                                 }
 
-                                                if (account.test_status === "completed" && account.test_id) {
-                                                  const attemptData = testAttemptDetails[account.test_id];
+                                                if (account.test_status === "completed") {
+                                                  const completedTestId =
+                                                    account.tests?.find((test: any) => test.status === "completed")?.id ??
+                                                    account.test_id;
+                                                  const attemptData = completedTestId
+                                                    ? testAttemptDetails[completedTestId]
+                                                    : undefined;
                                                   if (attemptData?.loading) {
                                                     return (
                                                       <div className="flex items-center gap-2 text-[11px] text-slate-500 py-2">

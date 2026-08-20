@@ -123,12 +123,18 @@ export async function readDocFileBuffer(
   const cached = cachePath(category, filename);
 
   try {
-    if (fs.existsSync(localPath)) return await readFile(localPath);
+    if (fs.existsSync(localPath)) {
+      const localBuffer = await readFile(localPath);
+      if (localBuffer.length > 0) return localBuffer;
+    }
   } catch {
     // fall through
   }
   try {
-    if (fs.existsSync(cached)) return await readFile(cached);
+    if (fs.existsSync(cached)) {
+      const cachedBuffer = await readFile(cached);
+      if (cachedBuffer.length > 0) return cachedBuffer;
+    }
   } catch {
     // fall through
   }
