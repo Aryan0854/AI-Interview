@@ -486,3 +486,6 @@ Proprietary — Enterprise License
 - Check `src/lib/local-ai.ts` for heuristic algorithm details
 - View browser DevTools console for errors
 - Open a GitHub issue with a sanitised sample resume (redact PII)
+
+![1787047884508](image/README/1787047884508.png)
+![1787047920898](image/README/1787047920898.png)
