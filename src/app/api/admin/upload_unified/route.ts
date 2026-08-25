@@ -8,7 +8,10 @@ import {
   refreshRequirements, 
   refreshCandidates, 
   refreshEmployees, 
-  refreshInterviews 
+  refreshInterviews,
+  sanitizeCorpPoolFileName,
+  isCorpPoolRosterFileName,
+  excelLooksLikeCorpPoolRoster,
 } from '@/services/automation-service';
 
 export const runtime = 'nodejs';
@@ -29,10 +32,10 @@ const CATEGORY_MAP: Record<string, { docCategory?: DocCategory; refresh: string 
 function inferUploadCategory(filename: string, selected: string): string {
   const name = String(filename || "").toLowerCase();
   if (selected === "interview") return "interview";
-  if (name.endsWith(".csv")) {
-    if (selected === "br") return "br";
-    return "employee";
-  }
+  if (selected === "br") return "br";
+  if (selected === "jd") return "jd";
+  if (isCorpPoolRosterFileName(filename)) return "employee";
+  if (name.endsWith(".csv")) return "employee";
   return selected || "resume";
 }
 
@@ -54,14 +57,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    const filename = file.name;
-    const category = inferUploadCategory(filename, selectedCategory);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    let category = inferUploadCategory(file.name, selectedCategory);
+    if (
+      category !== "employee" &&
+      category !== "interview" &&
+      category !== "br" &&
+      category !== "jd" &&
+      /\.(xlsx|xls)$/i.test(file.name) &&
+      (await excelLooksLikeCorpPoolRoster(buffer))
+    ) {
+      category = "employee";
+    }
     const mapping = CATEGORY_MAP[category];
     if (!mapping) {
       return NextResponse.json({ error: "Invalid upload category" }, { status: 400 });
     }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const filename = mapping.docCategory === "Corp Pool"
+      ? sanitizeCorpPoolFileName(file.name)
+      : file.name;
 
     if (category === 'interview') {
       const csvPath = join(getUploadsRoot(), "candidate_interview_data.csv");

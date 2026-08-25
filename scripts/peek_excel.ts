@@ -3,7 +3,7 @@ import path from 'path';
 
 async function run() {
   try {
-    const qbPath = path.join(__dirname, '..', 'QB-new.xlsx');
+    const qbPath = path.join(__dirname, '..', 'excel', 'QB-new.xlsx');
     const qb = new ExcelJS.Workbook();
     await qb.xlsx.readFile(qbPath);
     console.log('QB-new.xlsx sheets:', qb.worksheets.map(ws => ws.name));

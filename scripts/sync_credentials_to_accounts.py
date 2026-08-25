@@ -11,7 +11,8 @@ import openpyxl
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parents[1]
-CREDENTIALS_FILE = ROOT / "Employee_User_Credentials.xlsx"
+EXCEL_DIR = ROOT / "excel"
+CREDENTIALS_FILE = EXCEL_DIR / "Employee_User_Credentials.xlsx"
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 
 

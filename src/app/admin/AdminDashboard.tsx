@@ -2097,13 +2097,20 @@ export default function AdminDashboard() {
     }
   };
 
+  const isCorpPoolRosterFileName = (filename: string) => {
+    const n = String(filename || "").toLowerCase().replace(/[_'`’]/g, " ");
+    if (!/\.(xlsx|xls|csv)$/i.test(n)) return false;
+    return n.includes("corp pool") || n.includes("active list") || n.includes("employee list");
+  };
+
   const inferUnifiedCategory = (file: File, selected: string) => {
     const name = file.name.toLowerCase();
-    if (name.endsWith(".csv")) {
-      if (selected === "br") return "br";
-      return "employee";
-    }
-    return selected === "interview" ? "employee" : selected;
+    if (selected === "interview") return "employee";
+    if (selected === "br") return "br";
+    if (selected === "jd") return "jd";
+    if (isCorpPoolRosterFileName(file.name)) return "employee";
+    if (name.endsWith(".csv")) return "employee";
+    return selected;
   };
 
   const ingestUnifiedFile = async (file: File) => {
@@ -2143,7 +2150,12 @@ export default function AdminDashboard() {
         }
         await loadLogs();
 
-        setActionSuccess(`Upload and automated ingestion of ${file.name} successful.`);
+        const loaded = Number(result.refreshResult?.loaded);
+        setActionSuccess(
+          usedCategory === "employee" && Number.isFinite(loaded)
+            ? `Corp Pool now has ${loaded} people.`
+            : `Upload and automated ingestion of ${file.name} successful.`
+        );
         setTimeout(() => setActionSuccess(null), 3000);
       } else {
         throw new Error(result.error || "Failed to process upload");
@@ -2471,13 +2483,21 @@ export default function AdminDashboard() {
     setActionError(null);
     try {
       const originalJd = jds.find((j) => j.id === id);
-      const response = await fetch(`/api/admin/jd?id=${id}`, {
+      const duplicateIds = Array.isArray((originalJd as { duplicateIds?: string[] } | undefined)?.duplicateIds)
+        ? (originalJd as { duplicateIds: string[] }).duplicateIds
+        : [];
+      const ids = Array.from(new Set([id, ...duplicateIds].filter(Boolean)));
+      const response = await fetch("/api/admin/jd", {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to delete Job Description");
 
-      if (originalJd) {
+      const fileName = String(originalJd?.fileName || "");
+      const permanentlyGone = /50656\s*BR|50657\s*BR/i.test(fileName);
+      if (originalJd && !permanentlyGone) {
         setUndoStack((prev) => [
           ...prev,
           {
@@ -3120,7 +3140,10 @@ export default function AdminDashboard() {
       setActionLoading("bulk-jds");
       setActionError(null);
       try {
-        const idsToDelete = [...selectedJdIds];
+        const idsToDelete = Array.from(new Set(selectedJdIds.flatMap((id) => {
+          const row = jds.find((j) => j.id === id) as { duplicateIds?: string[] } | undefined;
+          return [id, ...(Array.isArray(row?.duplicateIds) ? row.duplicateIds : [])];
+        }).filter(Boolean)));
         const response = await fetch("/api/admin/jd", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -5701,7 +5724,7 @@ export default function AdminDashboard() {
                                 <td colSpan={15} className="text-center py-12 text-slate-400">
                                   {resourcePortalEmployees.length === 0 ? (
                                     <span className="italic">
-                                      No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the project root.
+                                      No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the excel folder.
                                     </span>
                                   ) : (
                                     <div className="flex flex-col items-center gap-2 px-6">
@@ -6503,10 +6526,10 @@ export default function AdminDashboard() {
                   <Upload className="w-5 h-5 text-primary group-hover:scale-110 transition-transform duration-200" />
                   <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click or drop a file to upload</span>
                   <span className="text-[9px] text-slate-400 font-semibold leading-snug">
-                    {uploadCategory === 'resume' && "Resumes, or drop a CSV to send it straight to Corp Pool"}
+                    {uploadCategory === 'resume' && "Resumes, or drop a Corp Pool Excel/CSV to send it straight to Corp Pool"}
                     {uploadCategory === 'jd' && "Converts JD → BR row in BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'br' && "Appends BR rows into BR_RawData 3.xlsx & saves to backend"}
-                    {uploadCategory === 'employee' && "Adds Excel/CSV/PDF/DOCX or a ZIP of resumes to Corp Pool without removing existing ones"}
+                    {uploadCategory === 'employee' && "Excel/CSV lists and resumes are added to Corp Pool. Deleted employees never come back."}
                   </span>
                   <input
                     type="file"

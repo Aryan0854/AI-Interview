@@ -37,8 +37,9 @@ ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 PROFILES_FILE = ROOT / "src" / "data" / "resource_portal_profiles.json"
 MANIFEST_FILE = ROOT / "src" / "data" / "employee_test_manifest.json"
 LOCAL_TESTS_FILE = ROOT / "src" / "data" / "local_tests_db.json"
-MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
-QB_FILE = ROOT / "QB-new.xlsx"
+EXCEL_DIR = ROOT / "excel"
+MAPPING_FILE = EXCEL_DIR / "Resource_Question_Mapping.xlsx"
+QB_FILE = EXCEL_DIR / "QB-new.xlsx"
 
 
 def clean(val) -> str:

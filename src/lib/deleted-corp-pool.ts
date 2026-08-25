@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/db";
+import { supabaseServer } from "@/lib/db";
 
 const SETTINGS_KEY = "deleted_corp_pool";
 
@@ -26,7 +26,7 @@ function emptyDeleted(): DeletedCorpPool {
 export async function loadDeletedCorpPool(): Promise<DeletedCorpPool> {
   if (cache && Date.now() - cache.at < 4000) return cache.value;
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseServer
       .from("portal_settings")
       .select("value")
       .eq("key", SETTINGS_KEY)
@@ -47,10 +47,13 @@ export async function loadDeletedCorpPool(): Promise<DeletedCorpPool> {
 
 async function saveDeletedCorpPool(value: DeletedCorpPool): Promise<void> {
   cache = { at: Date.now(), value };
-  const { error } = await supabase.from("portal_settings").upsert({
-    key: SETTINGS_KEY,
-    value,
-  });
+  const { error } = await supabaseServer.from("portal_settings").upsert(
+    {
+      key: SETTINGS_KEY,
+      value,
+    },
+    { onConflict: "key" }
+  );
   if (error) {
     console.warn("Failed to save deleted Corp Pool list:", error.message);
   }

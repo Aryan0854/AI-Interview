@@ -3,9 +3,9 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-const INPUT_EXCEL = path.join(process.cwd(), 'Resource details less tahn 3.5 rating.xlsx');
-const OUTPUT_EXCEL = path.join(process.cwd(), 'Employee_User_Credentials.xlsx');
-const OUTPUT_CSV = path.join(process.cwd(), 'Employee_User_Credentials.csv');
+const INPUT_EXCEL = path.join(process.cwd(), 'excel', 'Resource details less tahn 3.5 rating.xlsx');
+const OUTPUT_EXCEL = path.join(process.cwd(), 'excel', 'Employee_User_Credentials.xlsx');
+const OUTPUT_CSV = path.join(process.cwd(), 'excel', 'Employee_User_Credentials.csv');
 const ACCOUNTS_JSON = path.join(process.cwd(), 'src', 'data', 'employee-accounts.json');
 
 function hashPassword(password: string) {

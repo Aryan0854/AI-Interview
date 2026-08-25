@@ -11,7 +11,8 @@ from pathlib import Path
 import openpyxl
 
 ROOT = Path(__file__).resolve().parents[1]
-CREDENTIALS_FILE = ROOT / "Employee_User_Credentials.xlsx"
+EXCEL_DIR = ROOT / "excel"
+CREDENTIALS_FILE = EXCEL_DIR / "Employee_User_Credentials.xlsx"
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 LOGIN_URL = "http://localhost:3000/api/employee/auth/login"
 

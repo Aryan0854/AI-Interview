@@ -14,7 +14,7 @@ build
 # Production
 dist
 
-# Generated / legacy question bank exports (use QB-new.xlsx only)
+# Generated / legacy question bank exports (use excel/QB-new.xlsx only)
 Question Bank*.xlsx
 __pycache__/
 *.pyc

@@ -3,13 +3,15 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import openpyxl
 import re
+from pathlib import Path
 
 def clean_str(val):
     if val is None:
         return ""
     return str(val).strip()
 
-wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
+EXCEL_DIR = Path(__file__).resolve().parents[1] / "excel"
+wb_qb = openpyxl.load_workbook(EXCEL_DIR / "QB-new.xlsx", data_only=True)
 
 # Build question pools per product
 # QB Product names in QB sheets:

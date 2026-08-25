@@ -33,14 +33,8 @@ async function ensureAppDataBucket() {
 export async function readPersistedJson(filename: string): Promise<string | null> {
   const runtimePath = join(getRuntimeUploadsRoot(), filename);
 
-  try {
-    if (fs.existsSync(runtimePath)) {
-      return await readFile(runtimePath, "utf8");
-    }
-  } catch {
-    // fall through
-  }
-
+  // In Azure/Vercel, a stale local cache (including an empty wipe leftover) must
+  // not hide the cloud copy that other instances wrote.
   if (isCloudDeployment()) {
     try {
       await ensureAppDataBucket();
@@ -54,6 +48,14 @@ export async function readPersistedJson(filename: string): Promise<string | null
     } catch (e) {
       console.warn(`Supabase read failed for ${filename}:`, e);
     }
+  }
+
+  try {
+    if (fs.existsSync(runtimePath)) {
+      return await readFile(runtimePath, "utf8");
+    }
+  } catch {
+    // fall through
   }
 
   try {

@@ -4,6 +4,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import openpyxl
 import re
 import random
+from pathlib import Path
 
 def clean_str(val):
     if val is None:
@@ -18,7 +19,7 @@ def normalize_token(s):
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
-wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
+wb_qb = openpyxl.load_workbook(Path(__file__).resolve().parents[1] / "excel" / "QB-new.xlsx", data_only=True)
 
 # Question pools by canonical product key
 # Recognized product keys:

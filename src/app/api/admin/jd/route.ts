@@ -12,10 +12,13 @@ import { auditLogService } from '@/services/audit-log-service';
 import { writeLog } from '@/lib/structured-logger';
 import { allowLocalDataFallback } from '@/lib/db-mode';
 import {
+  extractBrId,
+  isPermanentlyRemovedBrId,
   isRequirementDeleted,
   loadDeletedRequirements,
   markRequirementsDeleted,
 } from '@/lib/deleted-requirements';
+import { eraseDeletedRequirementsFromMaster } from '@/services/automation-service';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -82,6 +85,17 @@ export async function GET(request: NextRequest) {
       
     if (!dbError && dbJds) {
       const deleted = await loadDeletedRequirements();
+      const hidden = dbJds.filter((row: any) => isRequirementDeleted(deleted, {
+        id: row.id,
+        fileName: row.file_name,
+        jdText: row.jd_text,
+      }));
+      if (hidden.length) {
+        await supabase
+          .from("job_descriptions")
+          .delete()
+          .in("id", hidden.map((row: any) => row.id).filter(Boolean));
+      }
       jds = dbJds
         .filter((row: any) => !isRequirementDeleted(deleted, {
           id: row.id,
@@ -258,6 +272,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Job description text cannot be empty" }, { status: 400 });
     }
 
+    if (isPermanentlyRemovedBrId(fileName) || isPermanentlyRemovedBrId(jdId)) {
+      return NextResponse.json(
+        { error: "This requirement was permanently removed and cannot be restored." },
+        { status: 409 }
+      );
+    }
+
     const id = jdId || crypto.randomUUID();
     const createdAt = new Date().toISOString();
 
@@ -353,20 +374,44 @@ export async function DELETE(request: NextRequest) {
 
     const { data: existingRows } = await supabase
       .from("job_descriptions")
-      .select("id, file_name, jd_text")
-      .in("id", ids);
+      .select("id, file_name, jd_text");
+    const selected = new Set(ids.map((value) => value.toLowerCase()));
+    const matchingRows = (existingRows || []).filter((row: any) => {
+      if (selected.has(String(row.id || "").toLowerCase())) return true;
+      const brId = extractBrId(row.file_name);
+      return Boolean(
+        brId &&
+          (existingRows || []).some(
+            (picked: any) =>
+              selected.has(String(picked.id || "").toLowerCase()) &&
+              extractBrId(picked.file_name) === brId
+          )
+      );
+    });
     await markRequirementsDeleted(
-      (existingRows || []).map((row: any) => ({
+      matchingRows.map((row: any) => ({
         id: row.id,
+        brId: extractBrId(row.file_name),
         fileName: row.file_name,
         jdText: row.jd_text,
       }))
     );
 
+    const extraBrIds = matchingRows
+      .map((row: any) => extractBrId(row.file_name))
+      .filter(Boolean);
+    await eraseDeletedRequirementsFromMaster(extraBrIds);
+
+    const idsToDelete = Array.from(
+      new Set([
+        ...ids,
+        ...matchingRows.map((row: any) => String(row.id || "")).filter(Boolean),
+      ])
+    );
     const { error: dbError } = await supabase
       .from('job_descriptions')
       .delete()
-      .in('id', ids);
+      .in('id', idsToDelete);
 
     if (dbError) {
       console.warn("Failed to delete JD from Supabase:", dbError.message);
@@ -376,7 +421,7 @@ export async function DELETE(request: NextRequest) {
       let jds = await ensureJdsJson();
       const deleted = await loadDeletedRequirements();
       jds = jds.filter((j: any) =>
-        !ids.includes(j.id) &&
+        !idsToDelete.includes(j.id) &&
         !isRequirementDeleted(deleted, { id: j.id, fileName: j.fileName, jdText: j.jdText })
       );
       await writeFile(getJdsJsonPath(), JSON.stringify(jds, null, 2), "utf8");

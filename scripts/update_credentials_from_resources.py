@@ -12,8 +12,9 @@ from openpyxl.styles import Font
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parents[1]
-CREDENTIALS_FILE = ROOT / "Employee_User_Credentials.xlsx"
-RESOURCES_FILE = ROOT / "resources less than 3.5 rating - latest.xlsx"
+EXCEL_DIR = ROOT / "excel"
+CREDENTIALS_FILE = EXCEL_DIR / "Employee_User_Credentials.xlsx"
+RESOURCES_FILE = EXCEL_DIR / "resources less than 3.5 rating - latest.xlsx"
 
 HEADER = [
     "Emp ID",

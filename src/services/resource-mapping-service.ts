@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { join } from "path";
+import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { derivePortalTestStatus, type PortalTestStatus } from "@/lib/portal-test-status";
 import { formatProductDisplayName, formatTopicTitleForDisplay } from "@/lib/product-display-name";
@@ -51,8 +52,14 @@ export interface ResourcePortalEmployee {
   }>;
 }
 
-const MAPPING_FILE = join(process.cwd(), "Resource_Question_Mapping.xlsx");
-const CREDENTIALS_FILE = join(process.cwd(), "Employee_User_Credentials.xlsx");
+function resolveExcelFile(name: string): string {
+  const nested = join(process.cwd(), "excel", name);
+  if (existsSync(nested)) return nested;
+  return join(process.cwd(), name);
+}
+
+const MAPPING_FILE = resolveExcelFile("Resource_Question_Mapping.xlsx");
+const CREDENTIALS_FILE = resolveExcelFile("Employee_User_Credentials.xlsx");
 const ACCOUNTS_FILE = join(process.cwd(), "src", "data", "employee-accounts.json");
 const PROFILES_JSON_FILE = join(process.cwd(), "src", "data", "resource_portal_profiles.json");
 

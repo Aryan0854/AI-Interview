@@ -8,11 +8,11 @@ import { writeLog } from '@/lib/structured-logger';
 import { localTestsDb, LocalTestsDb } from '@/services/local-tests-db';
 import { allowLocalTestsFallback } from '@/lib/db-mode';
 import { formatProductDisplayName, formatTopicTitleForDisplay } from '@/lib/product-display-name';
-import { readPersistedJson, writePersistedJson } from '@/lib/runtime-data';
+import { readPersistedJson, writePersistedJson, getRuntimeUploadsRoot } from '@/lib/runtime-data';
 import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
 import { cacheStore } from '@/lib/cache-store';
 import { deleteDocFile, listDocFiles } from '@/lib/docs-storage';
-import { markCorpPoolDeleted } from '@/lib/deleted-corp-pool';
+import { isCorpPoolDeleted, loadDeletedCorpPool, markCorpPoolDeleted } from '@/lib/deleted-corp-pool';
 import {
   buildResourcePortalEmployees,
   loadEmployeeTestManifest,
@@ -20,9 +20,7 @@ import {
 import { normalizeProctoring } from '@/lib/employee-proctoring';
 import { listEmployeeTestRecordingIds } from '@/lib/employee-test-video';
 
-const getUploadsRoot = () => {
-  return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-};
+const getUploadsRoot = () => getRuntimeUploadsRoot();
 
 const getEmployeesJsonPath = () => {
   return join(getUploadsRoot(), "employees.json");
@@ -140,7 +138,10 @@ export async function GET(request: NextRequest) {
   ]);
 
   // Corp Pool is screening-only. Employee Portal accounts/tests must never appear here.
-  let employees = employeesFromFile;
+  const deletedPool = await loadDeletedCorpPool();
+  let employees = employeesFromFile.filter(
+    (emp) => !isCorpPoolDeleted(deletedPool, { id: emp.employee_id, file: emp.source_file })
+  );
 
   // Query MCQ test results from Supabase (production source of truth),
   // with a hard timeout so a slow DB cannot block the portal indefinitely.
@@ -700,8 +701,11 @@ export async function DELETE(request: NextRequest) {
     });
     cacheStore.invalidate("employees");
 
+    const personalResume = (file: string) => /\.(pdf|docx|doc|txt)$/i.test(file);
     const filesToDelete = new Set(
-      removed.map((emp) => String(emp.source_file || "").trim()).filter(Boolean)
+      removed
+        .map((emp) => String(emp.source_file || "").trim())
+        .filter((file) => file && personalResume(file))
     );
     try {
       const storedFiles = await listDocFiles("Corp Pool");
@@ -709,7 +713,9 @@ export async function DELETE(request: NextRequest) {
         const empId = String(emp.employee_id || "").trim().toLowerCase();
         if (!empId || /^cv[a-f0-9]{8,}$/i.test(empId)) continue;
         for (const file of storedFiles) {
-          if (file.toLowerCase().includes(empId)) filesToDelete.add(file);
+          if (personalResume(file) && file.toLowerCase().includes(empId)) {
+            filesToDelete.add(file);
+          }
         }
       }
     } catch (listErr) {
@@ -717,7 +723,6 @@ export async function DELETE(request: NextRequest) {
     }
 
     for (const file of filesToDelete) {
-      if (/\.zip$/i.test(file)) continue;
       try {
         await deleteDocFile("Corp Pool", file);
       } catch (fileErr) {
@@ -725,10 +730,7 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
-    await markCorpPoolDeleted(
-      removed.map((emp) => emp.employee_id),
-      Array.from(filesToDelete)
-    );
+    await markCorpPoolDeleted(removed.map((emp) => emp.employee_id));
 
     await writeLog(
       "employee",

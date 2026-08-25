@@ -2,8 +2,10 @@ import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import openpyxl
+from pathlib import Path
 
-wb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
+EXCEL_DIR = Path(__file__).resolve().parents[1] / "excel"
+wb = openpyxl.load_workbook(EXCEL_DIR / "QB-new.xlsx", data_only=True)
 
 for sheetname in wb.sheetnames:
     sheet = wb[sheetname]

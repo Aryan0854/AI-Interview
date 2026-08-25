@@ -15,8 +15,9 @@ import openpyxl
 from qb_new_parser import build_alias_bank
 
 ROOT = Path(__file__).resolve().parents[1]
-MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
-QB_SOURCE_FILE = ROOT / "QB-new.xlsx"
+EXCEL_DIR = ROOT / "excel"
+MAPPING_FILE = EXCEL_DIR / "Resource_Question_Mapping.xlsx"
+QB_SOURCE_FILE = EXCEL_DIR / "QB-new.xlsx"
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 LOCAL_TESTS_FILE = ROOT / "uploads" / "local_tests_db.json"
 MANIFEST_FILE = ROOT / "uploads" / "employee_test_manifest.json"

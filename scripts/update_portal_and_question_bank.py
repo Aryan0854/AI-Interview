@@ -27,9 +27,10 @@ from qb_new_parser import (
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parents[1]
-RESOURCES_FILE = ROOT / "resources less than 3.5 rating - latest.xlsx"
-QB_FILE = ROOT / "QB-new.xlsx"
-MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
+EXCEL_DIR = ROOT / "excel"
+RESOURCES_FILE = EXCEL_DIR / "resources less than 3.5 rating - latest.xlsx"
+QB_FILE = EXCEL_DIR / "QB-new.xlsx"
+MAPPING_FILE = EXCEL_DIR / "Resource_Question_Mapping.xlsx"
 LOG_FILE = ROOT / "uploads" / "portal_qb_update_log.json"
 
 ASSIGNED_COLS = [f"Assigned Question {i}" for i in range(1, QUESTIONS_PER_EMPLOYEE + 1)]

@@ -3,8 +3,10 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 import openpyxl
 import re
+from pathlib import Path
 
-wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
+EXCEL_DIR = Path(__file__).resolve().parents[1] / "excel"
+wb_qb = openpyxl.load_workbook(EXCEL_DIR / "QB-new.xlsx", data_only=True)
 
 print("=== QUESTION BANK ANALYSIS ===")
 qb_pools = {} # normalized_prod_key -> list of questions

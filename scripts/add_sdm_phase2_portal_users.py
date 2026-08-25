@@ -2,14 +2,14 @@
 Add SDM Phase 2 employees to the Employee Portal pool and write a shareable
 login/password workbook.
 
-Source: Phase 2 SDM product details.xlsx
+Source: excel/Phase 2 SDM product details.xlsx
 Outputs:
-  - Employee_User_Credentials.xlsx (append)
-  - Resource_Question_Mapping.xlsx (append/update)
+  - excel/Employee_User_Credentials.xlsx (append)
+  - excel/Resource_Question_Mapping.xlsx (append/update)
   - src/data/employee-accounts.json
   - src/data/resource_portal_profiles.json
   - local tests + manifest (uploads + src/data)
-  - SDM_Phase2_User_Credentials.xlsx (share with requester)
+  - excel/SDM_Phase2_User_Credentials.xlsx (share with requester)
 """
 from __future__ import annotations
 
@@ -47,13 +47,14 @@ from reassign_test_questions_supabase import (  # noqa: E402
     reassign_one,
 )
 
-SOURCE_FILE = ROOT / "Phase 2 SDM product details.xlsx"
-CREDENTIALS_FILE = ROOT / "Employee_User_Credentials.xlsx"
-SHARE_FILE = ROOT / "SDM_Phase2_User_Credentials.xlsx"
-MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
+EXCEL_DIR = ROOT / "excel"
+SOURCE_FILE = EXCEL_DIR / "Phase 2 SDM product details.xlsx"
+CREDENTIALS_FILE = EXCEL_DIR / "Employee_User_Credentials.xlsx"
+SHARE_FILE = EXCEL_DIR / "SDM_Phase2_User_Credentials.xlsx"
+MAPPING_FILE = EXCEL_DIR / "Resource_Question_Mapping.xlsx"
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
 PROFILES_FILE = ROOT / "src" / "data" / "resource_portal_profiles.json"
-QB_FILE = ROOT / "QB-new.xlsx"
+QB_FILE = EXCEL_DIR / "QB-new.xlsx"
 
 SUBJECT_ID = "resource-subject"
 SUBJECT_TITLE = "Product Assessment"

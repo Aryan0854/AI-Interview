@@ -15,15 +15,21 @@ import {
   writeDocFile,
   deleteDocFile,
 } from '@/lib/docs-storage';
-import { writePersistedJson, readPersistedJson } from '@/lib/runtime-data';
+import { writePersistedJson, readPersistedJson, getRuntimeUploadsRoot } from '@/lib/runtime-data';
 import { cacheStore } from '@/lib/cache-store';
 import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
-import { isRequirementDeleted, loadDeletedRequirements, unmarkRequirementsDeleted } from '@/lib/deleted-requirements';
-import { isCorpPoolDeleted, loadDeletedCorpPool, unmarkCorpPoolDeleted } from '@/lib/deleted-corp-pool';
+import {
+  extractBrId,
+  isPermanentlyRemovedBrId,
+  isRequirementDeleted,
+  loadDeletedRequirements,
+  markRequirementsDeleted,
+  PERMANENTLY_REMOVED_BR_IDS,
+  unmarkRequirementsDeleted,
+} from '@/lib/deleted-requirements';
+import { isCorpPoolDeleted, loadDeletedCorpPool } from '@/lib/deleted-corp-pool';
 
-const getUploadsRoot = () => {
-  return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
-};
+const getUploadsRoot = () => getRuntimeUploadsRoot();
 
 const MASTER_BR_FILENAME = "BR_RawData 3.xlsx";
 const JD_DOCUMENT_EXT = /\.(docx|doc|pdf|txt)$/i;
@@ -352,7 +358,7 @@ function corpPoolProfileFromCv(file: string, text: string): {
   };
 }
 
-function sanitizeCorpPoolFileName(name: string): string {
+export function sanitizeCorpPoolFileName(name: string): string {
   const base = String(name || "").split(/[/\\]/).pop() || "resume";
   const cleaned = base
     .replace(/\u00a0/g, " ")
@@ -364,6 +370,77 @@ function sanitizeCorpPoolFileName(name: string): string {
   if (fallback.length <= 180) return fallback;
   const ext = fallback.includes(".") ? fallback.slice(fallback.lastIndexOf(".")) : "";
   return `${fallback.slice(0, Math.max(1, 180 - ext.length))}${ext}`;
+}
+
+export function isCorpPoolRosterFileName(name: string): boolean {
+  const n = String(name || "")
+    .toLowerCase()
+    .replace(/[_'`’]/g, " ");
+  if (!/\.(xlsx|xls|csv)$/i.test(n)) return false;
+  return n.includes("corp pool") || n.includes("active list") || n.includes("employee list");
+}
+
+function looksLikeCorpPoolHeaderCell(value: unknown): boolean {
+  const str = cellText(value).toLowerCase();
+  return (
+    str.includes("emp no") ||
+    str.includes("emp_no") ||
+    str.includes("employee id") ||
+    str.includes("emp id") ||
+    str.includes("emp name") ||
+    str.includes("employee name")
+  );
+}
+
+export async function excelLooksLikeCorpPoolRoster(buffer: Buffer): Promise<boolean> {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as any);
+    for (const ws of workbook.worksheets) {
+      const last = Math.min(10, Math.max(ws.rowCount || 0, ws.actualRowCount || 0, 1));
+      for (let n = 1; n <= last; n++) {
+        const values = ((ws.getRow(n).values as any[]) || []);
+        if (values.some(looksLikeCorpPoolHeaderCell)) return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+export async function reclaimMisfiledCorpPoolRosters(): Promise<string[]> {
+  await ensureDocsStorage();
+  const moved: string[] = [];
+  const resumeFiles = await listDocFiles("Resumes");
+  for (const file of resumeFiles) {
+    if (!isCorpPoolRosterFileName(file)) continue;
+    try {
+      const buffer = await readDocFileBuffer("Resumes", file);
+      const stored = sanitizeCorpPoolFileName(file);
+      await writeDocFile("Corp Pool", stored, buffer);
+      await deleteDocFile("Resumes", file);
+      moved.push(stored);
+      await writeLog(
+        "employee",
+        "RECLAIMED_CORP_POOL_ROSTER",
+        "success",
+        `Moved ${file} from Resumes to Corp Pool as ${stored}`
+      );
+    } catch (err: any) {
+      await writeLog(
+        "employee",
+        "RECLAIM_CORP_POOL_FAILED",
+        "failed",
+        `Could not move ${file} out of Resumes: ${err?.message || "unknown error"}`
+      );
+    }
+  }
+  return moved;
+}
+
+function corpPoolFileKey(name: string): string {
+  return sanitizeCorpPoolFileName(name).toLowerCase();
 }
 
 function uniqueCorpPoolFileName(name: string, used: Set<string>): string {
@@ -593,15 +670,114 @@ async function saveMasterBrWorkbook(workbook: ExcelJS.Workbook, filename = MASTE
   await writeDocFile("BR", filename, buffer);
 }
 
+function deletedBrIdSet(deleted: { brIds: string[] }): Set<string> {
+  return new Set((deleted.brIds || []).map((id) => String(id || "").toLowerCase()).filter(Boolean));
+}
+
+function removeBrIdsFromWorkbook(workbook: ExcelJS.Workbook, brIds: Set<string>): number {
+  const wanted = new Set(Array.from(brIds).map((id) => id.toLowerCase()));
+  let removed = 0;
+  for (const sheet of workbook.worksheets) {
+    if (!isBrDataSheet(sheet.name)) continue;
+    const idCol = headerCol(readSheetHeaders(sheet), "auto req id", "br id", "id");
+    if (!idCol) continue;
+    const rowNumbers: number[] = [];
+    sheet.eachRow((row, n) => {
+      if (n === 1) return;
+      const autoReqId = normalizeBrId(cellText(row.getCell(idCol).value));
+      if (autoReqId && wanted.has(autoReqId.toLowerCase())) rowNumbers.push(n);
+    });
+    rowNumbers.sort((a, b) => b - a);
+    for (const n of rowNumbers) {
+      sheet.spliceRows(n, 1);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+async function deleteJobDescriptionsMatchingDeleted(
+  deleted: Awaited<ReturnType<typeof loadDeletedRequirements>>
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("job_descriptions")
+    .select("id, file_name, jd_text");
+  if (error || !data) return [];
+
+  const ids = new Set<string>();
+  for (const row of data) {
+    if (
+      isRequirementDeleted(deleted, {
+        id: row.id,
+        fileName: row.file_name,
+        jdText: row.jd_text,
+      })
+    ) {
+      if (row.id) ids.add(String(row.id));
+    }
+  }
+  for (const brId of deleted.brIds) {
+    const match = String(brId).match(/(\d+)/);
+    if (!match) continue;
+    ids.add(brIdToUuid(`${match[1]}BR`));
+    ids.add(brIdToUuid(`${match[1]}br`));
+    ids.add(brIdToUuid(brId));
+  }
+
+  const unique = Array.from(ids);
+  for (let i = 0; i < unique.length; i += 50) {
+    const chunk = unique.slice(i, i + 50);
+    const { error: deleteError } = await supabase.from("job_descriptions").delete().in("id", chunk);
+    if (deleteError) {
+      console.warn("Failed to delete tombstoned job descriptions:", deleteError.message);
+    }
+  }
+  return unique;
+}
+
+export async function eraseDeletedRequirementsFromMaster(
+  extraBrIds: string[] = []
+): Promise<{ stripped: number; deletedRows: number }> {
+  await markRequirementsDeleted(
+    PERMANENTLY_REMOVED_BR_IDS.map((brId) => ({ brId, fileName: brId }))
+  );
+  const deleted = await loadDeletedRequirements();
+  const brIds = deletedBrIdSet(deleted);
+  for (const raw of extraBrIds) {
+    const brId = extractBrId(raw) || String(raw || "").trim().toLowerCase();
+    if (brId) brIds.add(brId);
+  }
+  const deletedIds = await deleteJobDescriptionsMatchingDeleted(deleted);
+  let stripped = 0;
+  try {
+    const { workbook, filename } = await loadMasterBrWorkbook();
+    stripped = removeBrIdsFromWorkbook(workbook, brIds);
+    if (stripped > 0) {
+      await saveMasterBrWorkbook(workbook, filename);
+      await writeLog(
+        "requirements",
+        "STRIPPED_DELETED_BR_ROWS",
+        "success",
+        `Removed ${stripped} deleted BR row(s) from ${filename}`
+      );
+    }
+  } catch (err: any) {
+    console.warn("Failed to strip deleted BRs from master workbook:", err?.message || err);
+  }
+  return { stripped, deletedRows: deletedIds.length };
+}
+
 function appendBrWorkbookRows(
   source: ExcelJS.Workbook,
   masterSheet: ExcelJS.Worksheet,
   masterHeaders: Map<string, number>,
-  existingIds: Set<string>
+  existingIds: Set<string>,
+  skipBrIds?: Set<string>
 ): number {
   let added = 0;
   const masterColCount = Math.max(masterSheet.columnCount || 25, 25);
   const templateRow = masterSheet.getRow(Math.max(2, lastUsedRow(masterSheet)));
+  const blocked = new Set(Array.from(skipBrIds || []).map((id) => id.toLowerCase()));
 
   for (const sheet of source.worksheets) {
     if (!isBrDataSheet(sheet.name)) continue;
@@ -612,7 +788,7 @@ function appendBrWorkbookRows(
     sheet.eachRow((row, n) => {
       if (n === 1) return;
       const autoReqId = normalizeBrId(cellText(row.getCell(idCol).value));
-      if (!autoReqId || existingIds.has(autoReqId)) return;
+      if (!autoReqId || existingIds.has(autoReqId) || blocked.has(autoReqId.toLowerCase())) return;
 
       const newRow = masterSheet.getRow(lastUsedRow(masterSheet) + 1);
       copyRowStyle(templateRow, newRow, masterColCount);
@@ -658,6 +834,7 @@ async function persistMasterRequirements(
   // test_questions, or test_attempts — Employee Portal data is independent.
   const merged = mergeBrRequirements(parseBrWorkbook(workbook, filename));
   const deleted = await loadDeletedRequirements();
+  const skippedIds = new Set<string>();
   const upsertRows = merged.flatMap((row) => {
     const jdUuid = brIdToUuid(row.autoReqId);
     if (
@@ -668,11 +845,9 @@ async function persistMasterRequirements(
         jdText: row.composedText,
       })
     ) {
+      skippedIds.add(jdUuid);
       const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
-      if (
-        existingIdx !== -1 &&
-        !isJdDocumentRequirementName(String(localJds[existingIdx].fileName || ""))
-      ) {
+      if (existingIdx !== -1) {
         localJds.splice(existingIdx, 1);
       }
       return [];
@@ -718,8 +893,29 @@ async function persistMasterRequirements(
     }
   }
 
-  // Never delete existing Requirements here. Uploading JD 2 must not remove JD 1.
-  // Deleted BRs stay gone because they are tombstoned and skipped above.
+  for (let i = localJds.length - 1; i >= 0; i -= 1) {
+    if (
+      isRequirementDeleted(deleted, {
+        id: localJds[i].id,
+        fileName: localJds[i].fileName,
+        jdText: localJds[i].jdText,
+      })
+    ) {
+      if (localJds[i].id) skippedIds.add(String(localJds[i].id));
+      localJds.splice(i, 1);
+    }
+  }
+
+  const toDelete = Array.from(skippedIds);
+  for (let i = 0; i < toDelete.length; i += 50) {
+    const chunk = toDelete.slice(i, i + 50);
+    const { error } = await supabase.from("job_descriptions").delete().in("id", chunk);
+    if (error) {
+      await writeLog("requirements", "DELETE_TOMBSTONED_BR_ERROR", "failed", error.message);
+    }
+  }
+
+  // Uploading a new BR/JD must not resurrect deleted requirements.
   return processed;
 }
 
@@ -857,12 +1053,16 @@ export async function refreshRequirements(opts?: {
   incomingJdFiles?: string[];
 }): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
   await ensureDocsStorage();
+  await markRequirementsDeleted(
+    PERMANENTLY_REMOVED_BR_IDS.map((brId) => ({ brId, fileName: brId }))
+  );
 
   const brFiles = await listDocFiles("BR");
   const jdFiles = await listDocFiles("JD");
   const incomingBr = new Set((opts?.incomingBrFiles || []).map((f) => f.toLowerCase()));
   const incomingJd = new Set((opts?.incomingJdFiles || []).map((f) => f.toLowerCase()));
   const deletedRequirements = await loadDeletedRequirements();
+  const blockedBrIds = deletedBrIdSet(deletedRequirements);
 
   let processedBRs = 0;
   let convertedJDs = 0;
@@ -878,7 +1078,13 @@ export async function refreshRequirements(opts?: {
   const localJdPath = join(getUploadsRoot(), "job_descriptions.json");
   try {
     const raw = await readFile(localJdPath, "utf8");
-    localJds = JSON.parse(raw);
+    localJds = JSON.parse(raw).filter((row: any) =>
+      !isRequirementDeleted(deletedRequirements, {
+        id: row.id,
+        fileName: row.fileName,
+        jdText: row.jdText,
+      })
+    );
   } catch {}
   try {
     const { data: existingJds } = await supabase
@@ -942,7 +1148,7 @@ export async function refreshRequirements(opts?: {
       const source = new ExcelJS.Workbook();
       const buffer = await readDocFileBuffer("BR", file);
       await source.xlsx.load(buffer as any);
-      const added = appendBrWorkbookRows(source, masterSheet, masterHeaders, existingIds);
+      const added = appendBrWorkbookRows(source, masterSheet, masterHeaders, existingIds, blockedBrIds);
       if (added > 0) {
         await writeLog(
           "requirements",
@@ -983,28 +1189,21 @@ export async function refreshRequirements(opts?: {
         continue;
       }
 
-      if (incomingJd.has(file.toLowerCase())) {
-        await unmarkRequirementsDeleted([
-          {
-            id: brIdToUuid(autoReqId),
-            brId: autoReqId,
-            fileName: `${autoReqId} | ${file}`,
-            jdText,
-          },
-        ]);
-      } else if (
-        isRequirementDeleted(deletedRequirements, {
-          id: brIdToUuid(autoReqId),
-          brId: autoReqId,
-          fileName: `${autoReqId} | ${file}`,
-          jdText,
-        }) &&
-        !localJds.some(
-          (j: any) =>
-            j.id === brIdToUuid(autoReqId) ||
-            String(j.fileName || "").toLowerCase().includes(file.toLowerCase())
-        )
-      ) {
+      const requirementParts = {
+        id: brIdToUuid(autoReqId),
+        brId: autoReqId,
+        fileName: `${autoReqId} | ${file}`,
+        jdText,
+      };
+      const blocked = isRequirementDeleted(deletedRequirements, requirementParts)
+        || isPermanentlyRemovedBrId(autoReqId)
+        || blockedBrIds.has(autoReqId.toLowerCase());
+
+      if (incomingJd.has(file.toLowerCase()) && !blocked) {
+        await unmarkRequirementsDeleted([requirementParts]);
+      } else if (blocked) {
+        continue;
+      } else if (!incomingJd.has(file.toLowerCase()) && alreadyLinked) {
         continue;
       }
 
@@ -1039,16 +1238,32 @@ export async function refreshRequirements(opts?: {
     }
   }
 
+  const stripped = removeBrIdsFromWorkbook(masterWorkbook, blockedBrIds);
+  if (stripped > 0) {
+    await writeLog(
+      "requirements",
+      "STRIPPED_DELETED_BR_ROWS",
+      "success",
+      `Removed ${stripped} deleted BR row(s) from ${masterFilename}`
+    );
+  }
   await saveMasterBrWorkbook(masterWorkbook, masterFilename);
   processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds);
 
-  if (restoredIncoming.length) {
-    const { error } = await supabase.from("job_descriptions").upsert(restoredIncoming);
+  const liveRestored = restoredIncoming.filter((row) =>
+    !isRequirementDeleted(deletedRequirements, {
+      id: row.id,
+      fileName: row.file_name,
+      jdText: row.jd_text,
+    })
+  );
+  if (liveRestored.length) {
+    const { error } = await supabase.from("job_descriptions").upsert(liveRestored);
     if (error) {
       await writeLog("requirements", "RESTORE_JD_ERROR", "failed", error.message);
     } else {
-      processedBRs = Math.max(processedBRs, restoredIncoming.length);
-      for (const row of restoredIncoming) {
+      processedBRs = Math.max(processedBRs, liveRestored.length);
+      for (const row of liveRestored) {
         const existingIdx = localJds.findIndex((j: any) => j.id === row.id);
         const local = {
           id: row.id,
@@ -1224,10 +1439,16 @@ export async function refreshEmployees(
   opts?: { incomingCorpPoolFiles?: string[] }
 ): Promise<{ success: boolean; loaded: number }> {
   await ensureDocsStorage();
-  const incomingSet = new Set((opts?.incomingCorpPoolFiles || []).map((f) => f.toLowerCase()));
+  const reclaimed = await reclaimMisfiledCorpPoolRosters();
+  const incomingSet = new Set(
+    (opts?.incomingCorpPoolFiles || []).map((f) => corpPoolFileKey(f))
+  );
+  if (incomingSet.size > 0) {
+    for (const file of reclaimed) incomingSet.add(corpPoolFileKey(file));
+  }
   let files = await listDocFiles("Corp Pool");
   if (incomingSet.size > 0) {
-    files = files.filter((f) => incomingSet.has(f.toLowerCase()));
+    files = files.filter((f) => incomingSet.has(corpPoolFileKey(f)));
   }
 
   const expandedFiles: string[] = [];
@@ -1319,8 +1540,11 @@ export async function refreshEmployees(
   }
   files = Array.from(new Set(expandedFiles));
   if (incomingSet.size > 0 && files.length === 0) {
+    const zipUpload = Array.from(incomingSet).some((name) => name.endsWith(".zip"));
     throw new Error(
-      "The ZIP had no resume PDF/DOCX or employee Excel/CSV files inside. Put those files in the ZIP and upload again."
+      zipUpload
+        ? "The ZIP had no resume PDF/DOCX or employee Excel/CSV files inside. Put those files in the ZIP and upload again."
+        : "The uploaded Corp Pool file could not be read after storage. Try renaming it (avoid apostrophes) and upload again."
     );
   }
   
@@ -1354,68 +1578,73 @@ export async function refreshEmployees(
       const buffer = fileBuffers.get(file) || await readDocFileBuffer("Corp Pool", file);
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer as any);
-      
-      let sheet = workbook.worksheets[0];
+
       let rows: any[][] = [];
       let headerRow: any[] = [];
       let headerRowIdx = -1;
-      
-      // Find a worksheet that has headers resembling employee columns
-      for (const ws of workbook.worksheets) {
-        const tempRows: any[][] = [];
-        ws.eachRow((row) => {
-          tempRows.push(row.values as any[]);
+
+      const collectSheetRows = (ws: ExcelJS.Worksheet): any[][] => {
+        const last = Math.max(ws.rowCount || 0, ws.actualRowCount || 0, 1);
+        const collected: any[][] = [];
+        for (let n = 1; n <= last; n++) {
+          const row = ws.getRow(n);
+          if (n > 1 && !row.hasValues) {
+            collected.push([]);
+            continue;
+          }
+          collected.push((row.values as any[]) || []);
+        }
+        return collected;
+      };
+
+      const looksLikeEmpHeader = (r: any[]) =>
+        Array.isArray(r) &&
+        r.some((h) => {
+          const str = cellText(h).toLowerCase();
+          return (
+            str.includes("emp no") ||
+            str.includes("emp_no") ||
+            str.includes("employee id") ||
+            str.includes("emp id") ||
+            str.includes("emp name") ||
+            str.includes("employee name")
+          );
         });
-        
-        if (tempRows.length > 0) {
-          let foundIdx = -1;
-          const maxRowsToCheck = Math.min(10, tempRows.length);
-          for (let i = 0; i < maxRowsToCheck; i++) {
-            const r = tempRows[i];
-            if (Array.isArray(r)) {
-              const hasHeaders = r.some(h => {
-                if (!h) return false;
-                const str = String(h).trim().toLowerCase();
-                return str.includes("emp no") || str.includes("emp_no") || str.includes("employee id") || str.includes("emp name") || str.includes("employee name");
-              });
-              if (hasHeaders) {
-                foundIdx = i;
-                break;
-              }
-            }
-          }
-          
-          if (foundIdx !== -1) {
-            sheet = ws;
-            rows = tempRows;
-            headerRowIdx = foundIdx;
-            headerRow = tempRows[foundIdx];
-            break;
-          }
+
+      for (const ws of workbook.worksheets) {
+        const tempRows = collectSheetRows(ws);
+        const foundIdx = tempRows.findIndex((r, i) => i < 10 && looksLikeEmpHeader(r));
+        if (foundIdx !== -1) {
+          rows = tempRows;
+          headerRowIdx = foundIdx;
+          headerRow = tempRows[foundIdx];
+          break;
         }
       }
-      
+
       if (headerRowIdx === -1 && workbook.worksheets.length > 0) {
-        sheet = workbook.worksheets[0];
-        rows = [];
-        sheet.eachRow((row) => {
-          rows.push(row.values as any[]);
-        });
+        rows = collectSheetRows(workbook.worksheets[0]);
         headerRowIdx = 0;
         headerRow = rows[0] || [];
       }
-      
+
       if (rows.length <= headerRowIdx + 1) continue;
-      
+
+      const normalizeHeader = (value: unknown) =>
+        cellText(value).toLowerCase().replace(/[_-]/g, " ").replace(/\.+$/, "").replace(/\s+/g, " ").trim();
+
       const getIdx = (names: string[]) => {
-        const normalizedNames = names.map(n => n.trim().toLowerCase().replace(/[_-]/g, ' '));
+        const normalizedNames = names.map((n) => n.trim().toLowerCase().replace(/[_-]/g, " "));
         return headerRow.findIndex((h: any) => {
-          if (!h) return false;
-          const normalizedH = String(h).trim().toLowerCase().replace(/[_-]/g, ' ');
-          return normalizedNames.includes(normalizedH);
+          const normalizedH = normalizeHeader(h);
+          if (!normalizedH) return false;
+          return normalizedNames.some((name) => {
+            if (name.length <= 3) return normalizedH === name;
+            return normalizedH === name || normalizedH.includes(name);
+          });
         });
       };
-      
+
       const findColumnIdx = (namesInOrderOfPriority: string[]) => {
         for (const name of namesInOrderOfPriority) {
           const idx = getIdx([name]);
@@ -1423,52 +1652,65 @@ export async function refreshEmployees(
         }
         return -1;
       };
-      
-      const idIdx = findColumnIdx(["emp no", "employee id", "emp id", "id"]);
-      const nameIdx = findColumnIdx(["emp name", "employee name", "name"]);
+
+      const idIdx = findColumnIdx(["emp no", "employee id", "emp id", "employee code"]);
+      const nameIdx = findColumnIdx(["emp name", "employee name", "full name", "name"]);
       const deptIdx = findColumnIdx(["business unit", "sbu", "bu", "department", "dept"]);
       const skillsIdx = findColumnIdx(["detailed skills", "skills bucket", "top 3 skills", "skills"]);
       const statusIdx = findColumnIdx(["status", "availability"]);
       const gradeIdx = findColumnIdx(["grade", "level"]);
-      const mailIdx = findColumnIdx(["official mail id", "email", "mail id"]);
+      const mailIdx = findColumnIdx(["official mail id", "official email", "email", "mail id"]);
       const roleIdx = findColumnIdx(["designation", "role", "position"]);
-      
+
+      let kept = 0;
+      let skippedBlank = 0;
       for (let r = headerRowIdx + 1; r < rows.length; r++) {
         const row = rows[r];
         if (!row) continue;
-        
-        const empNo = idIdx !== -1 && row[idIdx] ? String(row[idIdx]).trim() : `EMP${Math.floor(1000 + Math.random()*9000)}`;
-        const empName = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).trim() : "Unknown Employee";
-        const department = deptIdx !== -1 && row[deptIdx] ? String(row[deptIdx]).trim() : "Engineering";
-        const skills = skillsIdx !== -1 && row[skillsIdx] ? String(row[skillsIdx]).trim() : "";
-        const status = statusIdx !== -1 && row[statusIdx] ? String(row[statusIdx]).trim() : "Active";
-        const grade = gradeIdx !== -1 && row[gradeIdx] ? String(row[gradeIdx]).trim() : "E1";
-        const email = mailIdx !== -1 && row[mailIdx] ? String(row[mailIdx]).trim() : "";
-        const designation = roleIdx !== -1 && row[roleIdx] ? String(row[roleIdx]).trim() : "Support Engineer";
-        
+
+        const empNo = idIdx !== -1 ? cellText(row[idIdx]) : "";
+        const empName = nameIdx !== -1 ? cellText(row[nameIdx]) : "";
+        if (!empNo && !empName) {
+          skippedBlank++;
+          continue;
+        }
+
+        const department = deptIdx !== -1 ? cellText(row[deptIdx]) : "Engineering";
+        const skills = skillsIdx !== -1 ? cellText(row[skillsIdx]) : "";
+        const status = statusIdx !== -1 ? cellText(row[statusIdx]) : "Active";
+        const grade = gradeIdx !== -1 ? cellText(row[gradeIdx]) : "E1";
+        const email = mailIdx !== -1 ? cellText(row[mailIdx]) : "";
+        const designation = roleIdx !== -1 ? cellText(row[roleIdx]) : "Support Engineer";
+        const employeeId = empNo || `EMP${createHash("md5").update(`${file}:${empName}:${r}`).digest("hex").slice(0, 10)}`;
+
         const matchResult = calculateSkillMatch(
           employeeMatchText({ skills, designation, grade }),
           jdSkills
         );
-        
-        const record: EmployeeRecord = {
-          employee_id: empNo,
-          full_name: empName,
-          email: email || `${empNo}@example.com`,
-          department,
+
+        parsedEmployees.push({
+          employee_id: employeeId,
+          full_name: empName || "Unknown Employee",
+          email: email || `${employeeId}@example.com`,
+          department: department || "Engineering",
           skills,
-          grade,
-          designation,
-          status,
+          grade: grade || "E1",
+          designation: designation || "Support Engineer",
+          status: status || "Active",
           shortlisted: false,
           score: matchResult.score,
           matchingSkills: matchResult.matchingSkills,
           source_file: file,
-        };
-        
-        parsedEmployees.push(record);
-        loaded++;
+        });
+        kept++;
       }
+      loaded += kept;
+      await writeLog(
+        "employee",
+        "PARSED_CORP_POOL_EXCEL",
+        "success",
+        `Parsed ${kept} people from ${file} (${skippedBlank} blank rows skipped)`
+      );
     } catch (err: any) {
       await writeLog('employee', 'PARSE_EXCEL_FAILED', 'failed', `Error parsing xlsx employee pool ${file}: ${err.message}`);
     }
@@ -1514,8 +1756,10 @@ export async function refreshEmployees(
         const cells = rows[r];
         if (!cells || cells.length === 0 || cells.every((c) => !String(c || "").trim())) continue;
 
-        const empNo = idIdx !== -1 && cells[idIdx] ? String(cells[idIdx]).trim() : `EMP${Math.floor(1000 + Math.random() * 9000)}`;
-        const empName = nameIdx !== -1 && cells[nameIdx] ? String(cells[nameIdx]).trim() : "Unknown Employee";
+        const empNo = idIdx !== -1 ? String(cells[idIdx] || "").trim() : "";
+        const empName = nameIdx !== -1 ? String(cells[nameIdx] || "").trim() : "";
+        if (!empNo && !empName) continue;
+        const employeeId = empNo || `EMP${createHash("md5").update(`${file}:${empName}:${r}`).digest("hex").slice(0, 10)}`;
         const department = deptIdx !== -1 && cells[deptIdx] ? String(cells[deptIdx]).trim() : "Engineering";
         const skills = skillsIdx !== -1 && cells[skillsIdx] ? String(cells[skillsIdx]).trim() : "";
         const status = statusIdx !== -1 && cells[statusIdx] ? String(cells[statusIdx]).trim() : "Active";
@@ -1529,9 +1773,9 @@ export async function refreshEmployees(
         );
 
         parsedEmployees.push({
-          employee_id: empNo,
-          full_name: empName,
-          email: email || `${empNo}@example.com`,
+          employee_id: employeeId,
+          full_name: empName || "Unknown Employee",
+          email: email || `${employeeId}@example.com`,
           department,
           skills,
           grade,
@@ -1614,34 +1858,34 @@ export async function refreshEmployees(
   loaded = uniqueParsedEmployees.length;
   const incomingUpload = incomingSet.size > 0;
   const deletedPool = await loadDeletedCorpPool();
-  if (incomingUpload) {
-    await unmarkCorpPoolDeleted(
-      uniqueParsedEmployees.map((emp) => emp.employee_id),
-      uniqueParsedEmployees.map((emp) => emp.source_file || "")
-    );
-  } else {
-    const kept = uniqueParsedEmployees.filter(
-      (emp) => !isCorpPoolDeleted(deletedPool, { id: emp.employee_id, file: emp.source_file })
-    );
-    uniqueParsedEmployees.length = 0;
-    uniqueParsedEmployees.push(...kept);
-    loaded = uniqueParsedEmployees.length;
-  }
+  const parsedBeforeTombstone = uniqueParsedEmployees.length;
+  const liveParsed = uniqueParsedEmployees.filter(
+    (emp) => !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
+  );
+  uniqueParsedEmployees.length = 0;
+  uniqueParsedEmployees.push(...liveParsed);
+  loaded = uniqueParsedEmployees.length;
 
   if (uniqueParsedEmployees.length === 0) {
-    await writeLog(
-      "employee",
-      incomingUpload ? "INCOMING_CORP_POOL_EMPTY" : "SKIP_EMPTY_CORP_POOL",
-      incomingUpload ? "failed" : "success",
-      incomingUpload
-        ? "Uploaded Corp Pool file produced 0 people; left the existing list unchanged"
-        : "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
-    );
-    if (incomingUpload) {
+    if (incomingUpload && parsedBeforeTombstone === 0) {
+      await writeLog(
+        "employee",
+        "INCOMING_CORP_POOL_EMPTY",
+        "failed",
+        "Uploaded Corp Pool file produced 0 people; left the existing list unchanged"
+      );
       throw new Error(
         "The file was stored, but nobody was added to Corp Pool. Use a readable resume PDF/DOCX, an employee Excel/CSV, or a ZIP of those files."
       );
     }
+    await writeLog(
+      "employee",
+      incomingUpload ? "INCOMING_CORP_POOL_ALL_DELETED" : "SKIP_EMPTY_CORP_POOL",
+      "success",
+      incomingUpload
+        ? "Uploaded people were previously deleted and were not restored"
+        : "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
+    );
     return { success: true, loaded: 0 };
   }
 
@@ -1658,14 +1902,16 @@ export async function refreshEmployees(
     } catch {}
   }
   if (!Array.isArray(existingList)) existingList = [];
+  existingList = existingList.filter(
+    (emp) => emp?.employee_id && !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
+  );
 
   const byId = new Map<string, EmployeeRecord>();
   const byEmail = new Map<string, string>();
   for (const emp of existingList) {
-    if (!emp?.employee_id) continue;
-    byId.set(emp.employee_id, emp);
+    byId.set(String(emp.employee_id), emp);
     const email = String(emp.email || "").trim().toLowerCase();
-    if (email) byEmail.set(email, emp.employee_id);
+    if (email) byEmail.set(email, String(emp.employee_id));
   }
 
   let added = 0;
@@ -1698,7 +1944,9 @@ export async function refreshEmployees(
     }
   }
 
-  const finalEmployees = Array.from(byId.values());
+  const finalEmployees = Array.from(byId.values()).filter(
+    (emp) => !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
+  );
   loaded = finalEmployees.length;
 
   const serialized = JSON.stringify(finalEmployees, null, 2);

@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from qb_new_parser import parse_qb_new_xlsx
 
-_pools, records = parse_qb_new_xlsx(Path("QB-new.xlsx"))
+_pools, records = parse_qb_new_xlsx(Path(__file__).resolve().parents[1] / "excel" / "QB-new.xlsx")
 products = sorted({r.product for r in records})
 print("QB-new products:", products)
 for product in products:

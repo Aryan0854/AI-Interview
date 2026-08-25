@@ -24,8 +24,9 @@ from qb_new_parser import (  # noqa: E402
 )
 
 ACCOUNTS_FILE = ROOT / "src" / "data" / "employee-accounts.json"
-MAPPING_FILE = ROOT / "Resource_Question_Mapping.xlsx"
-QB_FILE = ROOT / "QB-new.xlsx"
+EXCEL_DIR = ROOT / "excel"
+MAPPING_FILE = EXCEL_DIR / "Resource_Question_Mapping.xlsx"
+QB_FILE = EXCEL_DIR / "QB-new.xlsx"
 TOPIC_ID = "resource-product-assessment"
 SUBJECT_ID = "resource-subject"
 SUBJECT_TITLE = "Product Assessment"

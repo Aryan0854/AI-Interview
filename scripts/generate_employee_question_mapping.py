@@ -36,7 +36,7 @@ def get_product_key(raw_name, sheet_name=""):
 
 # 1. Load Question Bank
 print("Loading Question Bank...")
-wb_qb = openpyxl.load_workbook("QB-new.xlsx", data_only=True)
+wb_qb = openpyxl.load_workbook(os.path.join(os.path.dirname(__file__), "..", "excel", "QB-new.xlsx"), data_only=True)
 qb_by_product = {}
 
 for sheetname in wb_qb.sheetnames:
@@ -174,7 +174,7 @@ for r_idx, row in enumerate(emp_rows[1:], start=2):
     new_row = row_values + assigned_questions + [remark]
     sheet_out.append(new_row)
 
-output_filename = "Resource_Question_Mapping.xlsx"
+output_filename = os.path.join(os.path.dirname(__file__), "..", "excel", "Resource_Question_Mapping.xlsx")
 wb_out.save(output_filename)
 print(f"Saved mapping output to {output_filename}")
 print(f"Successfully mapped {mapped_count} employees.")

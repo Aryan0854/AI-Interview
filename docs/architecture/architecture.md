@@ -92,7 +92,7 @@ All backend logic is exposed via **Next.js Route Handlers** under `src/app/api/`
 | `automation-service.ts` | Folder scan ingestion (BR/JD/Resumes/Corp Pool), JD-to-BR Excel |
 | `employee-account-store.ts` | Employee credentials in Supabase `employees` |
 | `local-tests-db.ts` | Employee test state (Supabase `tests` + JSON fallback) |
-| `resource-mapping-service.ts` | Reads `Resource_Question_Mapping.xlsx` for admin employee view |
+| `resource-mapping-service.ts` | Reads `excel/Resource_Question_Mapping.xlsx` for admin employee view |
 | `employee-test-attempts-service.ts` | Per-question attempt details for admin export |
 | `audit-log-service.ts` | Writes to `audit_logs` |
 | `settings-service.ts` | `portal_settings` key-value store |
@@ -175,7 +175,7 @@ When `USE_SUPABASE_PRIMARY` / cloud flags are off, JSON files under `src/data/` 
 | `/tmp` | Vercel serverless ephemeral storage |
 | `/app/uploads` | Azure Docker (`UPLOADS_DIR`) |
 | `docs/BR`, `docs/JD`, etc. | Local dev doc ingestion |
-| Repo root `.xlsx` | `Resource_Question_Mapping.xlsx`, `Employee_User_Credentials.xlsx` |
+| `excel/` | `Resource_Question_Mapping.xlsx`, `Employee_User_Credentials.xlsx`, `QB-new.xlsx` |
 
 ---
 

@@ -1,7 +1,10 @@
-import { supabase } from "@/lib/db";
+import { supabaseServer } from "@/lib/db";
 import { parseJdRequirements } from "@/lib/skill-match";
 
 const SETTINGS_KEY = "deleted_requirements";
+
+/** These BR IDs are never re-ingested, even if they remain in BR_RawData 3.xlsx. */
+export const PERMANENTLY_REMOVED_BR_IDS = ["50656br", "50657br"];
 
 export type DeletedRequirements = {
   ids: string[];
@@ -25,7 +28,13 @@ export function extractBrId(fileName?: string): string {
   const prefix = String(fileName || "").split("|")[0] || "";
   const match = prefix.trim().match(/(\d+)\s*BR/i);
   if (match) return `${match[1]}BR`.toLowerCase();
+  if (/^\d{4,}$/.test(prefix.trim())) return `${prefix.trim()}br`;
   return prefix.trim().toLowerCase();
+}
+
+export function isPermanentlyRemovedBrId(brId?: string): boolean {
+  const normalized = extractBrId(brId);
+  return Boolean(normalized && PERMANENTLY_REMOVED_BR_IDS.includes(normalized));
 }
 
 export function requirementTombstoneKey(jdText: string, fallbackId = ""): string {
@@ -41,27 +50,43 @@ export function requirementTombstoneKey(jdText: string, fallbackId = ""): string
 }
 
 function emptyDeleted(): DeletedRequirements {
-  return { ids: [], brIds: [], groupKeys: [] };
+  return {
+    ids: [],
+    brIds: [...PERMANENTLY_REMOVED_BR_IDS],
+    groupKeys: [],
+  };
+}
+
+function withPermanentBrIds(value: DeletedRequirements): DeletedRequirements {
+  return {
+    ids: cleanList(value.ids),
+    brIds: cleanList([...PERMANENTLY_REMOVED_BR_IDS, ...value.brIds]),
+    groupKeys: cleanList(value.groupKeys),
+  };
+}
+
+function collectedBrIds(parts: { brId?: string; fileName?: string }): string[] {
+  return cleanList([extractBrId(parts.brId), extractBrId(parts.fileName)]);
 }
 
 export async function loadDeletedRequirements(): Promise<DeletedRequirements> {
   if (cache && Date.now() - cache.at < 4000) return cache.value;
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseServer
       .from("portal_settings")
       .select("value")
       .eq("key", SETTINGS_KEY)
       .maybeSingle();
     if (error || !data?.value || typeof data.value !== "object") {
-      cache = { at: Date.now(), value: emptyDeleted() };
-      return cache.value;
+      console.warn("Failed to load deleted requirements:", error?.message || "empty settings");
+      return emptyDeleted();
     }
     const raw = data.value as Record<string, unknown>;
-    const value = {
+    const value = withPermanentBrIds({
       ids: cleanList(raw.ids),
       brIds: cleanList(raw.brIds),
       groupKeys: cleanList(raw.groupKeys),
-    };
+    });
     cache = { at: Date.now(), value };
     return value;
   } catch (err) {
@@ -71,11 +96,15 @@ export async function loadDeletedRequirements(): Promise<DeletedRequirements> {
 }
 
 async function saveDeletedRequirements(value: DeletedRequirements): Promise<void> {
-  cache = { at: Date.now(), value };
-  const { error } = await supabase.from("portal_settings").upsert({
-    key: SETTINGS_KEY,
-    value,
-  });
+  const next = withPermanentBrIds(value);
+  cache = { at: Date.now(), value: next };
+  const { error } = await supabaseServer.from("portal_settings").upsert(
+    {
+      key: SETTINGS_KEY,
+      value: next,
+    },
+    { onConflict: "key" }
+  );
   if (error) {
     console.warn("Failed to save deleted requirements:", error.message);
   }
@@ -86,14 +115,13 @@ export function isRequirementDeleted(
   parts: { id?: string; brId?: string; groupKey?: string; fileName?: string; jdText?: string }
 ): boolean {
   const id = String(parts.id || "").trim().toLowerCase();
-  const brId = extractBrId(parts.brId || parts.fileName);
   if (id && deleted.ids.includes(id)) return true;
-  if (brId && deleted.brIds.includes(brId)) return true;
-  return false;
+  const brIds = collectedBrIds(parts);
+  return brIds.some((brId) => deleted.brIds.includes(brId) || isPermanentlyRemovedBrId(brId));
 }
 
 export async function markRequirementsDeleted(
-  rows: Array<{ id?: string; fileName?: string; jdText?: string }>
+  rows: Array<{ id?: string; fileName?: string; jdText?: string; brId?: string }>
 ): Promise<void> {
   const deleted = await loadDeletedRequirements();
   const ids = new Set(deleted.ids);
@@ -102,10 +130,9 @@ export async function markRequirementsDeleted(
 
   for (const row of rows) {
     const id = String(row.id || "").trim().toLowerCase();
-    const brId = extractBrId(row.fileName);
     const groupKey = requirementTombstoneKey(row.jdText || "", row.id || "");
     if (id) ids.add(id);
-    if (brId) brIds.add(brId);
+    for (const brId of collectedBrIds(row)) brIds.add(brId);
     if (groupKey) groupKeys.add(groupKey);
   }
 
@@ -125,13 +152,11 @@ export async function unmarkRequirementsDeleted(
   const groupKeys = new Set(deleted.groupKeys);
 
   for (const row of rows) {
+    if (collectedBrIds(row).some(isPermanentlyRemovedBrId)) continue;
     const id = String(row.id || "").trim().toLowerCase();
-    const brId = extractBrId(row.brId || row.fileName);
-    const rawBrId = String(row.brId || "").trim().toLowerCase();
     const groupKey = requirementTombstoneKey(row.jdText || "", row.id || "");
     if (id) ids.delete(id);
-    if (brId) brIds.delete(brId);
-    if (rawBrId) brIds.delete(rawBrId);
+    for (const brId of collectedBrIds(row)) brIds.delete(brId);
     if (groupKey) groupKeys.delete(groupKey);
   }
 

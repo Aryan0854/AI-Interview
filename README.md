@@ -366,20 +366,20 @@ back to `src/lib/local-ai.ts` so the user experience is unaffected.
 
 ## Employee assessment Excel → portal mapping (keep these files)
 
-These are **not** imported by Next.js on every page load for question text from `QB-new.xlsx`, but they are the **source of truth pipeline** used to build the portal mapping the app *does* read.
+These are **not** imported by Next.js on every page load for question text from `excel/QB-new.xlsx`, but they are the **source of truth pipeline** used to build the portal mapping the app *does* read.
 
 | File | Keep? | Role |
 |---|---|---|
-| `resources less than 3.5 rating - latest.xlsx` | **Yes** | Employee roster source (Emp ID, name, product, email, …) |
-| `QB-new.xlsx` | **Yes** | Question bank (MCQs by product) |
-| `Resource_Question_Mapping.xlsx` | **Yes (runtime)** | Output mapping: each employee + 25 assigned questions — read by `src/services/resource-mapping-service.ts` |
-| `Employee_User_Credentials.xlsx` | **Yes (runtime)** | Login credentials for employee portal |
+| `excel/resources less than 3.5 rating - latest.xlsx` | **Yes** | Employee roster source (Emp ID, name, product, email, …) |
+| `excel/QB-new.xlsx` | **Yes** | Question bank (MCQs by product) |
+| `excel/Resource_Question_Mapping.xlsx` | **Yes (runtime)** | Output mapping: each employee + 25 assigned questions — read by `src/services/resource-mapping-service.ts` |
+| `excel/Employee_User_Credentials.xlsx` | **Yes (runtime)** | Login credentials for employee portal |
 | `scripts/` | **Yes (ops)** | Automation that builds the mapping / syncs to Supabase |
 
 ### How mapping works
 
 ```
-resources less than 3.5 rating - latest.xlsx   QB-new.xlsx
+excel/resources less than 3.5 rating - latest.xlsx   excel/QB-new.xlsx
                  \                               /
                   \                             /
                    v                           v
@@ -387,7 +387,7 @@ resources less than 3.5 rating - latest.xlsx   QB-new.xlsx
                    (uses qb_new_parser.py)
                               |
                               v
-              Resource_Question_Mapping.xlsx
+              excel/Resource_Question_Mapping.xlsx
                  Emp ID + Product + Assigned Question 1..25
                               |
                               v
@@ -395,9 +395,9 @@ resources less than 3.5 rating - latest.xlsx   QB-new.xlsx
 ```
 
 1. Read employees from the **resources** Excel.  
-2. For each employee’s **Product**, pull a pool from **QB-new.xlsx**.  
+2. For each employee’s **Product**, pull a pool from **excel/QB-new.xlsx**.  
 3. Assign **25** display questions per employee (product-specific rules in `scripts/qb_new_parser.py`).  
-4. Write **`Resource_Question_Mapping.xlsx`**.  
+4. Write **`excel/Resource_Question_Mapping.xlsx`**.  
 5. Runtime portal loads that mapping (and live test status from Supabase).
 
 ### Automate (re-run whenever Excel changes)
@@ -411,9 +411,9 @@ Useful related scripts (do **not** delete `scripts/` if you need remapping):
 
 | Script | Purpose |
 |---|---|
-| `scripts/update_portal_and_question_bank.py` | Main: roster + QB → `Resource_Question_Mapping.xlsx` |
+| `scripts/update_portal_and_question_bank.py` | Main: roster + QB → `excel/Resource_Question_Mapping.xlsx` |
 | `scripts/qb_new_parser.py` | Parse QB-new pools / assignment rules |
-| `scripts/update_credentials_from_resources.py` | Rebuild `Employee_User_Credentials.xlsx` from resources sheet |
+| `scripts/update_credentials_from_resources.py` | Rebuild `excel/Employee_User_Credentials.xlsx` from resources sheet |
 | `scripts/import_resource_question_mapping.py` | Push mapping/questions toward DB-oriented import |
 | `scripts/reassign_test_questions_supabase.py` | Reassign live Supabase test questions from mapping + QB |
 | `scripts/sync-manifest-to-supabase.ts` / `sync-local-tests-to-supabase.ts` | Sync local/manifest data to Supabase |
@@ -459,16 +459,13 @@ See `faceproj/README.md` for deploying the FaceNet service on Render.
 ## Project layout (KT)
 
 ```
+├── excel/                # Workbooks (QB, credentials, mapping, roster)
 ├── docs/                 # BR, JD, Corp Pool, Resumes (admin Scan & Refresh) + SQL schema
 ├── faceproj/             # Optional local FaceNet (Gemini is primary on Vercel)
 ├── scripts/              # Excel mapping / Supabase sync (ops — not next start)
 ├── src/                  # Next.js app (runtime)
 ├── public/               # Static assets
 ├── uploads/              # Local runtime cache (gitignored) — resumes, tests, logs
-├── Resource_Question_Mapping.xlsx
-├── Employee_User_Credentials.xlsx
-├── QB-new.xlsx
-└── resources less than 3.5 rating - latest.xlsx
 ```
 
 **Do not delete `uploads/` for local runs** — the app reads/writes `uploads/*.json`, resumes, and recordings locally. Hosted uses Supabase + `/tmp`. Git already ignores `uploads/*` except `.gitkeep`.

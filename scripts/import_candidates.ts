@@ -5,9 +5,9 @@ import path from 'path';
 
 // --- CONFIGURATION ---
 const ROOT = path.join(__dirname, '..');
-const QUESTION_BANK_FILE = path.join(ROOT, 'QB-new.xlsx');
-const RESOURCE_FILE = path.join(ROOT, 'resources less than 3.5 rating - latest.xlsx');
-const OUTPUT_FILE = 'Processed_Candidate_Mappings.xlsx';
+const QUESTION_BANK_FILE = path.join(ROOT, 'excel', 'QB-new.xlsx');
+const RESOURCE_FILE = path.join(ROOT, 'excel', 'resources less than 3.5 rating - latest.xlsx');
+const OUTPUT_FILE = path.join(ROOT, 'excel', 'Processed_Candidate_Mappings.xlsx');
 const ACCOUNTS_STORE_FILE = 'c:/Users/aryanmi/OneDrive - Infinite Computer Solutions (India) Limited/Desktop/Interviee/src/data/employee-accounts.json';
 const AUTH_SECRET = "dev-employee-auth-secret"; // We assume it's this or process.env
 
