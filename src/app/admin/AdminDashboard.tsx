@@ -64,7 +64,7 @@ import {
 } from "@/lib/portal-test-status";
 import { formatProductDisplayName } from "@/lib/product-display-name";
 import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
-import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT } from "@/lib/skill-match";
+import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT, type SkillBreakdownItem, type ScoreParts } from "@/lib/skill-match";
 import { clearAdminAccessFlags, readAdminAccessFlags, storeAdminAccessFlags } from "@/lib/admin-accounts";
 
 function portalEmployeeName(account: { full_name?: string | null; employee_id?: string | null }): string {
@@ -100,6 +100,52 @@ function personSkillChips(emp: { skills?: string | null; matchingSkills?: string
   if (unique.length) return unique;
   return (Array.isArray(emp.matchingSkills) ? emp.matchingSkills : []).filter(
     (skill) => typeof skill === "string" && skill.length >= 2 && skill.length <= 32 && /[A-Za-z]{2,}/.test(skill)
+  );
+}
+
+function skillMatchBadge(item: Pick<SkillBreakdownItem, "status" | "scoring">): { label: string; className: string } {
+  if (!item.scoring && item.status !== "missing") {
+    return { label: "Present", className: "bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200" };
+  }
+  if (!item.scoring) {
+    return { label: "Not scored", className: "bg-slate-100 dark:bg-slate-800 text-slate-500" };
+  }
+  if (item.status === "strong") {
+    return { label: "Strong", className: "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300" };
+  }
+  if (item.status === "solid") {
+    return { label: "Match", className: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300" };
+  }
+  if (item.status === "weak") {
+    return { label: "Weak", className: "bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300" };
+  }
+  return { label: "Missing", className: "bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300" };
+}
+
+function ScorePartRow({
+  label,
+  points,
+  max,
+  hint,
+}: {
+  label: string;
+  points: number;
+  max: number;
+  hint?: string;
+}) {
+  const pct = max > 0 ? Math.min(100, (points / max) * 100) : 0;
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}</span>
+        <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+          {points}/{max} pts{hint ? ` · ${hint}` : ""}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+        <div className="h-full rounded-full bg-indigo-500 dark:bg-indigo-400" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   );
 }
 
@@ -3844,15 +3890,22 @@ export default function AdminDashboard() {
         familyRelation: "",
         personFamily: "",
         jdFamily: "",
+        skillBreakdown: [] as SkillBreakdownItem[],
+        bonusSkills: [] as string[],
+        scoreParts: null as ScoreParts | null,
       };
     }
     const result = calculateSkillMatch(employeeMatchText(activeEmployee), jdText);
-    const required = extractJdDisplaySkills(jdText);
-    const matchedSet = new Set((result.matchingSkills || []).map((skill) => skill.toLowerCase()));
-    const missing = required.filter((skill) => !matchedSet.has(skill.toLowerCase()));
+    const required = result.skillBreakdown.map((row) => row.skill);
+    const matched = result.skillBreakdown
+      .filter((row) => row.scoring && (row.status === "strong" || row.status === "solid"))
+      .map((row) => row.skill);
+    const missing = result.skillBreakdown
+      .filter((row) => row.scoring && (row.status === "missing" || row.status === "weak"))
+      .map((row) => row.skill);
     return {
       personSkills,
-      matched: result.matchingSkills || [],
+      matched,
       missing,
       required,
       score: Number(result.score) || 0,
@@ -3863,6 +3916,9 @@ export default function AdminDashboard() {
       familyRelation: result.familyRelation,
       personFamily: result.personFamily,
       jdFamily: result.jdFamily,
+      skillBreakdown: result.skillBreakdown,
+      bonusSkills: result.bonusSkills,
+      scoreParts: result.scoreParts,
     };
   }, [activeEmployee, jdSavedText, selectedJdId]);
 
@@ -7223,7 +7279,7 @@ export default function AdminDashboard() {
 
       {activeEmployee && employeeMatchReport && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in text-foreground">
-          <Card className="w-full max-w-2xl max-h-[90vh] bg-card border border-indigo-150 shadow-2xl rounded-3xl overflow-hidden animate-scale-up flex flex-col">
+          <Card className="w-full max-w-3xl max-h-[90vh] bg-card border border-indigo-150 shadow-2xl rounded-3xl overflow-hidden animate-scale-up flex flex-col">
             <div className="bg-primary text-white px-6 py-4 flex items-center justify-between shrink-0">
               <span className="font-bold text-sm tracking-wide">Match Report</span>
               <button
@@ -7280,49 +7336,130 @@ export default function AdminDashboard() {
                 </div>
               ) : null}
 
+              {employeeMatchReport.scoreParts ? (
+                <div className="rounded-2xl border border-border bg-slate-50/80 dark:bg-slate-950/40 p-3 space-y-2.5">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">How the score is built</span>
+                  <ScorePartRow
+                    label="JD skills"
+                    points={employeeMatchReport.scoreParts.weighted.coverage}
+                    max={45}
+                    hint={`${employeeMatchReport.scoreParts.coveragePct}% coverage`}
+                  />
+                  <ScorePartRow
+                    label="Role family"
+                    points={employeeMatchReport.scoreParts.weighted.family}
+                    max={30}
+                    hint={`${employeeMatchReport.personFamily || "—"} → ${employeeMatchReport.jdFamily || "JD"}`}
+                  />
+                  <ScorePartRow
+                    label="Stack"
+                    points={employeeMatchReport.scoreParts.weighted.stack}
+                    max={15}
+                    hint={employeeMatchReport.jdFamily === "fullstack" ? "both sides of the stack" : "stack weight"}
+                  />
+                  <ScorePartRow
+                    label="Level / years"
+                    points={employeeMatchReport.scoreParts.weighted.level}
+                    max={10}
+                    hint={[
+                      employeeMatchReport.scoreParts.years != null ? `${employeeMatchReport.scoreParts.years} yrs` : null,
+                      employeeMatchReport.scoreParts.grade != null ? `E${employeeMatchReport.scoreParts.grade}` : null,
+                    ].filter(Boolean).join(" · ") || undefined}
+                  />
+                </div>
+              ) : null}
+
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Each JD skill</span>
+                {employeeMatchReport.skillBreakdown.length > 0 ? (
+                  <div className="rounded-2xl border border-border overflow-hidden">
+                    <table className="w-full text-left">
+                      <thead className="bg-slate-50 dark:bg-slate-950/60 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2 font-black">Skill</th>
+                          <th className="px-3 py-2 font-black">Result</th>
+                          <th className="px-3 py-2 font-black hidden sm:table-cell">Credit</th>
+                          <th className="px-3 py-2 font-black">Evidence</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {employeeMatchReport.skillBreakdown.map((row) => {
+                          const badge = skillMatchBadge(row);
+                          return (
+                            <tr key={row.skill} className="border-t border-border align-top">
+                              <td className="px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-100 whitespace-nowrap">
+                                {row.skill}
+                                {!row.scoring ? (
+                                  <div className="text-[9px] font-semibold text-slate-400 uppercase tracking-wide">Table-stakes</div>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-black ${badge.className}`}>
+                                  {badge.label}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hidden sm:table-cell whitespace-nowrap">
+                                {row.scoring ? `${Math.round(row.credit * 100)}%` : "—"}
+                                {row.years != null ? (
+                                  <span className="block text-[9px] font-semibold text-slate-400">{row.years}+ yrs</span>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300 leading-snug">
+                                {row.evidence}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <span className="text-slate-400 text-xs font-semibold">Select a requirement to compare each JD skill.</span>
+                )}
+              </div>
+
+              {employeeMatchReport.bonusSkills.length > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Also on this profile</span>
+                  <div className="flex flex-wrap gap-1">
+                    {employeeMatchReport.bonusSkills.map((s: string) => (
+                      <Badge key={`bonus-${s}`} className="bg-sky-50 dark:bg-sky-950/40 border-0 text-sky-800 dark:text-sky-300 text-[10px] px-2 py-0.5">
+                        {s}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="space-y-1.5">
                 <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Person skills</span>
                 <div className="flex flex-wrap gap-1">
                   {employeeMatchReport.personSkills.length > 0 ? (
-                    employeeMatchReport.personSkills.map((s: string, i: number) => (
-                      <Badge key={`person-${s}-${i}`} className="bg-slate-100 dark:bg-slate-800 border-0 text-slate-700 dark:text-slate-200 text-[10px] px-2 py-0.5">
-                        {s}
-                      </Badge>
-                    ))
+                    employeeMatchReport.personSkills.map((s: string, i: number) => {
+                      const hit = employeeMatchReport.skillBreakdown.some((row) => {
+                        if (row.status === "missing") return false;
+                        const chip = s.toLowerCase();
+                        return (
+                          row.skill.toLowerCase() === chip ||
+                          (row.foundAs && row.foundAs.toLowerCase() === chip) ||
+                          chip.includes(row.skill.toLowerCase())
+                        );
+                      });
+                      return (
+                        <Badge
+                          key={`person-${s}-${i}`}
+                          className={`border-0 text-[10px] px-2 py-0.5 ${
+                            hit
+                              ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200"
+                          }`}
+                        >
+                          {s}
+                        </Badge>
+                      );
+                    })
                   ) : (
                     <span className="text-slate-400 text-xs font-semibold">No skills extracted from this profile.</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Matched against JD</span>
-                <div className="flex flex-wrap gap-1">
-                  {employeeMatchReport.matched.length > 0 ? (
-                    employeeMatchReport.matched.map((s: string, i: number) => (
-                      <Badge key={`matched-${s}-${i}`} className="bg-emerald-50 dark:bg-emerald-950/40 border-0 text-emerald-700 dark:text-emerald-300 text-[10px] px-2 py-0.5">
-                        {s}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-slate-400 text-xs font-semibold">No overlapping JD skills.</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider block">Missing vs JD</span>
-                <div className="flex flex-wrap gap-1">
-                  {employeeMatchReport.missing.length > 0 ? (
-                    employeeMatchReport.missing.map((s: string, i: number) => (
-                      <Badge key={`missing-${s}-${i}`} className="bg-rose-50 dark:bg-rose-950/40 border-0 text-rose-700 dark:text-rose-300 text-[10px] px-2 py-0.5">
-                        {s}
-                      </Badge>
-                    ))
-                  ) : employeeMatchReport.required.length > 0 ? (
-                    <span className="text-emerald-600 text-xs font-semibold">No missing required skills.</span>
-                  ) : (
-                    <span className="text-slate-400 text-xs font-semibold">Select a requirement to compare against a JD.</span>
                   )}
                 </div>
               </div>

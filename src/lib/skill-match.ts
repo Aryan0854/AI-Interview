@@ -147,6 +147,33 @@ export type FamilyRelation = "match" | "adjacent" | "mismatch";
 
 export type MatchDecision = "interview" | "screen" | "hold" | "reject";
 
+export type SkillMatchStatus = "strong" | "solid" | "weak" | "missing";
+
+export type SkillBreakdownItem = {
+  skill: string;
+  status: SkillMatchStatus;
+  credit: number;
+  years: number | null;
+  evidence: string;
+  scoring: boolean;
+  foundAs: string;
+};
+
+export type ScoreParts = {
+  coveragePct: number;
+  familyScore: number;
+  stackScore: number;
+  levelScore: number;
+  years: number | null;
+  grade: number | null;
+  weighted: {
+    coverage: number;
+    family: number;
+    stack: number;
+    level: number;
+  };
+};
+
 export type SkillMatchResult = {
   score: number;
   matchingSkills: string[];
@@ -157,6 +184,19 @@ export type SkillMatchResult = {
   familyRelation: FamilyRelation;
   personFamily: JobFamily;
   jdFamily: JobFamily;
+  skillBreakdown: SkillBreakdownItem[];
+  bonusSkills: string[];
+  scoreParts: ScoreParts;
+};
+
+const EMPTY_SCORE_PARTS: ScoreParts = {
+  coveragePct: 0,
+  familyScore: 0,
+  stackScore: 0,
+  levelScore: 0,
+  years: null,
+  grade: null,
+  weighted: { coverage: 0, family: 0, stack: 0, level: 0 },
 };
 
 function emptyMatch(rationale = "No skills or requirement text to score."): SkillMatchResult {
@@ -170,6 +210,9 @@ function emptyMatch(rationale = "No skills or requirement text to score."): Skil
     familyRelation: "mismatch",
     personFamily: "other",
     jdFamily: "other",
+    skillBreakdown: [],
+    bonusSkills: [],
+    scoreParts: EMPTY_SCORE_PARTS,
   };
 }
 
@@ -343,6 +386,74 @@ function skillYearsHint(raw: string, skill: string): number {
   return 0;
 }
 
+function findMatchedAlias(emp: { canonical: Set<string>; raw: string }, required: string): string {
+  const canon = canonicalizeToken(required) || required.toLowerCase();
+  const aliases = aliasesForSkill(required, 2).sort((a, b) => b.length - a.length);
+  for (const alias of aliases) {
+    if (!hasPhrase(emp.raw, alias)) continue;
+    if (alias.length > canon.length && (alias.includes(" ") || alias.includes(".") || alias.includes("-"))) {
+      return alias
+        .split(/[\s._-]+/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
+    }
+    return prettySkill(canonicalizeToken(alias) || alias);
+  }
+  const related = RELATED_EQUIVALENCE[canon] || RELATED_EQUIVALENCE[required] || [];
+  for (const r of related) {
+    if (emp.canonical.has(r) || hasPhrase(emp.raw, r)) return prettySkill(r);
+  }
+  return "";
+}
+
+function describeSkillMatch(
+  emp: { canonical: Set<string>; raw: string },
+  required: string,
+  credit: number
+): SkillBreakdownItem {
+  const canon = canonicalizeToken(required) || required.toLowerCase();
+  const scoring = !TABLE_STAKES_SKILLS.has(canon);
+  const yearsHint = skillYearsHint(emp.raw, required);
+  const years = yearsHint > 0 ? yearsHint : null;
+  const foundAs = findMatchedAlias(emp, required);
+  const related = RELATED_EQUIVALENCE[canon] || [];
+  const viaRelated = related.find((r) => emp.canonical.has(r) || hasPhrase(emp.raw, r));
+  const present = employeeHasSkill(emp, required);
+
+  let status: SkillMatchStatus = "missing";
+  if (credit >= 0.9) status = "strong";
+  else if (credit >= 0.7) status = "solid";
+  else if (credit > 0 || present) status = "weak";
+
+  const bits: string[] = [];
+  if (!present) {
+    bits.push("Not found in this profile");
+  } else if (isWeakMention(emp.raw, required)) {
+    bits.push(foundAs ? `Only a weak mention as ${foundAs}` : "Only a weak mention");
+  } else if (viaRelated && prettySkill(viaRelated).toLowerCase() !== prettySkill(canon).toLowerCase()) {
+    bits.push(`Counted via ${prettySkill(viaRelated)} (treated as equivalent)`);
+  } else if (foundAs && foundAs.toLowerCase() !== prettySkill(canon).toLowerCase()) {
+    bits.push(`Matched as ${foundAs}`);
+  } else {
+    bits.push("Found in profile skills");
+  }
+  if (years != null) bits.push(`${years}+ years nearby in the profile`);
+  if (!scoring) {
+    bits.push(present ? "Table-stakes — does not change the fit score" : "Table-stakes if present — does not change the fit score");
+  }
+
+  return {
+    skill: prettySkill(canon),
+    status,
+    credit,
+    years,
+    evidence: bits.join(". ") + ".",
+    scoring,
+    foundAs,
+  };
+}
+
 function prettySkill(s: string): string {
   const special: Record<string, string> = {
     "node.js": "Node.js",
@@ -361,6 +472,7 @@ function prettySkill(s: string): string {
     gcp: "GCP",
     html: "HTML",
     css: "CSS",
+    git: "Git",
     sql: "SQL",
     rest: "REST",
     api: "API",
@@ -718,6 +830,50 @@ export function calculateSkillMatch(
     rationaleParts.push("only one side of the stack");
   }
 
+  const breakdownSeen = new Set<string>();
+  const skillBreakdown: SkillBreakdownItem[] = [];
+  const orderedReq = [
+    ...scoredSkills,
+    ...required.filter((s) => !scoredSkills.includes(s)),
+  ];
+  for (const req of orderedReq) {
+    const key = (canonicalizeToken(req) || req).toLowerCase();
+    if (!key || breakdownSeen.has(key)) continue;
+    breakdownSeen.add(key);
+    const credit = credits.has(req) ? credits.get(req) || 0 : skillCredit(emp, req);
+    skillBreakdown.push(describeSkillMatch(emp, req, credit));
+  }
+
+  const requiredCanon = new Set(required.map((s) => canonicalizeToken(s) || s));
+  const knownSkills = new Set(Object.values(CANONICAL_ALIASES));
+  const bonusSkills: string[] = [];
+  const bonusSeen = new Set<string>();
+  for (const skill of emp.canonical) {
+    if (!knownSkills.has(skill)) continue;
+    if (requiredCanon.has(skill) || TABLE_STAKES_SKILLS.has(skill)) continue;
+    const label = prettySkill(skill);
+    const k = label.toLowerCase();
+    if (!k || bonusSeen.has(k)) continue;
+    bonusSeen.add(k);
+    bonusSkills.push(label);
+  }
+  bonusSkills.sort((a, b) => a.localeCompare(b));
+
+  const scoreParts: ScoreParts = {
+    coveragePct: Math.round(coveragePct),
+    familyScore: alignment.score,
+    stackScore: stack,
+    levelScore: level,
+    years,
+    grade: parseGrade(emp.raw),
+    weighted: {
+      coverage: Math.round(0.45 * coveragePct),
+      family: Math.round(0.30 * alignment.score),
+      stack: Math.round(0.15 * stack),
+      level: Math.round(0.10 * level),
+    },
+  };
+
   return {
     score,
     matchingSkills,
@@ -728,5 +884,8 @@ export function calculateSkillMatch(
     familyRelation: alignment.relation,
     personFamily,
     jdFamily,
+    skillBreakdown,
+    bonusSkills: bonusSkills.slice(0, 16),
+    scoreParts,
   };
 }
