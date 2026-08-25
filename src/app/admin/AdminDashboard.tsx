@@ -611,7 +611,7 @@ export default function AdminDashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
-  const [canViewEmployeePortal, setCanViewEmployeePortal] = useState(true);
+  const [canViewEmployeePortal, setCanViewEmployeePortal] = useState(() => readAdminAccessFlags().canViewEmployeePortal);
   const [canChangePassword, setCanChangePassword] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
@@ -1155,8 +1155,9 @@ export default function AdminDashboard() {
     try {
       const sendJdId = selectedJdId && !selectedJdId.includes("@") ? selectedJdId : "all";
       const freshQuery = opts?.fresh ? "&fresh=1" : "";
+      const emailQuery = adminEmail ? `&email=${encodeURIComponent(adminEmail)}` : "";
       const res = await fetch(
-        `/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}${freshQuery}`
+        `/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}${freshQuery}${emailQuery}`
       );
       const data = await res.json();
       if (!res.ok) {
@@ -1178,7 +1179,7 @@ export default function AdminDashboard() {
     } finally {
       setIsEmployeesLoading(false);
     }
-  }, [selectedJdId]);
+  }, [selectedJdId, adminEmail]);
 
   useEffect(() => {
     if (authenticated && adminEmail) {
@@ -1847,7 +1848,7 @@ export default function AdminDashboard() {
     setIsExportingPortal(true);
     setActionError(null);
     try {
-      const res = await fetch("/api/admin/employees/export-portal");
+      const res = await fetch(`/api/admin/employees/export-portal?email=${encodeURIComponent(adminEmail)}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Export failed");
@@ -1939,7 +1940,7 @@ export default function AdminDashboard() {
           withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 60000, "resumes"),
           withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
           withTimeout(
-            fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1`),
+            fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1&email=${encodeURIComponent(email)}`),
             60000,
             "employees"
           ),

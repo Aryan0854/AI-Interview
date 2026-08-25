@@ -19,6 +19,7 @@ import {
   markRequirementsDeleted,
 } from '@/lib/deleted-requirements';
 import { eraseDeletedRequirementsFromMaster } from '@/services/automation-service';
+import { adminCanViewOrgScreeningData } from '@/lib/admin-accounts-server';
 
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
@@ -176,7 +177,7 @@ export async function GET(request: NextRequest) {
     jds = uniqueJds;
 
     // Shared org JDs (admin@infinite.com) are visible to every admin login.
-    if (!email || email === "admin@infinite.com") {
+    if (!email || (await adminCanViewOrgScreeningData(email))) {
       return NextResponse.json({ jds });
     }
     const filtered = jds.filter((j: any) => {

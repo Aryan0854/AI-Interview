@@ -5,6 +5,12 @@ import type { AdminAccess } from "@/lib/admin-accounts";
 
 const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "12345";
 const SUPER_ADMIN_EMAIL = "admin@infinite.com";
+const SCREENING_ONLY_PASSWORD = process.env.SCREENING_ADMIN_PASSWORD || "56789";
+const SCREENING_ONLY_ADMIN_EMAILS = new Set([
+  "ramendras@infinite.com",
+  "nehalathar@infinite.com",
+  "shwethab@infinite.com",
+]);
 const ACCOUNTS_SETTINGS_KEY = "admin_named_accounts";
 const LEGACY_PASSWORD_SETTINGS_KEY = "admin_named_passwords";
 const ACCOUNTS_STORE_FILE = "admin-named-accounts.json";
@@ -25,6 +31,10 @@ let accountCache: { at: number; value: NamedAdminMap } | null = null;
 
 function cleanEmail(email: string): string {
   return String(email || "").trim().toLowerCase();
+}
+
+function isScreeningOnlyAdmin(email: string): boolean {
+  return SCREENING_ONLY_ADMIN_EMAILS.has(cleanEmail(email));
 }
 
 function secretLooksValid(stored?: { hash?: string; salt?: string }): stored is StoredSecret {
@@ -117,6 +127,13 @@ async function loadNamedAdminAccounts(): Promise<NamedAdminMap> {
     dirty = true;
   }
 
+  for (const email of SCREENING_ONLY_ADMIN_EMAILS) {
+    if (accounts[email]?.canViewEmployeePortal) {
+      accounts[email] = { ...accounts[email], canViewEmployeePortal: false };
+      dirty = true;
+    }
+  }
+
   if (dirty) {
     await saveNamedAdminAccounts(accounts);
   } else {
@@ -129,10 +146,13 @@ async function loadNamedAdminAccounts(): Promise<NamedAdminMap> {
 async function saveNamedAdminAccounts(value: NamedAdminMap): Promise<void> {
   accountCache = { at: Date.now(), value };
   try {
-    const { error } = await supabase.from("portal_settings").upsert({
-      key: ACCOUNTS_SETTINGS_KEY,
-      value,
-    });
+    const { error } = await supabase.from("portal_settings").upsert(
+      {
+        key: ACCOUNTS_SETTINGS_KEY,
+        value,
+      },
+      { onConflict: "key" }
+    );
     if (error) throw error;
   } catch (err) {
     console.warn("Failed to save named admin accounts to Supabase:", err);
@@ -152,16 +172,17 @@ export async function getNamedAdminRecord(email: string): Promise<NamedAdminReco
 export async function getAdminAccess(email: string): Promise<AdminAccess> {
   const user = cleanEmail(email);
   const named = await getNamedAdminRecord(user);
+  const hidePortal = isScreeningOnlyAdmin(user);
   if (named) {
     return {
       email: user,
-      canViewEmployeePortal: named.canViewEmployeePortal,
+      canViewEmployeePortal: named.canViewEmployeePortal && !hidePortal,
       canChangePassword: named.canChangePassword,
     };
   }
   return {
     email: user,
-    canViewEmployeePortal: true,
+    canViewEmployeePortal: !hidePortal,
     canChangePassword: false,
   };
 }
@@ -173,7 +194,7 @@ export async function adminCanChangePassword(email: string): Promise<boolean> {
 
 export async function adminCanViewOrgScreeningData(email: string): Promise<boolean> {
   const user = cleanEmail(email);
-  if (user === SUPER_ADMIN_EMAIL) return true;
+  if (user === SUPER_ADMIN_EMAIL || isScreeningOnlyAdmin(user)) return true;
   const named = await getNamedAdminRecord(user);
   return Boolean(named?.canViewOrgScreeningData);
 }
@@ -186,10 +207,15 @@ export async function authenticateAdminCredentials(
   if (!user.endsWith("@infinite.com") || !password) return null;
 
   const named = await getNamedAdminRecord(user);
-  if (named) {
-    if (!secretLooksValid(named) || !matchesStoredPassword(password, named)) return null;
+  if (named && secretLooksValid(named) && matchesStoredPassword(password, named)) {
     return await getAdminAccess(user);
   }
+
+  if (isScreeningOnlyAdmin(user) && password === SCREENING_ONLY_PASSWORD) {
+    return await getAdminAccess(user);
+  }
+
+  if (named) return null;
 
   if (password !== DEFAULT_ADMIN_PASSWORD) return null;
   return await getAdminAccess(user);

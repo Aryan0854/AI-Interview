@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { authenticateAdminRequest } from "@/lib/employee-auth";
+import { getAdminAccess } from "@/lib/admin-accounts-server";
 import { supabase } from "@/lib/db";
 import { localTestsDb, LocalTestsDb } from "@/services/local-tests-db";
 import { allowLocalTestsFallback, useSupabasePrimary } from "@/lib/db-mode";
@@ -209,6 +210,14 @@ function applyDataBorders(worksheet: ExcelJS.Worksheet) {
 export async function GET(request: NextRequest) {
   if (!authenticateAdminRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const requesterEmail = new URL(request.url).searchParams.get("email")?.trim().toLowerCase() || "";
+  if (requesterEmail) {
+    const access = await getAdminAccess(requesterEmail);
+    if (!access.canViewEmployeePortal) {
+      return NextResponse.json({ error: "Employee Portal is not available for this login." }, { status: 403 });
+    }
   }
 
   try {

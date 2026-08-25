@@ -13,6 +13,7 @@ import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
 import { cacheStore } from '@/lib/cache-store';
 import { deleteDocFile, listDocFiles } from '@/lib/docs-storage';
 import { isCorpPoolDeleted, loadDeletedCorpPool, markCorpPoolDeleted } from '@/lib/deleted-corp-pool';
+import { getAdminAccess } from '@/lib/admin-accounts-server';
 import {
   buildResourcePortalEmployees,
   loadEmployeeTestManifest,
@@ -38,6 +39,22 @@ export async function GET(request: NextRequest) {
   const activeJdId = searchParams.get('activeJdId') || undefined;
   const isExport = searchParams.get('export') === 'true';
   const skipCache = searchParams.get('fresh') === '1';
+  const requesterEmail = searchParams.get('email')?.trim().toLowerCase() || "";
+  const access = requesterEmail ? await getAdminAccess(requesterEmail) : null;
+  const hidePortal = access ? !access.canViewEmployeePortal : false;
+
+  const withPortalVisibility = (payload: {
+    employees: unknown;
+    allTestResults: unknown;
+    resourcePortalEmployees: unknown;
+  }) => {
+    if (!hidePortal) return payload;
+    return {
+      ...payload,
+      allTestResults: [],
+      resourcePortalEmployees: [],
+    };
+  };
 
   const cached = !skipCache && cacheStore.get("employees", 120000, activeJdId);
   if (cached && !isExport) {
@@ -50,7 +67,7 @@ export async function GET(request: NextRequest) {
       cachedPortal.filter((e: any) => e?.test_id || (e?.assigned_question_count ?? 0) > 0).length > 0 &&
       cachedResults === 0;
     if (!assignedWithoutLive) {
-      return NextResponse.json(cached);
+      return NextResponse.json(withPortalVisibility(cached));
     }
   }
 
@@ -597,7 +614,7 @@ export async function GET(request: NextRequest) {
       cacheStore.invalidate("employees");
     }
 
-    return NextResponse.json(payload);
+    return NextResponse.json(withPortalVisibility(payload));
   }
 
   return NextResponse.json({ employees, allTestResults });
