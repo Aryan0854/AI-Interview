@@ -359,12 +359,13 @@ export async function DELETE(request: NextRequest) {
 
   const url = new URL(request.url);
   const id = url.searchParams.get("id");
-  const body = await request.json().catch(() => ({}));
-  const ids = Array.from(
+  const body = (await request.json().catch(() => ({}))) as { ids?: unknown };
+  const rawIds: unknown[] = Array.isArray(body.ids) ? body.ids : id ? [id] : [];
+  const ids: string[] = Array.from(
     new Set(
-      (Array.isArray(body.ids) ? body.ids : id ? [id] : [])
-        .map((value: unknown) => String(value || "").trim())
-        .filter(Boolean)
+      rawIds
+        .map((value: unknown) => String(value ?? "").trim())
+        .filter((value) => value.length > 0)
     )
   );
 
