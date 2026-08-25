@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile } from 'fs/promises';
 import { authenticateAdminRequest } from '@/lib/employee-auth';
 import { checkCsrf } from '@/lib/security';
+import { writeDocFile, type DocCategory } from '@/lib/docs-storage';
 import { 
   refreshRequirements, 
   refreshCandidates, 
@@ -10,8 +11,19 @@ import {
   refreshInterviews 
 } from '@/services/automation-service';
 
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
 const getUploadsRoot = () => {
   return process.env.VERCEL === "1" ? "/tmp" : join(process.cwd(), "uploads");
+};
+
+const CATEGORY_MAP: Record<string, { docCategory?: DocCategory; refresh: string }> = {
+  resume: { docCategory: "Resumes", refresh: "candidates" },
+  jd: { docCategory: "JD", refresh: "requirements" },
+  br: { docCategory: "BR", refresh: "requirements" },
+  employee: { docCategory: "Corp Pool", refresh: "employees" },
+  interview: { refresh: "interviews" },
 };
 
 export async function POST(request: NextRequest) {
@@ -25,54 +37,36 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    const category = formData.get('category') as string || ''; // resume, jd, br, employee, interview
+    const category = formData.get('category') as string || '';
     const activeJdId = formData.get('activeJdId') as string || undefined;
 
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    const filename = file.name;
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    let targetDir = "";
-    let triggerRefreshType = "";
-
-    if (category === 'resume') {
-      targetDir = join(process.cwd(), "docs", "Resumes");
-      triggerRefreshType = "candidates";
-    } else if (category === 'jd') {
-      targetDir = join(process.cwd(), "docs", "JD");
-      triggerRefreshType = "requirements";
-    } else if (category === 'br') {
-      targetDir = join(process.cwd(), "docs", "BR");
-      triggerRefreshType = "requirements";
-    } else if (category === 'employee') {
-      targetDir = join(process.cwd(), "docs", "Corp Pool");
-      triggerRefreshType = "employees";
-    } else if (category === 'interview') {
-      const csvPath = join(getUploadsRoot(), "candidate_interview_data.csv");
-      await writeFile(csvPath, buffer);
-      triggerRefreshType = "interviews";
-    } else {
+    const mapping = CATEGORY_MAP[category];
+    if (!mapping) {
       return NextResponse.json({ error: "Invalid upload category" }, { status: 400 });
     }
 
-    if (category !== 'interview') {
-      await mkdir(targetDir, { recursive: true });
-      const filePath = join(targetDir, filename);
-      await writeFile(filePath, buffer);
+    const filename = file.name;
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    if (category === 'interview') {
+      const csvPath = join(getUploadsRoot(), "candidate_interview_data.csv");
+      await writeFile(csvPath, buffer);
+    } else if (mapping.docCategory) {
+      await writeDocFile(mapping.docCategory, filename, buffer);
     }
 
-    // Trigger processing automatically based on refresh type
-    let refreshResult: any = {};
-    if (triggerRefreshType === 'requirements') {
+    let refreshResult: Record<string, unknown> = {};
+    if (mapping.refresh === 'requirements') {
       refreshResult = await refreshRequirements();
-    } else if (triggerRefreshType === 'candidates') {
+    } else if (mapping.refresh === 'candidates') {
       refreshResult = await refreshCandidates(activeJdId);
-    } else if (triggerRefreshType === 'employees') {
+    } else if (mapping.refresh === 'employees') {
       refreshResult = await refreshEmployees(activeJdId);
-    } else if (triggerRefreshType === 'interviews') {
+    } else if (mapping.refresh === 'interviews') {
       refreshResult = await refreshInterviews();
     }
 

@@ -709,7 +709,7 @@ export default function AdminResponseReviewPage() {
                                 <h3 className="text-sm font-bold text-slate-850 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
                                   <ShieldAlert className="w-4 h-4 text-indigo-500" /> Proctoring Integrity Logs
                                 </h3>
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-semibold">
+                                <p className="text-xs text-muted-foreground mt-0.5 font-semibold">
                                   Review real-time violations, gaze shifts, tab activity, and voice triggers.
                                 </p>
                               </div>
@@ -806,7 +806,7 @@ export default function AdminResponseReviewPage() {
                                         className="p-3 flex items-start gap-3 hover:bg-indigo-50/60 dark:hover:bg-slate-800/40 transition-all cursor-pointer group"
                                       >
                                         {/* Timestamp tag */}
-                                        <div className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-slate-800 text-indigo-700 dark:text-violet-400 font-mono text-xs font-bold flex-shrink-0 mt-0.5 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                                        <div className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-slate-800 text-primary font-mono text-xs font-bold flex-shrink-0 mt-0.5 group-hover:bg-indigo-600 group-hover:text-white transition-all">
                                           {formatVideoTime(v.videoTimestamp)}
                                         </div>
 
@@ -827,7 +827,7 @@ export default function AdminResponseReviewPage() {
                                               isCritical
                                                 ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-rose-455 border border-red-200 dark:border-red-900/40'
                                                 : ['Looking Left', 'Looking Right', 'Looking Up', 'Looking Down', 'Excessive Noise'].includes(v.type)
-                                                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+                                                  ? 'bg-secondary text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
                                                   : 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40'
                                             }`}>
                                               {isCritical ? 'Critical' : ['Looking Left', 'Looking Right', 'Looking Up', 'Looking Down', 'Excessive Noise'].includes(v.type) ? 'Low' : 'Medium'}
@@ -868,11 +868,11 @@ export default function AdminResponseReviewPage() {
                     </div>
                   ) : (
                     violationsList.length > 0 && (
-                      <Card className="p-6 bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 shadow-soft rounded-3xl">
+                      <Card className="p-6 bg-card border border-border shadow-soft rounded-3xl">
                         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                           <div>
                             <h3 className="text-sm font-bold text-slate-850 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                              <ShieldAlert className="w-4 h-4 text-indigo-500" /> Proctoring Integrity Logs (No Video Stream)
+                              <ShieldAlert className="w-4 h-4 text-primary" /> Proctoring Integrity Logs (No Video Stream)
                             </h3>
                           </div>
                           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border font-bold text-xs ${metrics.bg}`}>
@@ -891,13 +891,13 @@ export default function AdminResponseReviewPage() {
                               const isCritical = ["Multiple People Detected", "Fullscreen Exit Detected"].includes(v.type);
                               return (
                                 <div key={index} className="p-3 flex items-start gap-3 hover:bg-indigo-50/60 dark:hover:bg-slate-800/40 transition-all">
-                                  <div className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-slate-800 text-indigo-700 dark:text-violet-400 font-mono text-xs font-bold flex-shrink-0 mt-0.5">
+                                  <div className="px-2 py-0.5 rounded bg-indigo-100 dark:bg-slate-800 text-primary font-mono text-xs font-bold flex-shrink-0 mt-0.5">
                                     {formatVideoTime(v.videoTimestamp)}
                                   </div>
                                   <div className="flex-grow min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="font-extrabold text-xs text-slate-800 dark:text-slate-200">{v.type}</span>
-                                      <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.2 rounded-md font-bold bg-slate-100 dark:bg-slate-800 text-slate-550 dark:text-slate-400">
+                                      <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.2 rounded-md font-bold bg-secondary text-slate-550 dark:text-slate-400">
                                         {isAudio ? 'Audio' : 'Video'}
                                       </span>
                                       <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.2 rounded-md font-bold ${
@@ -906,7 +906,7 @@ export default function AdminResponseReviewPage() {
                                         {isCritical ? 'Critical' : 'Medium'}
                                       </span>
                                     </div>
-                                    <p className="text-xs text-slate-600 dark:text-slate-350 mt-1 leading-snug font-medium">{v.description}</p>
+                                    <p className="text-xs text-muted-foreground mt-1 leading-snug font-medium">{v.description}</p>
                                   </div>
                                 </div>
                               );

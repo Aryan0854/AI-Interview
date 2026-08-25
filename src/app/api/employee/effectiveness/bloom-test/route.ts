@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { effectivenessService } from "@/services/effectiveness-service";
 
 const MOCK_BLOOM_QUESTIONS: Record<string, any[]> = {
@@ -139,7 +139,7 @@ const DEFAULT_QUESTIONS = [
 ];
 
 export async function GET(request: NextRequest) {
-  const auth = authenticateRequest(request);
+  const auth = await authenticateRequestAsync(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = authenticateRequest(request);
+  const auth = await authenticateRequestAsync(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

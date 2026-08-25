@@ -50,9 +50,10 @@ export interface BusinessImpact {
   quality_metric: string;
   customer_csat_before: number;
   customer_csat_after: number;
-  cost_reduction: number; // USD/local
-  time_saved_hours: number;
-  roi_score: number; // percentage
+  cost_reduction: number | null; // USD/local
+  time_saved_hours: number | null;
+  roi_score: number | null; // percentage — see note in effectiveness-service.ts: computed
+    // against a hardcoded assumed training cost, not a real submitted figure
   business_impact_score: number; // 0-100 scale
   approved_by_pm: boolean;
   approved_by_rm: boolean;

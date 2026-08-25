@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, RotateCcw, AlertTriangle, Sparkles } from "lucide-react";
+import { CheckCircle2, RotateCcw, AlertTriangle, Sparkles, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 function ResultsView(props: {
@@ -12,11 +12,13 @@ function ResultsView(props: {
     ai_analysis?: { summary?: string; strengths?: string[]; weaknesses?: string[]; next_steps?: string[]; continue_message?: string } | string;
     topic_title: string;
   };
+  videoUploadState?: "pending" | "uploading" | "done" | "failed";
   onRetake: () => void;
   onGoDashboard: () => void;
 }) {
   const { correct = 0, total = 0, accuracy_pct = 0, ai_analysis, topic_title } = props.result;
   const analysis = typeof ai_analysis === "string" ? { summary: ai_analysis } : ai_analysis;
+  const videoUploadState = props.videoUploadState ?? "done";
   const pct = accuracy_pct;
   const accent = pct >= 75
     ? "text-emerald-600"
@@ -85,12 +87,36 @@ function ResultsView(props: {
         </div>
       )}
 
+      {/* ── Video upload status ── */}
+      {videoUploadState === "uploading" && (
+        <div className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50/80 dark:bg-indigo-950/30 p-4 flex items-center gap-3 text-sm text-indigo-900 dark:text-indigo-200">
+          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+          <p className="font-medium">Saving proctoring video… Please keep this page open.</p>
+        </div>
+      )}
+      {videoUploadState === "done" && (
+        <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/80 dark:bg-emerald-950/20 p-4 text-sm text-emerald-800 dark:text-emerald-300 font-medium">
+          Proctoring video saved successfully.
+        </div>
+      )}
+      {videoUploadState === "failed" && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/80 dark:bg-amber-950/20 p-4 text-sm text-amber-900 dark:text-amber-200">
+          Proctoring video could not be saved. Your score is already recorded — use{" "}
+          <strong>Upload Proctoring Video</strong> on your dashboard to add it without retaking the test.
+        </div>
+      )}
+
       {/* ── Actions ── */}
       <div className="flex gap-3">
         <Button onClick={props.onRetake} className="flex-1 gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white rounded-xl shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/35 transition-all font-semibold">
           <RotateCcw className="w-4 h-4" /> Retake
         </Button>
-        <Button variant="outline" className="flex-1 rounded-xl border-indigo-200 dark:border-slate-800 text-indigo-700 dark:text-violet-450 hover:bg-indigo-50 dark:hover:bg-slate-800 font-semibold" onClick={props.onGoDashboard}>
+        <Button
+          variant="outline"
+          className="flex-1 rounded-xl border-border text-indigo-700 dark:text-violet-450 hover:bg-secondary font-semibold"
+          onClick={props.onGoDashboard}
+          disabled={videoUploadState === "uploading"}
+        >
           Back to Dashboard
         </Button>
       </div>

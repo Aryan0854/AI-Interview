@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequestAsync, isProductQbEmployee, PRODUCT_ASSESSMENT_TOPIC_ID } from "@/lib/employee-auth";
 import { curriculum } from "@/data/learning-curriculum";
+import { isBlockedQbCatalogSubject } from "@/data/learning-subjects";
 
 // In-memory cache for catalog metadata
 let catalogCache: {
@@ -24,7 +25,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache TTL
 export async function GET(request: NextRequest) {
   try {
     // ── Auth: custom employee token ───────────────────────────────────
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestAsync(request);
     if (!auth) {
       return NextResponse.json([]);
     }
@@ -179,9 +180,21 @@ export async function GET(request: NextRequest) {
       return display;
     });
 
-    const allowed = isAdmin ? tree : tree;
+    const filteredTree = tree.filter((s: any) => !isBlockedQbCatalogSubject(s));
 
-    return NextResponse.json(allowed);
+    if (isProductQbEmployee(auth.employee)) {
+      filteredTree.unshift({
+        id: PRODUCT_ASSESSMENT_TOPIC_ID,
+        title: auth.employee.product ? `${auth.employee.product} Question Bank` : "Product Question Bank",
+        description: "Your assigned product assessment from the question bank",
+        icon: "Database",
+        color: "#4338CA",
+        is_active: true,
+        modules: [],
+      });
+    }
+
+    return NextResponse.json(filteredTree);
   } catch (e) {
     console.error("GET /employee/catalog error:", e);
     // As a last resort return the static curriculum so the portal is never blank

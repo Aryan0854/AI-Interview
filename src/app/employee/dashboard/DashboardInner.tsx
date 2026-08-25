@@ -26,6 +26,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import ThemeToggle from "@/components/ThemeToggle";
+import { computeReadinessScore, computeSkillLevel } from "@/lib/dashboard-analytics";
 
 import {
   Loader2,
@@ -48,6 +49,9 @@ export function DashboardInner() {
   const router = useRouter();
   const [analytics, setAnalytics] = useState<any>(null);
   const [results, setResults]     = useState<any[]>([]);
+  const [assignedTest, setAssignedTest] = useState<any>(null);
+  const [completedAssessment, setCompletedAssessment] = useState<any>(null);
+  const [productQbEligible, setProductQbEligible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr]       = useState<string | null>(null);
   const [tab, setTab]       = useState<"analytics" | "tests">("analytics");
@@ -58,12 +62,19 @@ export function DashboardInner() {
     if (!token) { setErr("Please sign in to access the dashboard."); setLoading(false); return; }
     (async () => {
       try {
-        const [a, r] = await Promise.all([
+        const [a, r, assigned, profile] = await Promise.all([
           fetchAnalytics(token),
           fetchResults(token),
+          fetchAssignedTest(token),
+          fetchEmployeeProfile(token),
         ]);
         if (cancelled) return;
         setAnalytics(a); setResults(r);
+        setProductQbEligible(profile?.product_qb_eligible === true);
+        if (assigned?.active_test) setAssignedTest(assigned.active_test);
+        else if (assigned?.test_id) setAssignedTest(assigned);
+        else setAssignedTest(null);
+        setCompletedAssessment(assigned?.completed_test ?? null);
       } catch (e: any) { if (!cancelled) setErr(e.message); }
       finally { if (!cancelled) setLoading(false); }
     })();
@@ -77,9 +88,28 @@ export function DashboardInner() {
 
   const displayAnalytics = useMemo(() => {
     if (!analytics) return null;
+    // Provide safe fallbacks for empty analytics
+    const totalTestsTaken = Math.max(displayResults.length, analytics.total_tests_taken || 0);
+    const averageScore = analytics.average_score || 0;
+    const activeBreakdown = (analytics.subject_breakdown ?? []).filter(
+      (s: any) => (s?.topic_count ?? 0) > 0
+    );
+    const readinessScore =
+      analytics.ai_readiness_score ||
+      computeReadinessScore({
+        averageScore,
+        totalTestsTaken,
+        subjectBreakdown: activeBreakdown,
+        testScores: displayResults.map((result: any) => result.accuracy_pct ?? 0),
+      });
+
     return {
       ...analytics,
-      total_tests_taken: displayResults.length,
+      total_tests_taken: totalTestsTaken,
+      average_score: averageScore,
+      ai_readiness_score: readinessScore,
+      skill_level: analytics.skill_level || computeSkillLevel(readinessScore),
+      xp_points: analytics.xp_points || 0,
       strongest_subject: analytics.strongest_subject?.subject_title ? analytics.strongest_subject : null,
       weakest_subject: analytics.weakest_subject?.subject_title ? analytics.weakest_subject : null,
       score_history: analytics.score_history || [],
@@ -89,14 +119,32 @@ export function DashboardInner() {
 
   const radarData = useMemo(() => {
     const subs = (displayAnalytics?.subject_breakdown || []) as any[];
-    const attempted = subs.filter((s) => s && s.topic_count > 0);
+    const attempted = subs.filter((s) => s && s.topic_count > 0 && s.subject_title);
     if (attempted.length === 0) return EMPTY_RADAR;
-    return attempted
-      .slice(0, 8)
-      .map((s) => ({
-        subject: s.subject_title.length > 12 ? s.subject_title.slice(0, 11) + "…" : s.subject_title,
+
+    const mapped = attempted.slice(0, 8).map((s) => {
+      const title = String(s.subject_title || "Subject");
+      return {
+        subject: title.length > 12 ? title.slice(0, 11) + "…" : title,
         value: typeof s.average_pct === "number" ? Math.round(s.average_pct) : 0,
-      }));
+      };
+    });
+
+    // A radar chart with fewer than 3 axes renders as a degenerate line/sliver instead of
+    // a polygon, which reads as "broken". Pad with zero-value placeholder axes (not
+    // counted toward the employee's mastery) so the shape always stays legible.
+    if (mapped.length < 3) {
+      const usedNames = new Set(mapped.map((m) => m.subject));
+      for (const filler of EMPTY_RADAR) {
+        if (mapped.length >= 3) break;
+        if (!usedNames.has(filler.subject)) {
+          mapped.push(filler);
+          usedNames.add(filler.subject);
+        }
+      }
+    }
+
+    return mapped;
   }, [displayAnalytics]);
 
   const trendData = useMemo(() => {
@@ -209,6 +257,72 @@ export function DashboardInner() {
 
       <main className="max-w-full mx-auto px-6 md:px-12 -mt-6 pb-14 space-y-6 relative z-10">
 
+        {assignedTest && productQbEligible && assignedTest.status !== "completed" && (
+          <Card className="p-6 bg-card border border-indigo-200 dark:border-indigo-900 shadow-soft">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-primary">Assigned Product Assessment</p>
+                <h2 className="mt-1 text-xl font-bold text-foreground">{assignedTest.topic_title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {assignedTest.total_questions} questions · Ready to start
+                </p>
+              </div>
+              <Button
+                className="rounded-xl"
+                onClick={() => router.push(`/employee/tests/${assignedTest.test_id}`)}
+              >
+                {assignedTest.status === "in_progress" ? "Resume Assessment" : "Start Assessment"}
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {!assignedTest && completedAssessment && productQbEligible && (
+          <Card className="p-6 bg-card border border-emerald-200 dark:border-emerald-900/60 shadow-soft">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Assessment Completed
+                </p>
+                <h2 className="mt-1 text-xl font-bold text-foreground">{completedAssessment.topic_title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Score: {completedAssessment.score_correct}/{completedAssessment.total_questions} (
+                  {completedAssessment.score_percent}%)
+                  {completedAssessment.completed_at
+                    ? ` · ${toDateStr(completedAssessment.completed_at)}`
+                    : ""}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {completedAssessment.recording_missing
+                    ? "Your score is saved, but the proctoring video is missing. Please upload it below."
+                    : "Contact your administrator if you need to retake this assessment."}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {completedAssessment.recording_missing && (
+                  <Button
+                    className="rounded-xl"
+                    onClick={() =>
+                      router.push(
+                        `/employee/tests/${completedAssessment.test_id}?uploadVideo=1`
+                      )
+                    }
+                  >
+                    Upload Proctoring Video
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  className="rounded-xl"
+                  onClick={() => router.push(`/employee/tests/${completedAssessment.test_id}`)}
+                >
+                  Review Results
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* ── Tab bar ───────────────────────────────────────────────────── */}
         <div className="flex gap-1 rounded-xl bg-white dark:bg-slate-900 p-1 w-fit shadow-soft border border-indigo-100 dark:border-slate-800 transition-colors duration-300">
           {([
@@ -252,7 +366,7 @@ export function DashboardInner() {
               <h2 className="text-lg font-semibold mb-4 text-slate-900 dark:text-slate-100">Subject Mastery</h2>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <RadarChart data={radarData}>
+                  <RadarChart data={radarData} outerRadius="72%">
                     <PolarGrid stroke="#e0e7ff" />
                     <PolarAngleAxis dataKey="subject" tick={{ fontSize: 12 }} />
                     <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} />
@@ -288,11 +402,11 @@ export function DashboardInner() {
               ) : (
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                    <ReBarChart data={weekData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+                    <ReBarChart data={weekData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }} barCategoryGap="35%">
                       <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                       <YAxis tick={{ fontSize: 11 }} />
                       <Tooltip />
-                      <Bar dataKey="tests" fill="#8b5cf6" radius={[4,4,0,0]} name="Tests taken" />
+                      <Bar dataKey="tests" fill="#8b5cf6" radius={[4,4,0,0]} name="Tests taken" maxBarSize={28} />
                     </ReBarChart>
                   </ResponsiveContainer>
                 </div>
@@ -389,6 +503,24 @@ async function fetchResults(token: string): Promise<any[]> {
   });
   if (!r.ok) throw new Error("Failed to load results");
   return r.json();
+}
+
+async function fetchAssignedTest(token: string): Promise<any | null> {
+  const r = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ""}/api/employee/assigned-test`, {
+    headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  return data?.test_id ? data : null;
+}
+
+async function fetchEmployeeProfile(token: string): Promise<any | null> {
+  const r = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || ""}/api/employee/auth/validate`, {
+    headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  return data?.employee ?? null;
 }
 
 // ---------------------------------------------------------------------------

@@ -9,8 +9,10 @@
     "designation": "Enterprise Architect",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 13,
+    "matchingSkills": [
+      "Automation"
+    ]
   },
   {
     "employee_id": "1029774",
@@ -38,8 +40,9 @@
     "designation": "Software Test Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
+      "Automation",
       "Api"
     ]
   },
@@ -68,8 +71,9 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
+      "Oracle",
       "Aws",
       "Azure"
     ]
@@ -99,9 +103,12 @@
     "designation": "Lead System Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 63,
     "matchingSkills": [
+      "Oracle",
       "Aws",
+      "Gcp",
+      "Ci/cd",
       "Linux"
     ]
   },
@@ -115,8 +122,10 @@
     "designation": "Data Architect",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 38,
     "matchingSkills": [
+      "Java",
+      "Oracle",
       "Azure"
     ]
   },
@@ -130,9 +139,10 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Sql"
+      "Sql",
+      "Sql Server"
     ]
   },
   {
@@ -145,11 +155,13 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 63,
     "matchingSkills": [
       "Azure",
+      "Ci/cd",
       "Splunk",
-      "Api"
+      "Api",
+      "Kafka"
     ]
   },
   {
@@ -162,9 +174,10 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Azure"
+      "Azure",
+      "Ci/cd"
     ]
   },
   {
@@ -177,8 +190,9 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
+      "Java",
       "Sql"
     ]
   },
@@ -192,9 +206,10 @@
     "designation": "Software Test Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Python"
+      "Python",
+      "Automation"
     ]
   },
   {
@@ -207,8 +222,10 @@
     "designation": "Senior Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 13,
+    "matchingSkills": [
+      "Java"
+    ]
   },
   {
     "employee_id": "1036422",
@@ -233,8 +250,11 @@
     "designation": "Technical Architect",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 25,
+    "matchingSkills": [
+      "Java",
+      "Microservices"
+    ]
   },
   {
     "employee_id": "1027257",
@@ -262,8 +282,11 @@
     "designation": "Associate Principal Consultant",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 25,
+    "matchingSkills": [
+      "Java",
+      "Oracle"
+    ]
   },
   {
     "employee_id": "1024468",
@@ -275,8 +298,10 @@
     "designation": "Deputy Manager",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 13,
+    "matchingSkills": [
+      "Automation"
+    ]
   },
   {
     "employee_id": "1021388",
@@ -317,9 +342,10 @@
     "designation": "Test Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 50,
     "matchingSkills": [
       "Python",
+      "Java",
       "Aws",
       "Api"
     ]
@@ -362,12 +388,13 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 63,
+    "score": 75,
     "matchingSkills": [
       "Python",
       "Sql",
       "Aws",
       "Azure",
+      "Gcp",
       "Api"
     ]
   },
@@ -458,10 +485,12 @@
     "designation": "Technical Architect",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 50,
     "matchingSkills": [
       "Python",
-      "Azure"
+      "Java",
+      "Azure",
+      "Gcp"
     ]
   },
   {
@@ -487,11 +516,15 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 88,
     "matchingSkills": [
+      "Java",
       "Sql",
+      "Oracle",
       "Aws",
-      "Azure"
+      "Azure",
+      "Ci/cd",
+      "Microservices"
     ]
   },
   {
@@ -546,9 +579,10 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Python"
+      "Python",
+      "Java"
     ]
   },
   {
@@ -561,9 +595,10 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
       "Sql",
+      "Sql Server",
       "Api"
     ]
   },
@@ -577,9 +612,10 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Sql"
+      "Sql",
+      "Sql Server"
     ]
   },
   {
@@ -592,8 +628,9 @@
     "designation": "Associate Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
+      "Java",
       "Sql",
       "Aws"
     ]
@@ -655,8 +692,9 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 63,
+    "score": 75,
     "matchingSkills": [
+      "Java",
       "Sql",
       "Linux",
       "Splunk",
@@ -674,11 +712,14 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 75,
     "matchingSkills": [
       "Python",
+      "Java",
       "Sql",
-      "Aws"
+      "Postgresql",
+      "Aws",
+      "Kafka"
     ]
   },
   {
@@ -691,9 +732,10 @@
     "designation": "Senior System Administrator",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Aws"
+      "Aws",
+      "Gcp"
     ]
   },
   {
@@ -706,9 +748,10 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Sql"
+      "Sql",
+      "Automation"
     ]
   },
   {
@@ -739,8 +782,9 @@
     "designation": "Associate Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
+      "Java",
       "Sql",
       "Api"
     ]
@@ -755,10 +799,12 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 50,
     "matchingSkills": [
+      "Java",
       "Sql",
-      "Aws"
+      "Aws",
+      "Microservices"
     ]
   },
   {
@@ -799,9 +845,10 @@
     "designation": "Technical Support Specialist",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Python"
+      "Python",
+      "Automation"
     ]
   },
   {
@@ -831,7 +878,7 @@
     "shortlisted": false,
     "score": 9,
     "matchingSkills": [
-      "And Stakeholder Management"
+      "Years Of Experience"
     ]
   },
   {
@@ -857,9 +904,11 @@
     "designation": "Senior Technical Architect",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 38,
     "matchingSkills": [
-      "Azure"
+      "Java",
+      "Azure",
+      "Microservices"
     ]
   },
   {
@@ -887,8 +936,10 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 38,
     "matchingSkills": [
+      "Java",
+      "Automation",
       "Api"
     ]
   },
@@ -902,10 +953,12 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 50,
     "matchingSkills": [
       "Python",
-      "Aws"
+      "Postgresql",
+      "Aws",
+      "Ci/cd"
     ]
   },
   {
@@ -933,8 +986,9 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
+      "Java",
       "Sql",
       "Aws"
     ]
@@ -949,10 +1003,12 @@
     "designation": "Technical Manager",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 63,
     "matchingSkills": [
       "Sql",
+      "Postgresql",
       "Azure",
+      "Microservices",
       "Api"
     ]
   },
@@ -1020,9 +1076,10 @@
     "designation": "Test Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 50,
     "matchingSkills": [
       "Python",
+      "Java",
       "Azure",
       "Api"
     ]
@@ -1037,10 +1094,11 @@
     "designation": "Test Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 50,
     "matchingSkills": [
       "Sql",
       "Azure",
+      "Automation",
       "Api"
     ]
   },
@@ -1054,9 +1112,10 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Python"
+      "Python",
+      "Automation"
     ]
   },
   {
@@ -1116,9 +1175,12 @@
     "designation": "Senior Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 50,
     "matchingSkills": [
-      "Sql"
+      "Java",
+      "Sql",
+      "Oracle",
+      "Microservices"
     ]
   },
   {
@@ -1146,9 +1208,10 @@
     "designation": "Senior Test Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 50,
     "matchingSkills": [
       "Python",
+      "Java",
       "Sql",
       "Api"
     ]
@@ -1232,10 +1295,12 @@
     "designation": "System Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 50,
     "matchingSkills": [
+      "Java",
       "Sql",
-      "Shell"
+      "Shell",
+      "Microservices"
     ]
   },
   {
@@ -1277,10 +1342,11 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
       "Python",
-      "Sql"
+      "Sql",
+      "Sql Server"
     ]
   },
   {
@@ -1293,9 +1359,11 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 63,
     "matchingSkills": [
+      "Java",
       "Sql",
+      "Sql Server",
       "Azure",
       "Api"
     ]
@@ -1370,9 +1438,13 @@
     "designation": "Technical Director",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 88,
     "matchingSkills": [
+      "Java",
+      "Oracle",
       "Azure",
+      "Ci/cd",
+      "Microservices",
       "Api",
       "Architecture"
     ]
@@ -1404,9 +1476,10 @@
     "designation": "Assistant Vice President",
     "status": "Active",
     "shortlisted": false,
-    "score": 38,
+    "score": 50,
     "matchingSkills": [
       "Python",
+      "Java",
       "Sql",
       "Aws"
     ]
@@ -1421,10 +1494,14 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 75,
     "matchingSkills": [
       "Sql",
-      "Aws"
+      "Oracle",
+      "Sql Server",
+      "Aws",
+      "Powershell",
+      "Automation"
     ]
   },
   {
@@ -1437,8 +1514,10 @@
     "designation": "Associate Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 13,
+    "matchingSkills": [
+      "Java"
+    ]
   },
   {
     "employee_id": "1036973",
@@ -1450,9 +1529,10 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
       "Python",
+      "Java",
       "Sql"
     ]
   },
@@ -1466,9 +1546,10 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Python"
+      "Python",
+      "Java"
     ]
   },
   {
@@ -1481,9 +1562,10 @@
     "designation": "Senior Lead Database Administrator",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Sql"
+      "Sql",
+      "Oracle"
     ]
   },
   {
@@ -1511,9 +1593,10 @@
     "designation": "Technical Manager",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Python"
+      "Python",
+      "Automation"
     ]
   },
   {
@@ -1541,9 +1624,10 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Sql"
+      "Sql",
+      "Sql Server"
     ]
   },
   {
@@ -1556,10 +1640,14 @@
     "designation": "Technical Architect",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 75,
     "matchingSkills": [
+      "Java",
       "Aws",
-      "Jira"
+      "Jira",
+      "Microservices",
+      "Kafka",
+      "Mq"
     ]
   },
   {
@@ -1604,8 +1692,10 @@
     "designation": "Senior Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 13,
+    "matchingSkills": [
+      "Java"
+    ]
   },
   {
     "employee_id": "1041640",
@@ -1630,10 +1720,11 @@
     "designation": "Senior Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
       "Aws",
-      "Azure"
+      "Azure",
+      "Gcp"
     ]
   },
   {
@@ -1661,10 +1752,12 @@
     "designation": "Senior Project Manager",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 50,
     "matchingSkills": [
       "Python",
-      "Sql"
+      "Sql",
+      "Oracle",
+      "Sql Server"
     ]
   },
   {
@@ -1694,9 +1787,10 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
       "Sql",
+      "Sql Server",
       "Azure"
     ]
   },
@@ -1740,8 +1834,9 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 20,
+    "score": 40,
     "matchingSkills": [
+      "Coordination",
       "Management"
     ]
   },
@@ -1755,9 +1850,10 @@
     "designation": "Associate Executive",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Sql"
+      "Sql",
+      "Automation"
     ]
   },
   {
@@ -1785,10 +1881,11 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 38,
     "matchingSkills": [
       "Python",
-      "Sql"
+      "Sql",
+      "Oracle"
     ]
   },
   {
@@ -1866,10 +1963,12 @@
     "designation": "Technical Lead",
     "status": "Active",
     "shortlisted": false,
-    "score": 25,
+    "score": 50,
     "matchingSkills": [
+      "Gcp",
       "Linux",
-      "Api"
+      "Api",
+      "Kafka"
     ]
   },
   {
@@ -1899,8 +1998,11 @@
     "designation": "Software Test Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 25,
+    "matchingSkills": [
+      "Oracle",
+      "Automation"
+    ]
   },
   {
     "employee_id": "1037467",
@@ -1912,8 +2014,9 @@
     "designation": "Senior Software Test Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
+      "Java",
       "Api"
     ]
   },
@@ -1942,8 +2045,9 @@
     "designation": "Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
+      "Automation",
       "Api"
     ]
   },
@@ -1972,9 +2076,11 @@
     "designation": "Software Test Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 38,
     "matchingSkills": [
-      "Python"
+      "Python",
+      "Java",
+      "Automation"
     ]
   },
   {
@@ -1987,8 +2093,10 @@
     "designation": "Project Manager",
     "status": "Active",
     "shortlisted": false,
-    "score": 0,
-    "matchingSkills": []
+    "score": 13,
+    "matchingSkills": [
+      "Automation"
+    ]
   },
   {
     "employee_id": "63000010",
@@ -2045,9 +2153,10 @@
     "designation": "Associate Software Engineer",
     "status": "Active",
     "shortlisted": false,
-    "score": 13,
+    "score": 25,
     "matchingSkills": [
-      "Aws"
+      "Aws",
+      "Ci/cd"
     ]
   },
   {

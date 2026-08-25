@@ -197,7 +197,7 @@ export interface EnhancementSuggestion {
 export interface ResumeReport {
   executiveSummary: string;
   recruiterInsights: string[];
-  hiringConfidence: "low" | "medium" | "high" | "very-high";
+  hiringConfidence: "low" | "medium" | "high" | "very-high" | null;
   industryFit: IndustryFit[];
   targetRoles: string[];
   priorityImprovements: PriorityImprovement[];
@@ -235,16 +235,16 @@ export interface PriorityImprovement {
 }
 
 export interface VisualMetrics {
-  overallScore: number;
-  atsScore: number;
+  overallScore: number | null;
+  atsScore: number | null;
   radarData: RadarDatum[];
   scoreHistory: ScoreHistory[];
-  topSkills: { name: string; score: number }[];
+  topSkills: { name: string; score: number | null }[];
 }
 
 export interface RadarDatum {
   subject: string;
-  value: number;
+  value: number | null;
   fullMark: number;
 }
 

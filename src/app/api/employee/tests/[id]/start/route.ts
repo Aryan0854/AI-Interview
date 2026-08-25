@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
+import { employeeOwnsTest, getEmployeeUuid } from "@/lib/employee-test-access";
 import { localTestsDb } from "@/services/local-tests-db";
 
 /**
@@ -14,7 +15,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestAsync(request);
     if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -26,6 +27,7 @@ export async function POST(
       // Empty body is ok
     }
     const difficulty = (body as any).difficulty ?? "medium";
+    const employeeUuid = await getEmployeeUuid(auth.employeeId);
 
     let testRow: any = null;
     let questions: any[] = [];
@@ -35,7 +37,7 @@ export async function POST(
         .from("tests")
         .select("*")
         .eq("id", id)
-        .eq("employee_id", auth.employeeId)
+        .eq("employee_id", employeeUuid)
         .single();
 
       if (error || !data) throw error || new Error("Test not found");
@@ -52,7 +54,7 @@ export async function POST(
     } catch (dbErr) {
       console.warn("Supabase start test query failed, falling back to local database.", dbErr);
       const localTest = await localTestsDb.getTestById(id);
-      if (!localTest || localTest.employee_id !== auth.employeeId) {
+      if (!localTest || !employeeOwnsTest(localTest as any, auth.employeeId, employeeUuid)) {
         return NextResponse.json({ error: "Test not found" }, { status: 404 });
       }
       testRow = localTest;

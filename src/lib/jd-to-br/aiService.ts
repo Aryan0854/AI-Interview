@@ -80,7 +80,7 @@ const runMockFallback = (text: string, filename?: string): any => {
   console.log('[AI] Running dynamic keyword scanning fallback parser.');
   
   // Extract Job Title
-  let job_title = 'Software Engineer';
+  let job_title: string | null = null;
   const titleMatch = text.match(/(Job Title|Title|Designation)\s*:\s*([^\r\n]+)/i);
   if (titleMatch) {
     job_title = titleMatch[2].trim();
@@ -92,7 +92,7 @@ const runMockFallback = (text: string, filename?: string): any => {
   }
 
   // Extract Experience
-  let experience = '3+ years';
+  let experience: string | null = null;
   const expMatch = text.match(/(\d+\s*(?:-|to|\+|–|—)?\s*\d*)\s*(years|yrs|year|yr)/i);
   if (expMatch) {
     experience = expMatch[0].trim();
@@ -104,6 +104,22 @@ const runMockFallback = (text: string, filename?: string): any => {
   else if (lowercaseText.includes('l3')) support_level = 'L3';
   else if (lowercaseText.includes('l2')) support_level = 'L2';
   else if (lowercaseText.includes('l1')) support_level = 'L1';
+
+  // Department, employment type, and shift are only set when the JD text
+  // actually says so — never guessed, since none of these can be reliably
+  // inferred from silence.
+  let department: string | null = null;
+  const deptMatch = text.match(/(Department|Domain|Team)\s*:\s*([^\r\n]+)/i);
+  if (deptMatch) department = deptMatch[2].trim();
+
+  let employment_type: string | null = null;
+  if (lowercaseText.includes('contract')) employment_type = 'Contract';
+  else if (lowercaseText.includes('full time') || lowercaseText.includes('full-time') || lowercaseText.includes('permanent')) employment_type = 'Full Time';
+
+  let shift_timing: string | null = null;
+  if (lowercaseText.includes('rotational')) shift_timing = 'Rotational';
+  else if (lowercaseText.includes('24x7') || lowercaseText.includes('24/7')) shift_timing = '24x7';
+  else if (lowercaseText.includes('day shift')) shift_timing = 'Day Shift';
 
   const keywords: { [key: string]: string[] } = {
     skills: ['sql', 'postgresql', 'oracle', 'mysql', 'linux', 'windows', 'unix', 'python', 'shell scripting', 'apis', 'microservices', 'kafka', 'java', 'springboot', 'javascript', 'html', 'css', 'react', 'angular', 'hibernate', 'spring boot'],
@@ -117,11 +133,11 @@ const runMockFallback = (text: string, filename?: string): any => {
 
   const extracted: any = {
     job_title,
-    department: 'Technical',
+    department,
     experience,
     support_level,
-    employment_type: lowercaseText.includes('contract') ? 'Contract' : 'Full Time',
-    shift_timing: lowercaseText.includes('rotational') ? 'Rotational' : lowercaseText.includes('24x7') ? '24x7' : 'Day Shift',
+    employment_type,
+    shift_timing,
     skills: [] as string[],
     monitoring_tools: [] as string[],
     cloud_platforms: [] as string[],

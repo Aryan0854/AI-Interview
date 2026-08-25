@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addEmployeeAccount, getEmployeeAccount, getEmployeeByEmail, signToken, syncEmployeeToSupabase } from "@/lib/employee-auth";
+import { addEmployeeAccountAsync, getEmployeeAccountAsync, getEmployeeByEmailAsync, signToken, syncEmployeeToSupabase } from "@/lib/employee-auth";
 
 export async function POST(request: NextRequest) {
   let body: any;
@@ -18,14 +18,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "A valid email address is required for SSO" }, { status: 400 });
     }
 
-    let employee = getEmployeeByEmail(email);
+    let employee = await getEmployeeByEmailAsync(email);
     
     // Auto-provision a new employee record if the email isn't registered yet!
     if (!employee) {
       const employee_id = "EMP" + Math.floor(1000 + Math.random() * 9000);
       const full_name = email.split("@")[0].split(".").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
       
-      const success = addEmployeeAccount({
+      const success = await addEmployeeAccountAsync({
         employee_id,
         full_name,
         email,
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
         throw new Error("Failed to auto-provision employee record");
       }
 
-      employee = getEmployeeAccount(employee_id);
+      employee = await getEmployeeAccountAsync(employee_id);
     }
 
     if (!employee) {

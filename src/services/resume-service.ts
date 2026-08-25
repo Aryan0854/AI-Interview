@@ -1132,17 +1132,20 @@ export class ResumeService {
     analysis: any,
     enhanced: any
   ): ResumeReport {
-    const score = analysis.overallScore || 50;
+    const score: number | null =
+      typeof analysis.overallScore === "number" ? analysis.overallScore : null;
 
-    const hiringConfidence = analysis.hiringConfidence || (
-      score >= 85
+    const hiringConfidence: ResumeReport["hiringConfidence"] =
+      analysis.hiringConfidence ??
+      (score === null
+        ? null
+        : score >= 85
         ? "very-high"
         : score >= 70
         ? "high"
         : score >= 50
         ? "medium"
-        : "low"
-    );
+        : "low");
 
     return {
       executiveSummary:
@@ -1183,51 +1186,52 @@ export class ResumeService {
       visualMetrics: {
         overallScore: score,
 
-        atsScore: analysis.atsScore || 50,
+        atsScore: typeof analysis.atsScore === "number" ? analysis.atsScore : null,
 
         radarData: [
           {
             subject: "Content",
             value:
-              analysis.scores?.clarity || 50,
+              typeof analysis.scores?.clarity === "number" ? analysis.scores.clarity : null,
             fullMark: 100,
           },
           {
             subject: "Format",
             value:
-              analysis.scores?.formatting ||
-              50,
+              typeof analysis.scores?.formatting === "number" ? analysis.scores.formatting : null,
             fullMark: 100,
           },
           {
             subject: "ATS",
             value:
-              analysis.atsScore || 50,
+              typeof analysis.atsScore === "number" ? analysis.atsScore : null,
             fullMark: 100,
           },
           {
             subject: "Impact",
             value:
-              analysis.impactScore || 50,
+              typeof analysis.impactScore === "number" ? analysis.impactScore : null,
             fullMark: 100,
           },
           {
             subject: "Technical",
             value:
-              analysis.technicalScore ||
-              50,
+              typeof analysis.technicalScore === "number" ? analysis.technicalScore : null,
             fullMark: 100,
           },
         ],
 
         scoreHistory: [],
 
+        // No per-skill score exists anywhere in the analysis — listing a skill
+        // is data-supported (it's actually on the resume), but a numeric score
+        // per skill is not, so it's left null rather than synthesized.
         topSkills:
           parsed.skills.technical
             .slice(0, 5)
-            .map((name: string, i: number) => ({
+            .map((name: string) => ({
               name,
-              score: Math.max(50, 100 - i * 10),
+              score: null,
             })),
       },
       suitability: analysis.suitability || (analysis.jdMatchScore !== undefined && analysis.jdMatchScore >= 40 ? "suitable" : "unsuitable"),
@@ -1236,10 +1240,17 @@ export class ResumeService {
     };
   }
 
-  private getExecutive(score: number, parsed: ParsedResume): string {
+  private getExecutive(score: number | null, parsed: ParsedResume): string {
     const techSkills = parsed.skills?.technical || [];
     const topSkills = techSkills.slice(0, 3).join(", ");
-    
+
+    if (score === null) {
+      if (topSkills) {
+        return `Automated scoring was unavailable for this resume. Based on the parsed content, the candidate lists experience with ${topSkills}; a manual review is recommended.`;
+      }
+      return "Automated scoring was unavailable for this resume. A manual review is recommended.";
+    }
+
     if (score >= 80) {
       if (topSkills) {
         return `A highly proficient professional with a strong background in ${topSkills}. The profile demonstrates clear quantifiable impact and exceptional capabilities.`;
@@ -1259,7 +1270,9 @@ export class ResumeService {
 
   private getInsights(analysis: any): string[] {
     const insights: string[] = [
-      `Resume Score: ${analysis.overallScore || 0}/100`,
+      typeof analysis.overallScore === "number"
+        ? `Resume Score: ${analysis.overallScore}/100`
+        : "Resume Score: not available",
     ];
 
     if (analysis.scores?.actionVerbs < 60) {

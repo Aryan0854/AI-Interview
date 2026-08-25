@@ -1,0 +1,125 @@
+import { NextRequest, NextResponse } from "next/server";
+import { join } from "path";
+import { mkdir, readFile, readdir, rm, writeFile } from "fs/promises";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
+import { getOwnedTest } from "@/lib/employee-test-access";
+import { localTestsDb } from "@/services/local-tests-db";
+import {
+  getEmployeeTestVideoAdminUrl,
+  saveEmployeeTestVideo,
+} from "@/lib/employee-test-video";
+import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
+import { getRuntimeUploadsRoot } from "@/lib/runtime-data";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+function chunkDir(testId: string) {
+  return join(getRuntimeUploadsRoot(), "video_upload_chunks", testId);
+}
+
+async function markVideoReady(
+  testId: string,
+  employee: Parameters<typeof syncLocalTestStateToSupabase>[1]
+) {
+  const videoUrl = getEmployeeTestVideoAdminUrl(testId);
+  await localTestsDb.updateTest(testId, { session_recording_url: videoUrl });
+
+  try {
+    await syncLocalTestStateToSupabase(testId, employee);
+  } catch (syncErr) {
+    console.warn("Failed to sync video URL to Supabase:", syncErr);
+  }
+
+  return videoUrl;
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: testId } = await params;
+    const auth = await authenticateRequestAsync(request);
+    if (!auth) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const owned = await getOwnedTest(testId, auth.employeeId);
+    if (!owned) {
+      return NextResponse.json({ error: "Test not found" }, { status: 404 });
+    }
+    const { test } = owned;
+
+    const formData = await request.formData();
+    const chunkIndex = Number(formData.get("chunkIndex"));
+    const totalChunks = Number(formData.get("totalChunks"));
+    const chunk = formData.get("chunk");
+
+    if (
+      !Number.isInteger(chunkIndex) ||
+      !Number.isInteger(totalChunks) ||
+      totalChunks < 1 ||
+      chunkIndex < 0 ||
+      chunkIndex >= totalChunks ||
+      !(chunk instanceof Blob)
+    ) {
+      return NextResponse.json({ error: "Invalid chunk payload" }, { status: 400 });
+    }
+
+    const dir = chunkDir(testId);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, `${chunkIndex}.part`),
+      Buffer.from(await chunk.arrayBuffer())
+    );
+
+    for (let i = 0; i < totalChunks; i++) {
+      try {
+        await readFile(join(dir, `${i}.part`));
+      } catch {
+        return NextResponse.json({
+          complete: false,
+          received: chunkIndex,
+          totalChunks,
+        });
+      }
+    }
+
+    const parts: Buffer[] = [];
+    for (let i = 0; i < totalChunks; i++) {
+      parts.push(await readFile(join(dir, `${i}.part`)));
+    }
+    const fullBuffer = Buffer.concat(parts);
+    if (!fullBuffer.length) {
+      return NextResponse.json({ error: "Recording file is empty" }, { status: 400 });
+    }
+
+    const saved = await saveEmployeeTestVideo(testId, fullBuffer);
+    if (!saved) {
+      return NextResponse.json({ error: "Failed to store recording in Supabase" }, { status: 500 });
+    }
+
+    const videoUrl = await markVideoReady(testId, auth.employee);
+
+    try {
+      const files = await readdir(dir);
+      await Promise.all(
+        files.map((file) => rm(join(dir, file), { force: true }))
+      );
+      await rm(dir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+
+    return NextResponse.json({
+      complete: true,
+      success: true,
+      videoUrl,
+      bytes: fullBuffer.length,
+    });
+  } catch (error: any) {
+    console.error("Employee test video chunk upload failed:", error);
+    return NextResponse.json({ error: error.message || "Chunk upload failed" }, { status: 500 });
+  }
+}

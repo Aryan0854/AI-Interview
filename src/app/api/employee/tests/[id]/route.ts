@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
+import { employeeOwnsTest } from "@/lib/employee-test-access";
 import { localTestsDb } from "@/services/local-tests-db";
 import { writeLog } from "@/lib/structured-logger";
+import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
+import { useSupabasePrimary } from "@/lib/db-mode";
+import { employeeTestVideoExists } from "@/lib/employee-test-video";
+import { formatTopicTitleForDisplay } from "@/lib/product-display-name";
+import { PRODUCT_ASSESSMENT_TOPIC_ID, isProductQbEmployee, isAssessmentOnlyEmployee } from "@/lib/employee-auth";
 
 import { fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
 
@@ -16,14 +22,14 @@ async function getEmployeeUuid(employeeId: string): Promise<string> {
       .eq("employee_id", employeeId)
       .maybeSingle();
     if (data?.id) return data.id;
-  } catch {}
+  } catch { }
   return employeeId;
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestAsync(request);
     if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const employeeUuid = await getEmployeeUuid(auth.employeeId);
@@ -53,14 +59,36 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     } catch (dbErr) {
       console.warn("Supabase load failed. Falling back to local file-based database.", dbErr);
       const localTest = await localTestsDb.getTestById(id);
-      if (!localTest || localTest.employee_id !== auth.employeeId) {
+      if (!localTest || !employeeOwnsTest(localTest as any, auth.employeeId, employeeUuid)) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       testRow = localTest;
       questions = await localTestsDb.getQuestions(id);
     }
 
-    return NextResponse.json({ test: testRow, questions });
+    if (
+      testRow.topic_id === PRODUCT_ASSESSMENT_TOPIC_ID &&
+      !isProductQbEmployee(auth.employee)
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    if (
+      isAssessmentOnlyEmployee(auth.employee) &&
+      testRow.topic_id !== PRODUCT_ASSESSMENT_TOPIC_ID
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const has_recording = await employeeTestVideoExists(id);
+    return NextResponse.json({
+      test: {
+        ...testRow,
+        topic_title: formatTopicTitleForDisplay(testRow.topic_title),
+      },
+      questions,
+      has_recording,
+    });
   } catch (e) {
     console.error("GET /employee/tests/[id] error:", e);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
@@ -70,7 +98,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestAsync(request);
     if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json();
@@ -107,7 +135,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const auth = authenticateRequest(request);
+  const auth = await authenticateRequestAsync(request);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const employeeUuid = await getEmployeeUuid(auth.employeeId);
 
@@ -132,7 +160,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     } catch (dbErr) {
       console.warn("Supabase load failed. Falling back to local file-based database for DELETE.", dbErr);
       const localTest = await localTestsDb.getTestById(id);
-      if (!localTest || localTest.employee_id !== auth.employeeId) {
+      if (!localTest || !employeeOwnsTest(localTest as any, auth.employeeId, employeeUuid)) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       testRow = localTest;

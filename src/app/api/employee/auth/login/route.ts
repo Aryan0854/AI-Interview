@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addEmployeeAccount, getEmployeeAccount, hasPassword, verifyPassword, signToken, syncEmployeeToSupabase } from "@/lib/employee-auth";
+import { addEmployeeAccountAsync, getEmployeeAccountAsync, hasPassword, verifyPassword, signToken, syncEmployeeToSupabase } from "@/lib/employee-auth";
 import { isRateLimited, getClientIp } from "@/lib/security";
 import { auditLogService } from "@/services/audit-log-service";
 
@@ -32,9 +32,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Employee ID is required" }, { status: 400 });
     }
 
-    let employee = getEmployeeAccount(employee_id);
+    let employee = await getEmployeeAccountAsync(employee_id);
     if (!employee) {
-      addEmployeeAccount({
+      await addEmployeeAccountAsync({
         employee_id,
         full_name: employee_id,
         email: "",
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
         skill_level: "beginner",
         ai_readiness_score: 0,
       });
-      employee = getEmployeeAccount(employee_id);
+      employee = await getEmployeeAccountAsync(employee_id);
     }
 
     if (!employee || !hasPassword(employee) || employee.is_first_login) {

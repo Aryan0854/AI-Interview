@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { findTopic } from "@/data/learning-curriculum";
 import { localTestsDb } from "@/services/local-tests-db";
 import { isMissingTestsTableError, getFallbackQuestions, fetchQuestionsFromAI, mapDifficulty } from "@/lib/learning-fallback";
@@ -13,7 +13,7 @@ export async function POST(
     const { topicId } = await params;
 
     // --- authenticate ---
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestAsync(request);
     if (!auth?.employeeId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

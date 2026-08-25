@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getEmployeeAccount, saveEmployeePassword, syncEmployeeToSupabase } from "@/lib/employee-auth";
+import { getEmployeeAccountAsync, saveEmployeePasswordAsync, syncEmployeeToSupabase } from "@/lib/employee-auth";
 
 function validatePassword(password: string) {
   return password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Employee ID is required" }, { status: 400 });
     }
 
-    const employee = getEmployeeAccount(employee_id);
+    const employee = await getEmployeeAccountAsync(employee_id);
 
     if (!employee) {
       return NextResponse.json({ error: "Employee ID not found" }, { status: 404 });
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
     // Hash, save (also clears is_first_login so they can log in normally), and sync
     // the updated record to Supabase so the admin portal reflects it immediately.
-    const updated = saveEmployeePassword(employee.employee_id, password);
+    const updated = await saveEmployeePasswordAsync(employee.employee_id, password);
     if (!updated) {
       return NextResponse.json({ error: "Failed to reset password" }, { status: 500 });
     }

@@ -8,16 +8,44 @@ import { CheckCircle2, Clock, Flag, XCircle, Zap, ArrowRight, RotateCcw, HelpCir
   Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Test, TestQuestion } from "@/types/learning";
+import { useEmployeeProctoring, isFullscreenActive } from "@/hooks/useEmployeeProctoring";
+import type { EmployeeProctoringState } from "@/lib/employee-proctoring";
+import VideoCatchupClient from "./VideoCatchupClient";
+import { EMPLOYEE_PROCTOR_MAX_VIOLATIONS } from "@/lib/employee-proctoring";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const durationToLabel = (d: number): string => {
+const DEFAULT_TIME_LIMIT_SECONDS = 1800;
+
+function createMediaRecorder(stream: MediaStream): MediaRecorder | null {
+  if (typeof window === "undefined" || typeof MediaRecorder === "undefined") return null;
+  const mimeTypes = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+  ];
+  for (const type of mimeTypes) {
+    if (MediaRecorder.isTypeSupported?.(type)) {
+      return new MediaRecorder(stream, {
+        mimeType: type,
+        videoBitsPerSecond: 400_000,
+      });
+    }
+  }
+  try {
+    return new MediaRecorder(stream, { videoBitsPerSecond: 400_000 });
+  } catch {
+    return null;
+  }
+}
+
+function durationToLabel(d: number): string {
   const m = Math.floor(d / 60);
   const s = d % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-};
+}
 
 function countdown(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -42,7 +70,7 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
   const pct = (current / Math.max(1, total)) * 100;
   return (
     <div className="w-full h-2 bg-indigo-100 rounded-full overflow-hidden" role="progressbar" aria-valuenow={current} aria-valuemax={total}>
-      <div className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full transition-all duration-200" style={{ width: `${pct}%` }} />
+      <div className="h-full bg-primary rounded-full transition-all duration-200" style={{ width: `${pct}%` }} />
     </div>
   );
 }
@@ -79,6 +107,12 @@ function ConfettiButton({ quizDone, onClick }: { quizDone: boolean; onClick?: ()
 
 export default function TestRunnerClient({ testId }: { testId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const uploadVideoOnly = searchParams.get("uploadVideo") === "1";
+
+  if (uploadVideoOnly) {
+    return <VideoCatchupClient testId={testId} />;
+  }
 
   // ── state ──────────────────────────────────────────────────────
   type Phase = "loading" | "ready" | "running" | "retake-confirm" | "submitted" | "error";
@@ -92,7 +126,8 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const [answers,     setAnswers]     = useState<Record<number, number>>({});
   const [timeLeft,    setTimeLeft]    = useState<number | null>(null);
   const [msg,         setMsg]         = useState<string | null>(null);
-  const [submitted,   setSubmitted]   = useState<{ correct: number; total: number; accuracy_pct: number; ai_analysis?: any; topic_title: string } | null>(null);
+  const [submitted,   setSubmitted]   = useState<{ correct: number; total: number; accuracy_pct: number; ai_analysis?: { summary?: string; strengths?: string[]; weaknesses?: string[]; next_steps?: string[]; continue_message?: string } | string; topic_title: string } | null>(null);
+  const [videoUploadState, setVideoUploadState] = useState<VideoUploadState>("pending");
 
   const savedRef     = useRef(false);
   const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -100,21 +135,19 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const submittingRef = useRef(false);
 
   const [token,       setToken]       = useState("");
-  
-  // New proctoring states
-  const [warningCount, setWarningCount] = useState(0);
-  const [showProctorWarning, setShowProctorWarning] = useState<string | null>(null);
-  const lastTriggerRef = useRef(0);
+  const [initialProctoring, setInitialProctoring] = useState<EmployeeProctoringState | null>(null);
 
   const [clmReady, setClmReady] = useState(false);
   const [camStream, setCamStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStartRef = useRef<number | null>(null);
+  const intentionalRecorderStopRef = useRef(false);
 
   useEffect(() => {
     setToken(window.localStorage.getItem("employee_token") ?? "");
   }, []);
-
-  // Helper to request fullscreen
   const requestFullscreen = useCallback(async () => {
     try {
       const docEl = document.documentElement;
@@ -158,7 +191,10 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         if (cancelled) return;
         setTest(testData);
         setQuestions(questionsData);
-        let finalTimeLeft = testData.time_limit_seconds ?? 900;
+        if (testData.proctoring) {
+          setInitialProctoring(testData.proctoring as EmployeeProctoringState);
+        }
+        let finalTimeLeft = testData.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS;
         if (testData.status === "in_progress" && testData.started_at) {
           const startedAtMs = new Date(testData.started_at).getTime();
           const elapsedSeconds = Math.floor((Date.now() - startedAtMs) / 1000);
@@ -221,31 +257,30 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
     return () => clearInterval(id);
   }, [phase, timeLeft]);
 
-  // ── proctoring logic and refs ──────────────────────────────────
   const answersRef = useRef(answers);
+  const handleSubmitRef = useRef<(ans: Record<number, number>) => void>(() => {});
+
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
 
-  // Auto-submit when time is expired
+  // Auto-submit when time expires
   useEffect(() => {
     if (timeLeft === 0 && phase === "running") {
-      handleSubmit(answersRef.current);
+      handleSubmitRef.current(answersRef.current);
     }
   }, [timeLeft, phase]);
 
-  // Stop webcam tracks on unmount or phase change
   useEffect(() => {
     return () => {
       if (camStream) {
-        camStream.getTracks().forEach(t => t.stop());
+        camStream.getTracks().forEach((t) => t.stop());
       }
     };
   }, [camStream]);
 
-  // Dynamic Loading of clmtrackr scripts from CDN
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     let clmScript: HTMLScriptElement | null = null;
     let modelScript: HTMLScriptElement | null = null;
@@ -257,20 +292,18 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           return;
         }
 
-        clmScript = document.createElement('script');
-        clmScript.src = 'https://cdn.jsdelivr.net/npm/clmtrackr@1.1.2/build/clmtrackr.min.js';
+        clmScript = document.createElement("script");
+        clmScript.src = "https://cdn.jsdelivr.net/npm/clmtrackr@1.1.2/build/clmtrackr.min.js";
         clmScript.async = true;
         document.body.appendChild(clmScript);
-
         await new Promise((resolve) => {
           clmScript!.onload = resolve;
         });
 
-        modelScript = document.createElement('script');
-        modelScript.src = 'https://cdn.jsdelivr.net/npm/clmtrackr@1.1.2/models/model_pca_20_svm.js';
+        modelScript = document.createElement("script");
+        modelScript.src = "https://cdn.jsdelivr.net/npm/clmtrackr@1.1.2/models/model_pca_20_svm.js";
         modelScript.async = true;
         document.body.appendChild(modelScript);
-
         await new Promise((resolve) => {
           modelScript!.onload = resolve;
         });
@@ -283,280 +316,192 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       }
     };
 
-    loadScripts();
+    void loadScripts();
 
     return () => {
       if (clmScript && document.body.contains(clmScript)) {
-        try { document.body.removeChild(clmScript); } catch(e){}
+        try {
+          document.body.removeChild(clmScript);
+        } catch {
+          /* ignore */
+        }
       }
       if (modelScript && document.body.contains(modelScript)) {
-        try { document.body.removeChild(modelScript); } catch(e){}
+        try {
+          document.body.removeChild(modelScript);
+        } catch {
+          /* ignore */
+        }
       }
     };
   }, []);
 
-  const triggerProctorWarning = useCallback((violationType: string) => {
-    if (phase !== "running") return;
+  const { warningCount, showProctorWarning, dismissWarning } = useEmployeeProctoring({
+    testId,
+    token,
+    phase,
+    answersRef,
+    onAutoSubmit: (ans) => handleSubmitRef.current(ans),
+    requestFullscreen,
+    videoRef,
+    camStream,
+    mediaRecorderRef,
+    clmReady,
+    initialProctoring,
+    intentionalRecorderStopRef,
+  });
 
-    // 3-second cooldown to avoid duplicate triggers
-    const nowMs = Date.now();
-    if (nowMs - lastTriggerRef.current < 3000) return;
-    lastTriggerRef.current = nowMs;
+  const stopRecordingAndUpload = useCallback(async (): Promise<boolean> => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      console.warn("Proctoring recorder was not active at submit time.");
+      return false;
+    }
 
-    setWarningCount((prev) => {
-      if (prev >= 3) return prev;
+    const uploadBlob = async (blob: Blob): Promise<boolean> => {
+      if (blob.size <= 0 || !token) return false;
 
-      const nextCount = prev + 1;
-      let msgText = "";
-      if (nextCount >= 3) {
-        msgText = "You have exceeded the maximum of 3 security violations. Your assessment is being automatically submitted.";
-      } else if (violationType === "Tab Switch Detected") {
-        msgText = "You switched browser tabs. This is prohibited during the test.";
-      } else if (violationType === "Window Lost Focus") {
-        msgText = "You left the test window or opened another app.";
-      } else if (violationType === "Right Click Attempted") {
-        msgText = "Right-clicking and inspecting elements is strictly disabled.";
-      } else if (violationType === "DevTools Shortcut Blocked") {
-        msgText = "Developer tools shortcuts are blocked.";
-      } else if (violationType === "Copy/Paste Attempted") {
-        msgText = "Copying or pasting text is strictly disabled.";
-      } else if (violationType === "Fullscreen Mode Exited") {
-        msgText = "You exited fullscreen mode. Please remain in fullscreen during the test.";
-      } else if (violationType === "Face Missing") {
-        msgText = "Face not detected in camera feed. Please face your screen clearly.";
-      } else if (violationType.startsWith("Looking")) {
-        msgText = `Please look directly at your screen. (Violation: ${violationType})`;
-      } else {
-        msgText = `A security violation (${violationType}) was flagged.`;
-      }
+      const authHeaders = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
 
-      setShowProctorWarning(msgText);
-
-      if (nextCount >= 3) {
-        setTimeout(() => {
-          setShowProctorWarning(null);
-          handleSubmit(answersRef.current);
-        }, 1500);
-      }
-
-      return nextCount;
-    });
-  }, [phase]);
-
-  // Active proctoring event listeners
-  useEffect(() => {
-    if (phase !== "running") return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        triggerProctorWarning("Tab Switch Detected");
-      }
-    };
-
-    const handleWindowBlur = () => {
-      triggerProctorWarning("Window Lost Focus");
-    };
-
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-      triggerProctorWarning("Right Click Attempted");
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
-      const isShift = e.shiftKey;
-      const isF12 = e.key === 'F12' || e.keyCode === 123;
-      const isDevToolsShortcut = 
-        (isCmdOrCtrl && isShift && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j' || e.key === 'C' || e.key === 'c' || e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) ||
-        (isCmdOrCtrl && (e.key === 'U' || e.key === 'u' || e.keyCode === 85)) ||
-        (isCmdOrCtrl && (e.key === 'S' || e.key === 's' || e.keyCode === 83));
-
-      if (isF12 || isDevToolsShortcut) {
-        e.preventDefault();
-        e.stopPropagation();
-        triggerProctorWarning("DevTools Shortcut Blocked");
-      }
-    };
-
-    const handleCopyCutPaste = (e: ClipboardEvent) => {
-      e.preventDefault();
-      triggerProctorWarning("Copy/Paste Attempted");
-    };
-
-    const handleSelectStart = (e: Event) => {
-      e.preventDefault();
-    };
-
-    const handleFullscreenChange = () => {
-      const isFullscreen = !!(
-        document.fullscreenElement ||
-        (document as any).webkitFullscreenElement ||
-        (document as any).mozFullScreenElement ||
-        (document as any).msFullscreenElement
-      );
-      if (!isFullscreen) {
-        triggerProctorWarning("Fullscreen Mode Exited");
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleWindowBlur);
-    document.addEventListener('contextmenu', handleContextMenu);
-    window.addEventListener('keydown', handleKeyDown, true);
-    document.addEventListener('copy', handleCopyCutPaste);
-    document.addEventListener('cut', handleCopyCutPaste);
-    document.addEventListener('paste', handleCopyCutPaste);
-    document.addEventListener('selectstart', handleSelectStart);
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleWindowBlur);
-      document.removeEventListener('contextmenu', handleContextMenu);
-      window.removeEventListener('keydown', handleKeyDown, true);
-      document.removeEventListener('copy', handleCopyCutPaste);
-      document.removeEventListener('cut', handleCopyCutPaste);
-      document.removeEventListener('paste', handleCopyCutPaste);
-      document.removeEventListener('selectstart', handleSelectStart);
-
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
-    };
-  }, [phase, triggerProctorWarning]);
-
-  // Face and gaze tracking loop
-  useEffect(() => {
-    if (phase !== "running" || !clmReady) return;
-
-    let trackerInstance: any = null;
-    let intervalId: any = null;
-    let lastState: 'one' | 'none' | 'left' | 'right' | 'up' | 'down' = 'one';
-    let stateStartTime = Date.now();
-    let isTracking = false;
-
-    const stateHistory: string[] = [];
-
-    const startTracking = () => {
-      if (!clmReady || !(window as any).clm || !(window as any).pModel) return;
+      // Production: direct upload to Supabase Storage (serverless-safe)
       try {
-        if (!videoRef.current || videoRef.current.readyState < 2) return;
-        trackerInstance = new (window as any).clm.tracker();
-        trackerInstance.init((window as any).pModel);
-        trackerInstance.start(videoRef.current);
-        isTracking = true;
-      } catch (err) {
-        console.debug("Failed to start clmtrackr:", err);
+        const urlRes = await fetch(`/api/employee/tests/${testId}/video-upload-url`, {
+          method: "POST",
+          headers: authHeaders,
+        });
+        if (urlRes.ok) {
+          const { signedUrl } = await urlRes.json();
+          if (signedUrl) {
+            const putRes = await fetch(signedUrl, {
+              method: "PUT",
+              headers: { "Content-Type": blob.type || "video/webm" },
+              body: blob,
+            });
+            if (putRes.ok) {
+              const completeRes = await fetch(`/api/employee/tests/${testId}/upload_video`, {
+                method: "POST",
+                headers: authHeaders,
+                body: JSON.stringify({ complete: true }),
+              });
+              if (completeRes.ok) {
+                const payload = await completeRes.json().catch(() => ({}));
+                return Boolean(payload?.success);
+              }
+            }
+          }
+        }
+      } catch (directErr) {
+        console.warn("Direct Supabase video upload failed, trying chunk fallback:", directErr);
       }
+
+      // Fallback: chunked server upload (local dev only)
+      const CHUNK_SIZE = 2 * 1024 * 1024;
+      const totalChunks = Math.max(1, Math.ceil(blob.size / CHUNK_SIZE));
+
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const slice = blob.slice(
+          chunkIndex * CHUNK_SIZE,
+          Math.min(blob.size, (chunkIndex + 1) * CHUNK_SIZE)
+        );
+        const formData = new FormData();
+        formData.append("chunkIndex", String(chunkIndex));
+        formData.append("totalChunks", String(totalChunks));
+        formData.append(
+          "chunk",
+          new File([slice], `${testId}-chunk-${chunkIndex}.webm`, {
+            type: blob.type || "video/webm",
+          })
+        );
+
+        const res = await fetch(`/api/employee/tests/${testId}/upload_video/chunk`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+
+        if (!res.ok) {
+          console.warn("Video chunk upload failed:", await res.text().catch(() => ""));
+          return false;
+        }
+
+        const payload = await res.json().catch(() => ({}));
+        if (payload?.complete && payload?.success) {
+          return true;
+        }
+      }
+
+      return false;
     };
 
-    const timer = setTimeout(() => {
-      startTracking();
-    }, 1000);
-
-    intervalId = setInterval(() => {
-      if (!clmReady || !isTracking || !trackerInstance || !(window as any).clm || !(window as any).pModel) {
-        if (videoRef.current && videoRef.current.readyState >= 2 && !isTracking) {
-          startTracking();
-        }
-        return;
-      }
-
-      const positions = trackerInstance.getCurrentPosition();
-      const score = trackerInstance.getScore();
-
-      let detectedState: typeof lastState = 'one';
-
-      if (!positions || positions.length < 70 || score < 0.35) {
-        detectedState = 'none';
-      } else {
-        const noseX = positions[62][0];
-        const noseY = positions[62][1];
-        const leftFaceX = positions[1][0];
-        const rightFaceX = positions[13][0];
-        const noseBridgeY = positions[33][1];
-        const chinY = positions[7][1];
-
-        const leftDist = noseX - leftFaceX;
-        const rightDist = rightFaceX - noseX;
-        const horizontalRatio = leftDist / (rightDist || 1);
-
-        const noseLen = noseY - noseBridgeY;
-        const chinLen = chinY - noseY;
-        const verticalRatio = noseLen / (chinLen || 1);
-
-        if (horizontalRatio < 0.75) {
-          detectedState = 'right';
-        } else if (horizontalRatio > 1.30) {
-          detectedState = 'left';
-        } else if (verticalRatio < 0.45) {
-          detectedState = 'up';
-        } else if (verticalRatio > 0.85) {
-          detectedState = 'down';
-        } else {
-          detectedState = 'one';
-        }
-      }
-
-      stateHistory.push(detectedState);
-      if (stateHistory.length > 5) {
-        stateHistory.shift();
-      }
-
-      const counts: Record<string, number> = {};
-      let maxCount = 0;
-      let smoothedState = detectedState;
-      for (const s of stateHistory) {
-        counts[s] = (counts[s] || 0) + 1;
-        if (counts[s] > maxCount) {
-          maxCount = counts[s];
-          smoothedState = s as any;
-        }
-      }
-
-      const now = Date.now();
-      if (smoothedState !== lastState) {
-        lastState = smoothedState;
-        stateStartTime = now;
-      } else {
-        const duration = (now - stateStartTime) / 1000;
-        
-        if (lastState === 'none' && duration >= 4.0) {
-          triggerProctorWarning("Face Missing");
-          stateStartTime = now;
-        } else if (['left', 'right', 'up', 'down'].includes(lastState) && duration >= 4.0) {
-          let warningMsg = "Looking Away";
-          if (lastState === 'down') warningMsg = "Looking Down (possible phone usage)";
-          triggerProctorWarning(warningMsg);
-          stateStartTime = now;
-        }
-      }
-    }, 1000);
-
-    return () => {
-      clearTimeout(timer);
-      clearInterval(intervalId);
-      if (trackerInstance) {
+    return await new Promise<boolean>((resolve) => {
+      recorder.onstop = async () => {
         try {
-          trackerInstance.stop();
-        } catch (e) {}
+          const blob = new Blob(recordingChunksRef.current, {
+            type: recorder.mimeType || "video/webm",
+          });
+          if (blob.size <= 0) {
+            console.warn("Proctoring recording blob is empty.");
+            resolve(false);
+            return;
+          }
+
+          let ok = await uploadBlob(blob);
+          if (!ok) {
+            await new Promise((r) => setTimeout(r, 800));
+            ok = await uploadBlob(blob);
+          }
+          resolve(ok);
+        } catch (err) {
+          console.warn("Failed to upload proctoring video:", err);
+          resolve(false);
+        }
+      };
+
+      try {
+        if (recorder.state === "recording") {
+          recorder.requestData();
+        }
+      } catch {
+        // ignore
       }
-    };
-  }, [phase, clmReady, triggerProctorWarning]);
+      intentionalRecorderStopRef.current = true;
+      recorder.stop();
+    });
+  }, [testId, token]);
 
   const handleStartTest = async () => {
     await requestFullscreen();
+    if (!isFullscreenActive()) {
+      alert("Fullscreen mode is required to start this assessment. Please allow fullscreen and try again.");
+      return;
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240 }
+        video: { width: 640, height: 480, facingMode: "user" },
+        audio: false,
       });
       setCamStream(stream);
+
+      const recorder = createMediaRecorder(stream);
+      if (!recorder) {
+        stream.getTracks().forEach((track) => track.stop());
+        alert(
+          "Could not start proctoring video recording. Please use Chrome or Edge, allow camera access, and try again."
+        );
+        return;
+      }
+
+      mediaRecorderRef.current = recorder;
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size > 0) recordingChunksRef.current.push(event.data);
+      };
+      recorder.start(1000);
+      recordingStartRef.current = Date.now();
     } catch (err) {
       console.warn("Failed to access webcam:", err);
       alert("Proctoring camera access is required to take this test. Please enable camera access in your browser settings and click Start again.");
@@ -581,8 +526,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       } catch (err) {
         console.warn("Failed to update test start time in database:", err);
       }
-      // Set local start time so the timer starts fresh
-      setTimeLeft(test.time_limit_seconds ?? 900);
+      setTimeLeft(test.time_limit_seconds ?? DEFAULT_TIME_LIMIT_SECONDS);
     }
 
     setPhase("running");
@@ -593,11 +537,16 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const hasPrevious = currentIdx > 0;
   const hasNext     = currentIdx < (questions?.length ?? 0) - 1;
 
-  async function handleSubmit(ans: Record<number, number>) {
+  async function handleSubmit(ans: Record<number, number>, opts?: { autoSubmitted?: boolean }) {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setMsg("Submitting…");
     try {
+      await stopRecordingAndUpload();
+      if (camStream) {
+        camStream.getTracks().forEach((track) => track.stop());
+      }
+
       const responseList = Object.entries(ans).map(([qIdx, selected]) => ({
         question_id: questions![parseInt(qIdx)].id,
         selected_index: selected,
@@ -610,7 +559,10 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ answers: responseList }),
+        body: JSON.stringify({
+          answers: responseList,
+          autoSubmitted: opts?.autoSubmitted === true || warningCount >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS,
+        }),
       });
 
       if (!r.ok) {
@@ -626,12 +578,16 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         ai_analysis: res.ai_analysis,
         topic_title: (test as any)?.topic_title ?? "",
       });
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
       setPhase("submitted");
     } catch (e: any) {
       submittingRef.current = false;
       setErr(e.message ?? "Submit failed"); setPhase("error");
     }
   }
+  handleSubmitRef.current = handleSubmit;
 
   function toggleFlag(idx: number) {
     setFlags((prev) => {
@@ -651,7 +607,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   if (!currentQ) {
     return (
       <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-500" />
+        <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
         <p className="font-medium">Loading questions…</p>
       </div>
     );
@@ -705,15 +661,15 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   // ── phase: ready ────────────────────────────────────────────────
   if (phase === "ready") {
     return (
-      <div className="max-w-2xl mx-auto py-16 px-4 space-y-8 text-center bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800 rounded-3xl shadow-soft p-10 animate-fade-in mt-10">
-        <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-500/25 animate-pulse">
+      <div className="max-w-2xl mx-auto py-16 px-4 space-y-8 text-center bg-card border border-border rounded-3xl shadow-soft p-10 animate-fade-in mt-10">
+        <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-500/25 animate-pulse">
           <AlertTriangle className="w-8 h-8 text-white" />
         </div>
         <div className="space-y-3">
-          <h1 className="text-2xl font-black text-slate-900 dark:text-slate-100">
+          <h1 className="text-2xl font-black text-foreground">
             {test?.status === "in_progress" ? "Resume Assessment" : "Active Proctoring & Integrity Agreement"}
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 font-semibold max-w-md mx-auto leading-relaxed">
+          <p className="text-sm text-muted-foreground font-semibold max-w-md mx-auto leading-relaxed">
             {test?.status === "in_progress"
               ? "Re-enter the assessment window. Fullscreen mode and camera access will be reactivated."
               : "By proceeding, you agree to grant camera access for real-time face tracking. Exiting fullscreen or switching tabs will trigger violation warnings."}
@@ -722,11 +678,12 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
         <div className="bg-slate-50 dark:bg-slate-950 p-6 rounded-2xl border border-slate-100 dark:border-slate-900/60 max-w-md mx-auto text-left space-y-4">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-850 dark:text-slate-200">Rules &amp; Guidelines:</h3>
-          <ul className="text-xs font-semibold text-slate-500 dark:text-slate-400 space-y-2 list-disc list-inside">
-            <li>Fullscreen mode must remain active.</li>
-            <li>Browser tab switching or minimizing is blocked.</li>
-            <li>Face must be visible in the camera feed at all times.</li>
-            <li>3 security warnings will result in auto-submission.</li>
+          <ul className="text-xs font-semibold text-muted-foreground space-y-2 list-disc list-inside">
+            <li>Camera and fullscreen must stay active for the entire session.</li>
+            <li>Tab switch, minimize, refresh, copy/paste, and DevTools are blocked.</li>
+            <li>Face must remain visible; looking away triggers warnings.</li>
+            <li>Session is video-recorded and violations are logged server-side.</li>
+            <li>{EMPLOYEE_PROCTOR_MAX_VIOLATIONS} strikes auto-submits your assessment.</li>
           </ul>
         </div>
 
@@ -746,7 +703,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   if (phase === "loading") {
     return (
       <div className="py-24 mx-auto max-w-xl text-center text-slate-500 space-y-4">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-500" />
+        <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" />
         <p className="font-medium">Preparing your test…</p>
       </div>
     );
@@ -760,7 +717,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
   const selected   = answers[currentIdx];
 
   return (
-    <div className={`max-w-3xl mx-auto px-4 py-6 space-y-6 ${phase === "running" ? "select-none" : ""}`}>
+    <div className={`max-w-3xl mx-auto px-4 py-6 space-y-6 ${phase === "running" ? "select-none" : ""} ${showProctorWarning ? "pointer-events-none" : ""}`}>
 
       {/* ── Header bar ──────────────────────────────────────────── */}
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -779,7 +736,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         <Button
           variant="outline"
           size="sm"
-          className={`gap-1.5 rounded-lg border ${allAnswered ? "border-indigo-500 dark:border-indigo-700 text-indigo-600 dark:text-violet-400 bg-indigo-50 dark:bg-slate-900 font-semibold" : "border-indigo-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-indigo-50 dark:hover:bg-slate-800"}`}
+          className={`gap-1.5 rounded-lg border ${allAnswered ? "border-indigo-500 dark:border-indigo-700 text-primary bg-indigo-50 dark:bg-slate-900 font-semibold" : "border-border text-muted-foreground hover:bg-secondary"}`}
           disabled={!allAnswered}
           onClick={() => handleSubmit(answers)}
         >
@@ -792,12 +749,12 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
       <ProgressBar current={currentIdx} total={questions!.length} />
 
       {/* ── Question card ────────────────────────────────────────── */}
-      <div className="rounded-2xl bg-white dark:bg-slate-900 shadow-soft border border-indigo-100 dark:border-slate-800 p-8 space-y-5">
+      <div className="rounded-2xl bg-card shadow-soft border border-border p-8 space-y-5">
 
         {/* flag */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-500 dark:text-violet-450 uppercase tracking-wider">
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-primary dark:text-violet-450 uppercase tracking-wider">
               <span className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-505 to-violet-600 flex items-center justify-center text-white text-[10px]">{currentIdx + 1}</span>
               Q{currentIdx + 1}
             </span>
@@ -816,7 +773,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         </div>
 
         {/* question text */}
-        <h2 className="text-lg font-bold leading-snug text-slate-900 dark:text-slate-100">
+        <h2 className="text-lg font-bold leading-snug text-foreground">
           {(currentQ as any).question_text}
         </h2>
 
@@ -832,7 +789,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
                   w-full text-left px-5 py-4 rounded-xl border-2 text-sm font-medium transition-all duration-200
                   ${isSelected
                     ? "border-indigo-500 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/20 text-indigo-900 dark:text-indigo-200 shadow-md shadow-indigo-500/15 ring-2 ring-indigo-200 dark:ring-indigo-800"
-                    : "border-indigo-100 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 hover:bg-indigo-50/50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
+                    : "border-border hover:border-indigo-400 dark:hover:border-indigo-600 hover:bg-indigo-50/50 dark:hover:bg-slate-800 text-muted-foreground"
                   }
                 `}
                 aria-pressed={isSelected}
@@ -859,7 +816,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
         {/* Previous */}
         <Button
           variant="outline"
-          className="rounded-xl border-indigo-200 dark:border-slate-800 text-indigo-700 dark:text-violet-400 hover:bg-indigo-50 dark:hover:bg-slate-800 font-semibold"
+          className="rounded-xl border-border text-primary hover:bg-secondary font-semibold"
           onClick={() => setCurrentIdx((i) => Math.max(0, i - 1))}
           disabled={!hasPrevious}
         >
@@ -877,7 +834,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
             else if (answered && flagged) cls += "border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-450";
             else if (answered)            cls += "border-emerald-400 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-450";
             else if (flagged)             cls += "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 text-amber-505 dark:text-amber-450";
-            else                          cls += "border-indigo-100 dark:border-slate-800 bg-white dark:bg-slate-900 text-indigo-300 dark:text-slate-600";
+            else                          cls += "border-border bg-card text-indigo-300 dark:text-slate-600";
             return (
               <button
                 key={i}
@@ -894,7 +851,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
         {/* Next / Finish */}
         {hasNext ? (
-          <Button className="gap-1 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/30 transition-all rounded-xl" onClick={() => setCurrentIdx((i) => i + 1)}>
+          <Button className="gap-1 bg-primary hover:from-indigo-700 hover:to-violet-700 text-white shadow-md shadow-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/30 transition-all rounded-xl" onClick={() => setCurrentIdx((i) => i + 1)}>
             Next <ArrowRight className="w-4 h-4" />
           </Button>
         ) : (
@@ -911,22 +868,22 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
 
       {/* Security Warning Modal Overlay */}
       {showProctorWarning && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-md w-full p-6 border border-red-100 dark:border-red-950/30 text-center space-y-4">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 pointer-events-auto">
+          <div className="bg-card rounded-2xl shadow-xl max-w-md w-full p-6 border border-red-100 dark:border-red-950/30 text-center space-y-4">
             <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-950/30 flex items-center justify-center mx-auto text-red-600 dark:text-red-400 animate-pulse">
               <AlertTriangle className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Security Warning</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300">
+            <h3 className="text-lg font-bold text-foreground">Security Warning</h3>
+            <p className="text-sm text-muted-foreground">
               {showProctorWarning}
             </p>
             <div className="bg-red-50 dark:bg-red-950/20 py-2 px-4 rounded-xl text-xs font-bold text-red-700 dark:text-rose-400 inline-block">
-              Warning Strike: {warningCount} / 3
+              Warning Strike: {warningCount} / {EMPLOYEE_PROCTOR_MAX_VIOLATIONS}
             </div>
             <p className="text-xs text-slate-400">
-              Note: Reaching 3 strikes will automatically submit your assessment.
+              Note: Reaching {EMPLOYEE_PROCTOR_MAX_VIOLATIONS} strikes will automatically submit your assessment.
             </p>
-            {warningCount >= 3 ? (
+            {warningCount >= EMPLOYEE_PROCTOR_MAX_VIOLATIONS ? (
               <Button
                 disabled
                 className="w-full bg-red-600 text-white rounded-xl py-3 font-semibold text-sm flex items-center justify-center gap-2"
@@ -936,10 +893,7 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
             ) : (
               <Button
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3 font-semibold text-sm"
-                onClick={async () => {
-                  setShowProctorWarning(null);
-                  await requestFullscreen();
-                }}
+                onClick={() => void dismissWarning()}
               >
                 Understand & Continue
               </Button>

@@ -30,6 +30,8 @@ function InnerPage() {
   const employeeId = searchParams.get("employee_id") ?? "";
   const org = searchParams.get("org") ?? "";
 
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -54,6 +56,16 @@ function InnerPage() {
       return;
     }
 
+    if (!fullName.trim()) {
+      setError("Please enter your full name.");
+      return;
+    }
+
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
@@ -70,7 +82,7 @@ function InnerPage() {
       const response = await fetch("/api/employee/auth/set-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employee_id: employeeId, password }),
+        body: JSON.stringify({ employee_id: employeeId, password, full_name: fullName.trim(), email: email.trim() }),
       });
       let result: any = null;
       const contentType = response.headers.get("content-type") || "";
@@ -170,6 +182,36 @@ function InnerPage() {
               className="w-full text-sm rounded-xl border-2 border-slate-200 dark:border-slate-650 bg-slate-100/60 dark:bg-slate-900/60 px-4 py-2.5 text-slate-550 dark:text-slate-400 font-medium outline-none cursor-not-allowed"
               value={employeeId}
               readOnly
+            />
+          </div>
+
+          {/* Full Name */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+              Full Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              className="w-full text-sm rounded-xl border-2 border-slate-200 dark:border-slate-600/80 bg-slate-50/50 dark:bg-slate-900/60 px-4 py-2.5 text-slate-900 dark:text-white font-medium placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:bg-white dark:focus:bg-slate-900/80 transition-all"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              placeholder="e.g. Sofia Reddy"
+              required
+            />
+          </div>
+
+          {/* Email Address */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+              Email Address <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="email"
+              className="w-full text-sm rounded-xl border-2 border-slate-200 dark:border-slate-600/80 bg-slate-50/50 dark:bg-slate-900/60 px-4 py-2.5 text-slate-900 dark:text-white font-medium placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 focus:bg-white dark:focus:bg-slate-900/80 transition-all"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="e.g. sofia.reddy@example.com"
+              required
             />
           </div>
 

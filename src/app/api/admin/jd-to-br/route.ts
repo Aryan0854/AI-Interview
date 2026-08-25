@@ -7,14 +7,14 @@ import { authenticateAdminRequest } from '@/lib/employee-auth';
 export const dynamic = 'force-dynamic';
 
 function getGradeFromExperience(expStr: string | undefined | null): string {
-  if (!expStr) return 'E2';
-  
+  if (!expStr) return 'Not Specified';
+
   // Extract numbers
   const numbers = expStr.match(/\d+(\.\d+)?/g);
   if (!numbers || numbers.length === 0) {
-    return 'E2';
+    return 'Not Specified';
   }
-  
+
   const years = parseFloat(numbers[0]);
   if (years >= 0 && years < 1) return 'E0';
   if (years >= 1 && years < 3) return 'E1';
@@ -22,8 +22,8 @@ function getGradeFromExperience(expStr: string | undefined | null): string {
   if (years >= 6 && years < 9) return 'E3';
   if (years >= 9 && years < 12) return 'E4';
   if (years >= 12) return 'E5/E6';
-  
-  return 'E2';
+
+  return 'Not Specified';
 }
 
 export async function POST(req: NextRequest) {
@@ -208,7 +208,7 @@ export async function POST(req: NextRequest) {
         'Auto req ID': newAutoReqId,
         'Current Req Status': 'Open',
         'Grade': calculatedGrade,
-        'Designation': jdDetails.job_title,
+        'Designation': jdDetails.job_title ?? 'Not Specified',
         'Recruiter': '',
         'Department Type': 'Technical',
         'BU': 'ITS - TMH - Delivery',

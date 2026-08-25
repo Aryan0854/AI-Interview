@@ -1,17 +1,38 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useTheme } from "@/components/ThemeProvider";
-import { Sun, Moon } from "lucide-react";
+import React, { useEffect, useState, useRef } from "react";
+import { useTheme, Theme } from "@/components/ThemeProvider";
+import { Sun, Moon, Palette } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+const themes = [
+  { id: "light", label: "Light", icon: Sun },
+  { id: "dark", label: "Dark", icon: Moon },
+  { id: "blue", label: "Blue", icon: Palette },
+  { id: "purple", label: "Purple", icon: Palette },
+  { id: "emerald", label: "Emerald", icon: Palette },
+  { id: "rose", label: "Rose", icon: Palette },
+  { id: "sunset", label: "Sunset", icon: Palette },
+];
+
 export default function ThemeToggle() {
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Avoid hydration mismatch by waiting for mount
   useEffect(() => {
     setMounted(true);
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   if (!mounted) {
@@ -20,40 +41,53 @@ export default function ThemeToggle() {
     );
   }
 
-  const isDark = theme === "dark";
+  const activeTheme = themes.find((t) => t.id === theme) || themes[0];
+  const ActiveIcon = activeTheme.icon;
 
   return (
-    <button
-      onClick={toggleTheme}
-      type="button"
-      className="relative w-9 h-9 rounded-xl border border-indigo-150/40 dark:border-slate-800/40 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md flex items-center justify-center text-indigo-600 dark:text-violet-400 hover:bg-indigo-50/60 dark:hover:bg-slate-800/60 shadow-sm hover:shadow transition-all duration-300 overflow-hidden outline-none select-none group"
-      aria-label="Toggle light & dark theme"
-    >
-      <AnimatePresence mode="wait" initial={false}>
-        {isDark ? (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        type="button"
+        className="relative w-9 h-9 rounded-xl border border-primary/20 bg-background/60 backdrop-blur-md flex items-center justify-center text-primary hover:bg-primary/10 shadow-sm hover:shadow transition-all duration-300 overflow-hidden outline-none select-none group"
+        aria-label="Select theme"
+      >
+        <ActiveIcon className="w-[18px] h-[18px] group-hover:scale-110 transition-transform duration-300" />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
           <motion.div
-            key="moon"
-            initial={{ y: 15, rotate: 45, opacity: 0 }}
-            animate={{ y: 0, rotate: 0, opacity: 1 }}
-            exit={{ y: -15, rotate: -45, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 200, damping: 15 }}
-            className="flex items-center justify-center"
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="absolute right-0 mt-2 w-36 rounded-xl border border-border bg-popover/90 backdrop-blur-md shadow-lg overflow-hidden z-50 p-1 flex flex-col gap-0.5"
           >
-            <Moon className="w-[18px] h-[18px] fill-violet-400/20 text-violet-400 group-hover:scale-110 group-hover:rotate-12 transition-transform duration-300" />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="sun"
-            initial={{ y: 15, rotate: -45, opacity: 0 }}
-            animate={{ y: 0, rotate: 0, opacity: 1 }}
-            exit={{ y: -15, rotate: 45, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 200, damping: 15 }}
-            className="flex items-center justify-center"
-          >
-            <Sun className="w-[18px] h-[18px] fill-amber-500/10 text-amber-500 group-hover:scale-110 group-hover:rotate-45 transition-transform duration-300" />
+            {themes.map((t) => {
+              const Icon = t.icon;
+              const isActive = t.id === theme;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setTheme(t.id as Theme);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
           </motion.div>
         )}
       </AnimatePresence>
-    </button>
+    </div>
   );
 }

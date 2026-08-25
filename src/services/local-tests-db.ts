@@ -6,6 +6,7 @@ import { supabase } from "@/lib/db";
 export interface LocalTest {
   id: string;
   employee_id: string;
+  employee_code?: string;
   topic_id: string;
   subject_id: string;
   difficulty: string;
@@ -89,7 +90,8 @@ export class LocalTestsDb {
     }
     return {
       id: row.id,
-      employee_id: row.employee_id,
+      employee_id: row.employee_code || row.employee_id,
+      employee_code: row.employee_code,
       topic_id: row.topic_id,
       subject_id: row.subject_id,
       difficulty: row.difficulty,

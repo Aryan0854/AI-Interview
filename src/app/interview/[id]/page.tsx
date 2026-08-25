@@ -2260,7 +2260,7 @@ export default function CandidatePortal() {
               <div className="space-y-6">
                 <div className="text-left">
                   <h3 className="text-sm font-black text-slate-855 dark:text-slate-200 uppercase tracking-wider mb-2">Step 1: Capture or Upload Government ID</h3>
-                  <p className="text-xs text-slate-600 dark:text-slate-350 leading-relaxed font-semibold">
+                  <p className="text-xs text-muted-foreground leading-relaxed font-semibold">
                     Please hold your Government ID (Driver's License, Passport, or National ID card) up to the camera or upload a scanned image file. Ensure all details are clearly legible and the face photo on the ID is fully visible.
                   </p>
                 </div>

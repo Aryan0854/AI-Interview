@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/db";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
+import { employeeOwnsTest, getEmployeeUuid } from "@/lib/employee-test-access";
 import { localTestsDb } from "@/services/local-tests-db";
+import { syncSubmitToSupabase } from "@/services/employee-test-supabase-sync";
+import { canSubmitTest, normalizeProctoring } from "@/lib/employee-proctoring";
 
 /**
  * POST /api/employee/tests/:id/submit
@@ -14,7 +17,7 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const auth = authenticateRequest(request);
+    const auth = await authenticateRequestAsync(request);
     if (!auth) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -23,6 +26,21 @@ export async function POST(
     const answers = body.answers ?? [];
     if (!Array.isArray(answers) || answers.length === 0) {
       return NextResponse.json({ error: "Empty answers" }, { status: 400 });
+    }
+
+    const employeeUuid = await getEmployeeUuid(auth.employeeId);
+    const localTest = await localTestsDb.getTestById(id);
+    if (!localTest || !employeeOwnsTest(localTest as any, auth.employeeId, employeeUuid)) {
+      return NextResponse.json({ error: "Test not found" }, { status: 404 });
+    }
+
+    if (localTest.status === "completed") {
+      return NextResponse.json({ error: "Test already submitted." }, { status: 409 });
+    }
+
+    const submitCheck = canSubmitTest(localTest);
+    if (!submitCheck.ok && submitCheck.code === "NOT_STARTED") {
+      return NextResponse.json({ error: submitCheck.error }, { status: 400 });
     }
 
     let attempts: any[] = [];
@@ -48,7 +66,7 @@ export async function POST(
         )
         .map((a: { question_id: string; selected_index: number; time_seconds?: number }) => ({
           test_id:               id,
-          employee_id:           auth.employeeId,
+          employee_id:           employeeUuid,
           question_id:           a.question_id,
           selected_option_index: a.selected_index,
           is_correct:            correctMap.get(a.question_id)! === a.selected_index,
@@ -93,7 +111,7 @@ export async function POST(
         )
         .map((a: { question_id: string; selected_index: number; time_seconds?: number }) => ({
           test_id:               id,
-          employee_id:           auth.employeeId,
+          employee_id:           employeeUuid,
           question_id:           a.question_id,
           selected_option_index: a.selected_index,
           is_correct:            correctMap.get(a.question_id)! === a.selected_index,
@@ -114,8 +132,9 @@ export async function POST(
     // ---- compute accuracy ----
     const correct  = attempts.filter((a: any) => a.is_correct).length;
     const accuracy = round((correct / Math.max(1, attempts.length)) * 100);
+    const completedAt = new Date().toISOString();
+    const totalQuestions = questionsList.length || attempts.length;
 
-    // ---- AI analysis (Gemini) ----
     const wrongQuestions = answers
       .filter((a: any) => {
         const q = questionsList.find((qq: any) => qq.id === a.question_id);
@@ -136,15 +155,67 @@ export async function POST(
         correct,
         wrongQuestions: wrongQuestions.slice(0, 5),
       });
-
-      // Save AI analysis back to database
-      if (isLocal) {
-        await localTestsDb.updateTest(id, { in_progress: aiAnalysis });
-      } else {
-        await supabase.from("tests").update({ in_progress: aiAnalysis }).eq("id", id);
-      }
     } catch (aiErr) {
       console.warn("AI analysis failed or skipped:", aiErr);
+    }
+
+    const completionUpdates = {
+      status: "completed" as const,
+      completed_at: completedAt,
+      score_correct: correct,
+      score_total: totalQuestions,
+      score_percent: accuracy,
+      in_progress: aiAnalysis ?? null,
+      ai_analysis: aiAnalysis ?? null,
+      proctoring: {
+        ...normalizeProctoring(localTest.proctoring),
+        autoSubmitted:
+          normalizeProctoring(localTest.proctoring).autoSubmitted ||
+          body.autoSubmitted === true,
+      },
+    };
+
+    if (isLocal) {
+      testRow = await localTestsDb.updateTest(id, completionUpdates);
+      try {
+        await syncSubmitToSupabase(
+          id,
+          auth.employeeId,
+          attempts,
+          {
+            ...completionUpdates,
+            topic_title: testRow?.topic_title,
+            subject_title: testRow?.subject_title,
+            session_recording_url: testRow?.session_recording_url,
+            started_at: testRow?.started_at,
+            time_limit_seconds: testRow?.time_limit_seconds,
+            total_questions: totalQuestions,
+            difficulty: testRow?.difficulty,
+            topic_id: testRow?.topic_id,
+            subject_id: testRow?.subject_id,
+            current_question_index: testRow?.current_question_index ?? 0,
+          },
+          auth.employee
+        );
+      } catch (syncErr) {
+        console.warn("Supabase sync after submit failed:", syncErr);
+      }
+    } else {
+      const { data: updated, error: updErr } = await supabase
+        .from("tests")
+        .update({
+          status: "completed",
+          completed_at: completedAt,
+          score_correct: correct,
+          score_total: totalQuestions,
+          score_percent: accuracy,
+          in_progress: aiAnalysis ?? null,
+        })
+        .eq("id", id)
+        .select("*")
+        .single();
+      if (updErr) throw updErr;
+      testRow = updated;
     }
 
     return NextResponse.json({

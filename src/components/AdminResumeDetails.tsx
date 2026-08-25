@@ -49,7 +49,8 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
   const analysis = data.analysis || {};
   const enhanced = data.enhanced || {};
 
-  const getScoreColor = (score: number) => {
+  const getScoreColor = (score: number | null | undefined) => {
+    if (typeof score !== "number") return "text-slate-400 dark:text-slate-500";
     if (score >= 80) return "text-emerald-600 dark:text-emerald-450";
     if (score >= 60) return "text-amber-600 dark:text-amber-450";
     return "text-red-500 dark:text-red-450";
@@ -204,7 +205,7 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                         <Card className="p-5 bg-white dark:bg-slate-900 border-indigo-100 dark:border-slate-800 shadow-soft text-center hover:shadow-card hover:border-indigo-300 dark:hover:border-slate-700 transition-all">
                           <metric.icon className="w-6 h-6 mx-auto mb-3 text-indigo-600 dark:text-violet-400" />
                           <div className={cn("text-2xl font-extrabold mb-1", getScoreColor(metric.value))}>
-                            {metric.value}
+                            {typeof metric.value === "number" ? metric.value : "N/A"}
                           </div>
                           <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mt-1">{metric.label}</div>
                         </Card>
@@ -363,10 +364,16 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                       <div className="p-4 rounded-xl bg-indigo-50 dark:bg-slate-950 border border-indigo-200 dark:border-slate-800">
                         <p className="text-indigo-950 dark:text-slate-350 font-bold mb-3 text-sm">Recruiter Recommendation</p>
                         <p className="text-indigo-950 dark:text-slate-300 text-sm font-semibold leading-relaxed">
-                          Based on the analysis, this candidate has a <span className="font-extrabold">{analysis.overallScore || 0}% fit</span> score.
-                          {analysis.overallScore >= 80 ? " ✓ Strong candidate - proceed to technical review." :
-                           analysis.overallScore >= 60 ? " • Good fit for discussion phase." :
-                           " ○ Consider for further evaluation."}
+                          {typeof analysis.overallScore === "number" ? (
+                            <>
+                              Based on the analysis, this candidate has a <span className="font-extrabold">{analysis.overallScore}% fit</span> score.
+                              {analysis.overallScore >= 80 ? " ✓ Strong candidate - proceed to technical review." :
+                               analysis.overallScore >= 60 ? " • Good fit for discussion phase." :
+                               " ○ Consider for further evaluation."}
+                            </>
+                          ) : (
+                            "A fit score is not available for this candidate — automated scoring did not return a result. Manual review recommended."
+                          )}
                         </p>
                       </div>
                     </div>
@@ -832,7 +839,7 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                             'fullscreen-exit': 'border-rose-500 bg-rose-50 dark:bg-rose-950/30 text-rose-500',
                             'face-none': 'border-amber-500 bg-amber-50 dark:bg-amber-950/30 text-amber-500',
                             'face-multiple': 'border-rose-500 bg-rose-50 dark:bg-rose-950/30 text-rose-500',
-                            'voice-loud': 'border-indigo-500 bg-indigo-50 dark:bg-slate-950/30 text-indigo-500',
+                            'voice-loud': 'border-indigo-500 bg-indigo-50 dark:bg-slate-950/30 text-primary',
                           };
 
                           const iconMap: Record<string, React.ReactNode> = {
@@ -852,7 +859,7 @@ export function AdminResumeDetails({ data, onClose }: AdminResumeDetailsProps) {
                           };
 
                           const friendlyName = userFriendlyTypes[violation.type] || violation.type.toUpperCase();
-                          const styleStr = typeColors[violation.type] || 'border-indigo-500 bg-indigo-50 text-indigo-500';
+                          const styleStr = typeColors[violation.type] || 'border-indigo-500 bg-indigo-50 text-primary';
                           const detailsStr = detailsMap[violation.type] || 'Suspicious user pattern logged by the system.';
                           const iconEl = iconMap[violation.type] || <ShieldAlert className="w-3.5 h-3.5" />;
 

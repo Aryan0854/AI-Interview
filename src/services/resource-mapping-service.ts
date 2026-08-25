@@ -1,0 +1,643 @@
+import ExcelJS from "exceljs";
+import { join } from "path";
+import { readFile } from "fs/promises";
+import { derivePortalTestStatus, type PortalTestStatus } from "@/lib/portal-test-status";
+import { formatProductDisplayName, formatTopicTitleForDisplay } from "@/lib/product-display-name";
+import { readPersistedJson, writePersistedJson } from "@/lib/runtime-data";
+
+export interface ResourcePortalEmployee {
+  employee_id: string;
+  full_name: string;
+  role: string;
+  domain: string;
+  product: string;
+  email: string;
+  ddh: string;
+  emp_status: string;
+  remarks: string;
+  assigned_questions: string[];
+  assigned_question_count: number;
+  test_id: string | null;
+  test_status: PortalTestStatus | null;
+  score: number | null;
+  score_max?: number;
+  completed_at?: string | null;
+    tests: Array<{
+    id: string;
+    topicTitle: string;
+    subjectTitle: string;
+    difficulty: string;
+    totalQuestions: number;
+    status: string;
+    score: number;
+    scoreMax?: number;
+    videoUrl?: string | null;
+    hasRecording?: boolean;
+    proctoring?: {
+      warningCount: number;
+      violations: Array<{
+        type: string;
+        timestamp: string;
+        category?: string;
+        severity?: string;
+        detail?: string;
+      }>;
+      autoSubmitted: boolean;
+      sessionStartedAt?: string | null;
+      videoUploaded?: boolean;
+    } | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  }>;
+}
+
+const MAPPING_FILE = join(process.cwd(), "docs", "Question Banks", "Resource_Question_Mapping.xlsx");
+const CREDENTIALS_FILE = join(process.cwd(), "Employee_User_Credentials.xlsx");
+const ACCOUNTS_FILE = join(process.cwd(), "src", "data", "employee-accounts.json");
+// Persisted (and edited) via readPersistedJson/writePersistedJson so admin edits survive
+// on serverless/Vercel deployments instead of writing to the read-only bundled filesystem.
+const PROFILES_JSON_FILENAME = "resource_portal_profiles.json";
+const REMOVED_EMPLOYEES_FILENAME = "portal_removed_employees.json";
+
+type PortalProfileRow = Omit<ResourcePortalEmployee, "test_id" | "test_status" | "score" | "tests">;
+
+let mappingCache: { at: number; rows: PortalProfileRow[] } | null = null;
+let credentialsCache: { at: number; rows: PortalProfileRow[] } | null = null;
+let profilesJsonCache: { at: number; rows: PortalProfileRow[] } | null = null;
+const EXCEL_CACHE_MS = 5 * 60 * 1000;
+const PROFILES_JSON_CACHE_MS = 5 * 60 * 1000;
+
+function normalizeEmployeeId(value: string | null | undefined): string {
+  return String(value ?? "").trim();
+}
+
+function pickField(get: (key: string) => string, keys: string[]): string {
+  for (const key of keys) {
+    const value = get(key);
+    if (value) return value;
+  }
+  return "";
+}
+
+function clean(value: ExcelJS.CellValue): string {
+  if (value == null) return "";
+  if (typeof value === "object" && "text" in value) return String((value as any).text ?? "").trim();
+  if (typeof value === "object" && "result" in value) return String((value as any).result ?? "").trim();
+  return String(value).trim();
+}
+
+import { supabase } from "@/lib/db";
+import { shouldUseDbAccounts } from "@/services/employee-account-store";
+
+/** Fast roster from employee accounts DB / JSON (preferred over Excel for admin load). */
+export async function loadPortalRosterFromAccounts(): Promise<PortalProfileRow[]> {
+  try {
+    let list: Array<{
+      employee_id?: string;
+      full_name?: string;
+      email?: string;
+      role?: string;
+      department?: string;
+      product?: string;
+      product_qb_eligible?: boolean;
+    }> = [];
+
+    if (shouldUseDbAccounts()) {
+      const { data: dbEmps } = await supabase
+        .from("employees")
+        .select("employee_id, full_name, email, role, department, product, product_qb_eligible");
+      if (dbEmps && dbEmps.length > 0) {
+        list = dbEmps as any[];
+      }
+    }
+
+    if (list.length === 0) {
+      const raw = await readFile(ACCOUNTS_FILE, "utf8");
+      const store = JSON.parse(raw) as {
+        employees?: Array<{
+          employee_id?: string;
+          full_name?: string;
+          email?: string;
+          role?: string;
+          department?: string;
+          product?: string;
+          product_qb_eligible?: boolean;
+        }>;
+      };
+      list = store.employees ?? [];
+    }
+
+    return list
+      .filter((e) => Boolean(e.employee_id))
+      .map((e) => ({
+        employee_id: String(e.employee_id),
+        full_name: e.full_name || String(e.employee_id),
+        role: e.role || "employee",
+        domain: e.department || "",
+        product: e.product || "",
+        email: e.email || "",
+        ddh: "",
+        emp_status: "Confirmed",
+        remarks: "",
+        assigned_questions: [],
+        assigned_question_count: 0,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Fast JSON snapshot of mapping profiles (generated by import script). */
+export async function loadResourcePortalProfilesFromJson(): Promise<PortalProfileRow[]> {
+  if (profilesJsonCache && Date.now() - profilesJsonCache.at < PROFILES_JSON_CACHE_MS) {
+    return profilesJsonCache.rows;
+  }
+  try {
+    const raw = await readPersistedJson(PROFILES_JSON_FILENAME);
+    const parsed = raw ? (JSON.parse(raw) as PortalProfileRow[]) : [];
+    const rows = Array.isArray(parsed) ? parsed : [];
+    profilesJsonCache = { at: Date.now(), rows };
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+async function loadRemovedPortalEmployeeIds(): Promise<Set<string>> {
+  try {
+    const raw = await readPersistedJson(REMOVED_EMPLOYEES_FILENAME);
+    const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set((Array.isArray(parsed) ? parsed : []).map(normalizeEmployeeId));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Clears in-memory caches so the next read reflects a just-written edit/delete. */
+export function invalidatePortalProfileCaches() {
+  profilesJsonCache = null;
+}
+
+/**
+ * Upsert an admin-made edit for a single portal employee. Only the fields present in
+ * `edits` are changed; anything omitted keeps its current merged value the next time the
+ * roster is built (see overlayProfileRow / loadResourceQuestionMapping).
+ */
+export async function saveResourcePortalProfileEdit(
+  employeeId: string,
+  edits: Partial<PortalProfileRow>
+): Promise<void> {
+  const id = normalizeEmployeeId(employeeId);
+  const existingRows = await loadResourcePortalProfilesFromJson();
+  const idx = existingRows.findIndex((row) => normalizeEmployeeId(row.employee_id) === id);
+
+  const base: PortalProfileRow =
+    idx >= 0
+      ? existingRows[idx]
+      : {
+          employee_id: id,
+          full_name: "",
+          role: "",
+          domain: "",
+          product: "",
+          email: "",
+          ddh: "",
+          emp_status: "",
+          remarks: "",
+          assigned_questions: [],
+          assigned_question_count: 0,
+        };
+
+  const updated: PortalProfileRow = {
+    ...base,
+    ...edits,
+    employee_id: id,
+  };
+
+  const nextRows = [...existingRows];
+  if (idx >= 0) {
+    nextRows[idx] = updated;
+  } else {
+    nextRows.push(updated);
+  }
+
+  await writePersistedJson(PROFILES_JSON_FILENAME, JSON.stringify(nextRows, null, 2));
+  invalidatePortalProfileCaches();
+}
+
+/** Removes a portal employee from the profile overlay and records their id so they never
+ * reappear from the read-only Excel mapping either, even across cache refreshes. */
+export async function deleteResourcePortalProfile(employeeId: string): Promise<void> {
+  const id = normalizeEmployeeId(employeeId);
+
+  const existingRows = await loadResourcePortalProfilesFromJson();
+  const nextRows = existingRows.filter((row) => normalizeEmployeeId(row.employee_id) !== id);
+  if (nextRows.length !== existingRows.length) {
+    await writePersistedJson(PROFILES_JSON_FILENAME, JSON.stringify(nextRows, null, 2));
+  }
+
+  const removedIds = await loadRemovedPortalEmployeeIds();
+  removedIds.add(id);
+  await writePersistedJson(
+    REMOVED_EMPLOYEES_FILENAME,
+    JSON.stringify(Array.from(removedIds), null, 2)
+  );
+
+  invalidatePortalProfileCaches();
+}
+
+export async function loadAssignedQuestionsForEmployee(employeeId: string): Promise<string[]> {
+  const normId = normalizeEmployeeId(employeeId);
+  const jsonRows = await loadResourcePortalProfilesFromJson();
+  const fromJson = jsonRows.find((row) => normalizeEmployeeId(row.employee_id) === normId);
+  if (fromJson?.assigned_questions?.length) {
+    return fromJson.assigned_questions;
+  }
+
+  const mappingRows = await loadResourceQuestionMapping();
+  const fromMapping = mappingRows.find((row) => normalizeEmployeeId(row.employee_id) === normId);
+  return fromMapping?.assigned_questions ?? [];
+}
+
+/**
+ * Mapping rows sourced from Resource_Question_Mapping.xlsx, overlaid with any edits
+ * persisted to resource_portal_profiles.json (keyed by employee_id). The JSON overlay
+ * only patches the rows it explicitly contains — it must never fully replace the Excel
+ * data set, or every employee not present in the (usually partial) overlay file would
+ * silently lose their assigned questions / status / remarks.
+ */
+export async function loadResourceQuestionMapping(): Promise<PortalProfileRow[]> {
+  const excelRows = await loadResourceQuestionMappingFromExcel();
+  const jsonRows = await loadResourcePortalProfilesFromJson();
+  if (jsonRows.length === 0) {
+    return excelRows;
+  }
+
+  const byId = new Map(excelRows.map((row) => [normalizeEmployeeId(row.employee_id), row]));
+  for (const jsonRow of jsonRows) {
+    const id = normalizeEmployeeId(jsonRow.employee_id);
+    const existing = byId.get(id);
+    // JSON overlay fields win for the fields it sets, but fall back to the Excel row for
+    // anything it leaves blank, so a partial edit doesn't blank out untouched fields.
+    byId.set(id, existing ? overlayProfileRow(existing, jsonRow) : jsonRow);
+  }
+  return Array.from(byId.values());
+}
+
+/** Apply a partial edit (`overlay`) on top of a base row, keeping base values for anything the overlay leaves blank. */
+function overlayProfileRow(base: PortalProfileRow, overlay: PortalProfileRow): PortalProfileRow {
+  return {
+    employee_id: overlay.employee_id || base.employee_id,
+    full_name: overlay.full_name || base.full_name,
+    role: overlay.role || base.role,
+    domain: overlay.domain || base.domain,
+    product: overlay.product || base.product,
+    email: overlay.email || base.email,
+    ddh: overlay.ddh || base.ddh,
+    emp_status: overlay.emp_status || base.emp_status,
+    remarks: overlay.remarks ?? base.remarks,
+    assigned_questions: overlay.assigned_questions?.length ? overlay.assigned_questions : base.assigned_questions,
+    assigned_question_count: overlay.assigned_questions?.length
+      ? overlay.assigned_question_count || overlay.assigned_questions.length
+      : base.assigned_question_count,
+  };
+}
+
+async function loadResourceQuestionMappingFromExcel(): Promise<PortalProfileRow[]> {
+  if (mappingCache && Date.now() - mappingCache.at < EXCEL_CACHE_MS) {
+    return mappingCache.rows;
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(MAPPING_FILE);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+
+  const headerRow = sheet.getRow(1);
+  const headers: string[] = [];
+  headerRow.eachCell((cell, colNumber) => {
+    headers[colNumber - 1] = clean(cell.value);
+  });
+
+  const col = Object.fromEntries(headers.map((h, i) => [h, i]));
+  const questionCols = Array.from({ length: 25 }, (_, i) => col[`Assigned Question ${i + 1}`]).filter(
+    (idx) => idx !== undefined
+  );
+
+  const rowMap = new Map<string, PortalProfileRow>();
+
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return;
+
+    const get = (key: string) => {
+      const idx = col[key];
+      if (idx === undefined) return "";
+      return clean(row.getCell(idx + 1).value);
+    };
+
+    const employee_id = pickField(get, ["Emp ID", "Employee ID"]);
+    if (!employee_id) return;
+
+    const assigned_questions = questionCols
+      .map((idx) => clean(row.getCell(idx + 1).value))
+      .filter(Boolean);
+    const dedupedQuestions: string[] = [];
+    const seenQuestions = new Set<string>();
+    for (const question of assigned_questions) {
+      const key = question.trim().toLowerCase().replace(/\s+/g, " ");
+      if (seenQuestions.has(key)) continue;
+      seenQuestions.add(key);
+      dedupedQuestions.push(question);
+    }
+
+    const entry = {
+      employee_id,
+      full_name: pickField(get, ["Emp Name", "Employee Name"]),
+      role: pickField(get, ["Role"]),
+      domain: pickField(get, ["Domain"]),
+      product: pickField(get, ["Product", "Product-Updated"]),
+      email: pickField(get, ["Nokia Email ID", "Email"]),
+      ddh: pickField(get, ["DDH", "DDH Manager"]),
+      emp_status: pickField(get, ["Emp Status"]),
+      remarks: pickField(get, ["Remarks"]),
+      assigned_questions: dedupedQuestions,
+      assigned_question_count: dedupedQuestions.length,
+    };
+
+    const normId = normalizeEmployeeId(employee_id);
+    const existing = rowMap.get(normId);
+    if (!existing) {
+      rowMap.set(normId, entry);
+      return;
+    }
+
+    const mergedQuestions = Array.from(
+      new Set([...existing.assigned_questions, ...entry.assigned_questions])
+    );
+    rowMap.set(normId, {
+      ...existing,
+      ...entry,
+      employee_id: entry.employee_id || existing.employee_id,
+      full_name: entry.full_name || existing.full_name,
+      role: entry.role || existing.role,
+      domain: entry.domain || existing.domain,
+      product: entry.product || existing.product,
+      email: entry.email || existing.email,
+      ddh: entry.ddh || existing.ddh,
+      emp_status: entry.emp_status || existing.emp_status,
+      assigned_questions: mergedQuestions,
+      assigned_question_count: mergedQuestions.length,
+      remarks: entry.remarks || existing.remarks,
+    });
+  });
+
+  const rows = Array.from(rowMap.values());
+  mappingCache = { at: Date.now(), rows };
+  return rows;
+}
+
+export async function loadEmployeeCredentialsRoster(): Promise<PortalProfileRow[]> {
+  if (credentialsCache && Date.now() - credentialsCache.at < EXCEL_CACHE_MS) {
+    return credentialsCache.rows;
+  }
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(CREDENTIALS_FILE);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return [];
+
+    const headerRow = sheet.getRow(1);
+    const headers: string[] = [];
+    headerRow.eachCell((cell, colNumber) => {
+      headers[colNumber - 1] = clean(cell.value);
+    });
+
+    const col = Object.fromEntries(headers.map((h, i) => [h, i]));
+    const rows: PortalProfileRow[] = [];
+
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const get = (key: string) => {
+        const idx = col[key];
+        if (idx === undefined) return "";
+        return clean(row.getCell(idx + 1).value);
+      };
+
+      const employee_id = pickField(get, ["Emp ID", "Employee ID"]);
+      if (!employee_id) return;
+
+      rows.push({
+        employee_id,
+        full_name: pickField(get, ["Employee Name", "Emp Name"]),
+        role: pickField(get, ["Role"]),
+        domain: pickField(get, ["Domain"]),
+        product: pickField(get, ["Product", "Product-Updated"]),
+        email: pickField(get, ["Nokia Email ID", "Email"]),
+        ddh: pickField(get, ["DDH Manager", "DDH"]),
+        emp_status: "",
+        remarks: "",
+        assigned_questions: [],
+        assigned_question_count: 0,
+      });
+    });
+
+    credentialsCache = { at: Date.now(), rows };
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+function mergePortalProfileRow(rosterRow: PortalProfileRow, mappingRow?: PortalProfileRow): PortalProfileRow {
+  if (!mappingRow) return rosterRow;
+
+  return {
+    employee_id: rosterRow.employee_id || mappingRow.employee_id,
+    full_name: rosterRow.full_name || mappingRow.full_name,
+    role: rosterRow.role || mappingRow.role,
+    domain: rosterRow.domain || mappingRow.domain,
+    product: rosterRow.product || mappingRow.product,
+    email: rosterRow.email || mappingRow.email,
+    ddh: rosterRow.ddh || mappingRow.ddh,
+    emp_status: mappingRow.emp_status || rosterRow.emp_status,
+    remarks: mappingRow.remarks || rosterRow.remarks,
+    assigned_questions: mappingRow.assigned_questions,
+    assigned_question_count: mappingRow.assigned_question_count || rosterRow.assigned_question_count,
+  };
+}
+
+export async function loadEmployeeTestManifest(): Promise<Record<string, string>> {
+  try {
+    const raw = await readPersistedJson("employee_test_manifest.json");
+    if (!raw) return {};
+    const manifest = JSON.parse(raw) as Array<{ employee_id: string; test_id: string; question_count?: number }>;
+    return Object.fromEntries(manifest.map((item) => [String(item.employee_id).trim(), item.test_id]));
+  } catch {
+    return {};
+  }
+}
+
+async function loadManifestRows(): Promise<
+  Array<{ employee_id: string; test_id: string; question_count?: number; product?: string; full_name?: string }>
+> {
+  try {
+    const raw = await readPersistedJson("employee_test_manifest.json");
+    if (!raw) return [];
+    const manifest = JSON.parse(raw);
+    return Array.isArray(manifest) ? manifest : [];
+  } catch {
+    return [];
+  }
+}
+
+export function mergeResourcePortalData(
+  mappingRows: PortalProfileRow[],
+  allTestResults: any[],
+  manifest: Record<string, string>
+): ResourcePortalEmployee[] {
+  const testsByEmployee = new Map<string, any[]>();
+  for (const test of allTestResults) {
+    const key = normalizeEmployeeId(test.employeeId);
+    if (!key) continue;
+    const list = testsByEmployee.get(key) || [];
+    list.push(test);
+    testsByEmployee.set(key, list);
+  }
+
+  return mappingRows.map((row) => {
+    const empTests = testsByEmployee.get(normalizeEmployeeId(row.employee_id)) || [];
+    const manifestTestId = manifest[row.employee_id] ?? manifest[normalizeEmployeeId(row.employee_id)] ?? null;
+    const completed = empTests.filter((test) => test.status === "completed");
+
+    // Keep the current assignment (manifest) as primary when present — do not hide Supabase rows.
+    // If that assignment is completed, use it; otherwise keep the live assignment and still
+    // expose every attempt under `tests` (including older completed ones).
+    const assignedTest =
+      empTests.find((test) => test.id === manifestTestId) ??
+      empTests.find((test) => test.topicId === "resource-product-assessment") ??
+      null;
+    const primaryCompleted =
+      completed.find((test) => test.id === assignedTest?.id) ??
+      completed.find((test) => test.id === manifestTestId) ??
+      completed.find((test) => test.topicId === "resource-product-assessment") ??
+      null;
+    const primaryTest = primaryCompleted ?? assignedTest ?? completed[0] ?? empTests[0] ?? null;
+
+    const score =
+      primaryCompleted != null
+        ? (primaryCompleted.correctCount ??
+            primaryCompleted.score ??
+            primaryCompleted.answers_correct ??
+            null)
+        : null;
+    const scoreMax = primaryTest?.totalQuestions ?? row.assigned_question_count ?? 25;
+
+    const answeredCount = primaryTest?.answeredCount ?? 0;
+    const totalQuestions = primaryTest?.totalQuestions ?? row.assigned_question_count ?? 0;
+    const completedAt =
+      primaryCompleted?.completedAt ??
+      (primaryTest?.status === "completed" ? primaryTest?.completedAt ?? null : null);
+
+    const rawStatus =
+      primaryCompleted?.status === "completed"
+        ? "completed"
+        : assignedTest?.status ?? primaryTest?.status ?? null;
+
+    return {
+      ...row,
+      product: formatProductDisplayName(row.product),
+      test_id: assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
+      test_status: derivePortalTestStatus({
+        assignedQuestionCount: row.assigned_question_count || (manifestTestId ? 25 : 0),
+        testId: assignedTest?.id ?? primaryTest?.id ?? manifestTestId,
+        rawStatus,
+        answeredCount,
+        totalQuestions,
+        startedAt: assignedTest?.startedAt ?? primaryTest?.startedAt ?? null,
+      }),
+      score: score ?? (rawStatus === "completed" ? primaryTest?.correctCount ?? primaryTest?.score ?? null : null),
+      score_max: scoreMax,
+      completed_at: completedAt,
+      tests: empTests.map((test) => ({
+        id: test.id,
+        topicTitle: formatTopicTitleForDisplay(test.topicTitle),
+        subjectTitle: test.subjectTitle,
+        difficulty: test.difficulty,
+        totalQuestions: test.totalQuestions,
+        status: test.status,
+        score: test.correctCount ?? test.score,
+        scoreMax: test.totalQuestions,
+        videoUrl: test.videoUrl ?? null,
+        hasRecording: Boolean(test.hasRecording),
+        proctoring: test.proctoring ?? null,
+        startedAt: test.startedAt,
+        completedAt: test.completedAt,
+      })),
+    };
+  });
+}
+
+/**
+ * Build portal employee rows.
+ * Always merges Resource_Question_Mapping.xlsx so assigned question text is visible in admin.
+ * Uses accounts JSON for the roster when present (fast), Excel as fallback.
+ */
+export async function buildResourcePortalEmployees(
+  allTestResults: any[],
+  manifest: Record<string, string>
+): Promise<ResourcePortalEmployee[]> {
+  const [accountRows, manifestRows] = await Promise.all([
+    loadPortalRosterFromAccounts(),
+    loadManifestRows(),
+  ]);
+
+  const canUseFastPath = accountRows.length > 0;
+  const rosterRows = canUseFastPath ? [] : await loadEmployeeCredentialsRoster();
+  // loadResourceQuestionMapping() already overlays jsonProfileRows on top of the Excel
+  // mapping (patching only the employee_ids present in the JSON file), so it's always
+  // the complete, correct source here — never substitute the raw jsonProfileRows.
+  const mappingRows = await loadResourceQuestionMapping();
+
+  const mappingById = new Map(
+    mappingRows.map((row) => [normalizeEmployeeId(row.employee_id), row])
+  );
+  const questionCountById = new Map(
+    manifestRows.map((row) => [normalizeEmployeeId(row.employee_id), row.question_count ?? 25])
+  );
+
+  let profileRows: PortalProfileRow[] = [];
+
+  if (accountRows.length > 0) {
+    profileRows = accountRows.map((row) => {
+      const mapped = mappingById.get(normalizeEmployeeId(row.employee_id));
+      const merged = mergePortalProfileRow(row, mapped);
+      if (!merged.assigned_question_count) {
+        merged.assigned_question_count =
+          questionCountById.get(normalizeEmployeeId(row.employee_id)) || merged.assigned_questions.length;
+      }
+      return merged;
+    });
+  } else if (rosterRows.length > 0) {
+    profileRows = rosterRows.map((row) => mergePortalProfileRow(row, mappingById.get(normalizeEmployeeId(row.employee_id))));
+  } else {
+    profileRows = mappingRows;
+  }
+
+  // Include any mapping-only employees not already in roster/accounts.
+  const existingIds = new Set(profileRows.map((row) => normalizeEmployeeId(row.employee_id)));
+  for (const row of mappingRows) {
+    if (!existingIds.has(normalizeEmployeeId(row.employee_id))) {
+      profileRows.push(row);
+    }
+  }
+
+  // Admin-deleted employees must stay gone even though the read-only Excel mapping (and,
+  // in dev, a stale accounts JSON) may still list them.
+  const removedIds = await loadRemovedPortalEmployeeIds();
+  if (removedIds.size > 0) {
+    profileRows = profileRows.filter((row) => !removedIds.has(normalizeEmployeeId(row.employee_id)));
+  }
+
+  return mergeResourcePortalData(profileRows, allTestResults, manifest);
+}

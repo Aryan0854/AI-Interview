@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/employee-auth";
+import { authenticateRequestAsync } from "@/lib/employee-auth";
 import { effectivenessService } from "@/services/effectiveness-service";
 
 export async function GET(request: NextRequest) {
-  const auth = authenticateRequest(request);
+  const auth = await authenticateRequestAsync(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -22,7 +22,8 @@ export async function GET(request: NextRequest) {
     if (isHR) {
       // Training ROI
       const totalImpacts = db.business_impacts.length;
-      const totalSavings = db.business_impacts.reduce((sum, item) => sum + item.cost_reduction, 0);
+      const impactsWithSavings = db.business_impacts.filter((item) => typeof item.cost_reduction === "number");
+      const totalSavings = impactsWithSavings.reduce((sum, item) => sum + (item.cost_reduction as number), 0);
       const totalCost = totalImpacts * 1500; // Mock cost of $1500 per training program
       const netBenefits = totalSavings - totalCost;
       const overallROI = totalCost > 0 ? Math.round((netBenefits / totalCost) * 100) : 0;
@@ -205,7 +206,14 @@ export async function GET(request: NextRequest) {
         learning_maturity_score: 0,
         competency_development_score: 0,
         knowledge_retention_score: 0,
-        bloom_radar: [],
+        bloom_radar: [
+          { subject: "Remember", value: 0 },
+          { subject: "Understand", value: 0 },
+          { subject: "Apply", value: 0 },
+          { subject: "Analyze", value: 0 },
+          { subject: "Evaluate", value: 0 },
+          { subject: "Create", value: 0 },
+        ],
         milestones: [],
       });
     }

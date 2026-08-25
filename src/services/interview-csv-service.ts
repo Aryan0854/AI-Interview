@@ -78,9 +78,14 @@ export class InterviewCSVService {
         const status = isConcluded ? "Completed" : (hasAttempts ? "In Progress" : "Pending");
         
         let avgScore = 0;
+        let hasScoredAttempt = false;
         if (hasAttempts) {
-          const sum = candidateAttempts.reduce((acc, curr) => acc + (curr.mock_score || 0), 0);
-          avgScore = Math.round((sum / candidateAttempts.length) * 10) / 10;
+          const scoredAttempts = candidateAttempts.filter((a: any) => typeof a.mock_score === "number");
+          if (scoredAttempts.length > 0) {
+            const sum = scoredAttempts.reduce((acc, curr) => acc + curr.mock_score, 0);
+            avgScore = Math.round((sum / scoredAttempts.length) * 10) / 10;
+            hasScoredAttempt = true;
+          }
         }
 
         const warningCount = resume.report?.proctoring?.warningCount || 0;
@@ -100,7 +105,7 @@ export class InterviewCSVService {
           resume.parsed?.personal?.fullName || resume.filename.replace(/\.[^/.]+$/, ""),
           resume.parsed?.personal?.email || "",
           status,
-          String(avgScore),
+          hasScoredAttempt ? String(avgScore) : "N/A",
           String(warningCount),
           evaluation,
           timestamp

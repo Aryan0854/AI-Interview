@@ -207,30 +207,6 @@ export function EffectivenessConsole() {
     );
   }
 
-  if (err) {
-    return (
-      <div className="min-h-screen bg-[#f0f4ff] dark:bg-slate-950 flex items-center justify-center p-6">
-        <Card className="max-w-md p-6 text-center space-y-4 border-red-200 bg-red-50 dark:bg-slate-900">
-          <p className="text-red-600 font-medium">{err}</p>
-          <Button onClick={() => window.location.reload()}>Retry</Button>
-        </Card>
-      </div>
-    );
-  }
-
-  if (analytics && analytics.total_evaluations === 0) {
-    return (
-      <div className="min-h-screen bg-[#f0f4ff] dark:bg-slate-950 flex items-center justify-center p-6">
-        <Card className="max-w-md p-8 text-center space-y-3">
-          <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">No post-training evaluations yet</p>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            These metrics populate once a reaction survey, knowledge assessment, and manager evaluation have been completed for a training subject. Nothing has been submitted yet.
-          </p>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#f0f4ff] dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 pb-12">
       {/* Page Header */}
@@ -250,7 +226,7 @@ export function EffectivenessConsole() {
           </div>
           <div className="text-right space-y-1">
             <span className="text-xs text-indigo-200 uppercase tracking-widest block font-bold">Effectiveness Index (TEI)</span>
-            <span className="text-4xl font-black text-emerald-400">{analytics.training_effectiveness_score}%</span>
+            <span className="text-4xl font-black text-emerald-400">{analytics?.training_effectiveness_score ?? 0}%</span>
           </div>
         </div>
       </div>
@@ -265,7 +241,7 @@ export function EffectivenessConsole() {
               <Badge className="bg-indigo-50 text-indigo-600 dark:bg-slate-850 dark:text-indigo-400">Satisfaction</Badge>
             </div>
             <div className="mt-4">
-              <span className="text-3xl font-black">{analytics.reaction_score}%</span>
+              <span className="text-3xl font-black">{analytics?.reaction_score ?? 0}%</span>
               <span className="text-[10px] text-slate-400 block mt-1 font-semibold">{npsText}</span>
             </div>
           </Card>
@@ -276,9 +252,9 @@ export function EffectivenessConsole() {
               <Badge className="bg-blue-50 text-blue-600 dark:bg-slate-850 dark:text-blue-400">Knowledge Gain</Badge>
             </div>
             <div className="mt-4">
-              <span className="text-3xl font-black">{analytics.learning_score}%</span>
+              <span className="text-3xl font-black">{analytics?.learning_score ?? 0}%</span>
               <span className="text-[10px] text-emerald-500 flex items-center gap-1 mt-1 font-bold">
-                <TrendingUp className="w-3.5 h-3.5" /> +{analytics.competency_development_score}% Growth
+                <TrendingUp className="w-3.5 h-3.5" /> +{analytics?.competency_development_score ?? 0}% Growth
               </span>
             </div>
           </Card>
@@ -289,8 +265,8 @@ export function EffectivenessConsole() {
               <Badge className="bg-purple-50 text-purple-600 dark:bg-slate-850 dark:text-purple-400">Application</Badge>
             </div>
             <div className="mt-4">
-              <span className="text-3xl font-black">{analytics.behavior_score}%</span>
-              <span className="text-[10px] text-slate-400 block mt-1 font-semibold">Retention: {analytics.knowledge_retention_score}%</span>
+              <span className="text-3xl font-black">{analytics?.behavior_score ?? 0}%</span>
+              <span className="text-[10px] text-slate-400 block mt-1 font-semibold">Retention: {analytics?.knowledge_retention_score ?? 0}%</span>
             </div>
           </Card>
 
@@ -300,7 +276,7 @@ export function EffectivenessConsole() {
               <Badge className="bg-emerald-50 text-emerald-600 dark:bg-slate-850 dark:text-emerald-400">Business Impact</Badge>
             </div>
             <div className="mt-4">
-              <span className="text-3xl font-black">{analytics.results_score}%</span>
+              <span className="text-3xl font-black">{analytics?.results_score ?? 0}%</span>
               <span className="text-[10px] text-slate-400 block mt-1 font-semibold">Verified outcomes mapped</span>
             </div>
           </Card>
@@ -315,7 +291,7 @@ export function EffectivenessConsole() {
               <p className="text-xs text-slate-400">Weighted competency score across cognitive complexity levels.</p>
             </div>
             <div className="h-72 flex justify-center items-center">
-              {analytics.bloom_radar.length > 0 ? (
+              {(analytics?.bloom_radar || []).length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <RadarChart cx="50%" cy="50%" outerRadius="80%" data={analytics.bloom_radar}>
                     <PolarGrid stroke="#e2e8f0" />
@@ -338,10 +314,10 @@ export function EffectivenessConsole() {
                 <div>
                   <div className="flex justify-between items-center text-sm font-semibold mb-1">
                     <span>Learning Maturity</span>
-                    <span className="text-indigo-600">{analytics.learning_maturity_score}%</span>
+                    <span className="text-indigo-600">{analytics?.learning_maturity_score ?? 0}%</span>
                   </div>
                   <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${analytics.learning_maturity_score}%` }} />
+                    <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${analytics?.learning_maturity_score ?? 0}%` }} />
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">Weighted integration of all cognitive complexity stages.</p>
                 </div>
@@ -349,10 +325,10 @@ export function EffectivenessConsole() {
                 <div>
                   <div className="flex justify-between items-center text-sm font-semibold mb-1">
                     <span>Competency Development</span>
-                    <span className="text-blue-600">+{analytics.competency_development_score}%</span>
+                    <span className="text-blue-600">+{analytics?.competency_development_score ?? 0}%</span>
                   </div>
                   <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, analytics.competency_development_score)}%` }} />
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, analytics?.competency_development_score ?? 0)}%` }} />
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">Calculated knowledge baseline-to-post-training increase.</p>
                 </div>
@@ -360,10 +336,10 @@ export function EffectivenessConsole() {
                 <div>
                   <div className="flex justify-between items-center text-sm font-semibold mb-1">
                     <span>Knowledge Retention</span>
-                    <span className="text-purple-600">{analytics.knowledge_retention_score}%</span>
+                    <span className="text-purple-600">{analytics?.knowledge_retention_score ?? 0}%</span>
                   </div>
                   <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-purple-500 rounded-full" style={{ width: `${analytics.knowledge_retention_score}%` }} />
+                    <div className="h-full bg-purple-500 rounded-full" style={{ width: `${analytics?.knowledge_retention_score ?? 0}%` }} />
                   </div>
                   <p className="text-[10px] text-slate-400 mt-1">Measures long-term recall against 30/60/90 day active application.</p>
                 </div>
@@ -371,7 +347,7 @@ export function EffectivenessConsole() {
             </div>
             <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Training Effectiveness Index</span>
-              <span className="text-3xl font-black text-indigo-600 dark:text-violet-400 mt-1 block">{analytics.training_effectiveness_score}%</span>
+              <span className="text-3xl font-black text-indigo-600 dark:text-violet-400 mt-1 block">{analytics?.training_effectiveness_score ?? 0}%</span>
             </div>
           </Card>
         </section>
@@ -380,7 +356,7 @@ export function EffectivenessConsole() {
         <section className="space-y-4">
           <h2 className="text-lg font-bold">Your Training Programs &amp; Timeline Trackers</h2>
           <div className="space-y-6">
-            {analytics.milestones.map((prog: any) => (
+            {(analytics?.milestones || []).map((prog: any) => (
               <Card key={prog.subject_id} className="p-6 bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-850 shadow-soft">
                 <div className="flex justify-between items-center flex-wrap gap-2 border-b border-indigo-50 dark:border-slate-855 pb-4 mb-6">
                   <div>
@@ -433,6 +409,12 @@ export function EffectivenessConsole() {
                 </div>
               </Card>
             ))}
+            {(!analytics?.milestones || analytics.milestones.length === 0) && (
+              <Card className="p-6 text-center text-slate-400 dark:text-slate-500 bg-white dark:bg-slate-900 border border-indigo-100 dark:border-slate-800">
+                <p className="text-sm font-medium">No training program milestones completed yet.</p>
+                <p className="text-xs mt-1">Complete a learning assessment to initiate program timeline trackers.</p>
+              </Card>
+            )}
           </div>
         </section>
       </main>
