@@ -636,7 +636,8 @@ export async function POST(request: NextRequest) {
     const jsonPath = getEmployeesJsonPath();
     let employees: EmployeeRecord[] = [];
     try {
-      const raw = await readFile(jsonPath, "utf8");
+      const persisted = await readPersistedJson("employees.json");
+      const raw = persisted || (await readFile(jsonPath, "utf8"));
       const parsed = JSON.parse(raw) as EmployeeRecord[];
       const seen = new Set<string>();
       employees = parsed.filter(emp => {
@@ -656,7 +657,11 @@ export async function POST(request: NextRequest) {
 
     // Toggle shortlisted state
     matched.shortlisted = !matched.shortlisted;
-    await writeFile(jsonPath, JSON.stringify(employees, null, 2), "utf8");
+    const serialized = JSON.stringify(employees, null, 2);
+    await writeFile(jsonPath, serialized, "utf8");
+    await writePersistedJson("employees.json", serialized).catch((err) => {
+      console.warn("Failed to persist employees.json after shortlist:", err);
+    });
     cacheStore.invalidate("employees");
 
     await writeLog('employee', 'SHORTLIST_EMPLOYEE', 'success', `Toggled shortlist for employee ID ${employeeId}: shortlisted=${matched.shortlisted}`);

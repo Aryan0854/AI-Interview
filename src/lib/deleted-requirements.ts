@@ -3,8 +3,8 @@ import { parseJdRequirements } from "@/lib/skill-match";
 
 const SETTINGS_KEY = "deleted_requirements";
 
-/** These BR IDs are never re-ingested, even if they remain in BR_RawData 3.xlsx. */
-export const PERMANENTLY_REMOVED_BR_IDS = ["50656br", "50657br"];
+/** Previously blocked BR IDs. Empty so a re-uploaded JD like 50656BR.docx can appear again. */
+export const PERMANENTLY_REMOVED_BR_IDS: string[] = [];
 
 export type DeletedRequirements = {
   ids: string[];
@@ -69,8 +69,8 @@ function collectedBrIds(parts: { brId?: string; fileName?: string }): string[] {
   return cleanList([extractBrId(parts.brId), extractBrId(parts.fileName)]);
 }
 
-export async function loadDeletedRequirements(): Promise<DeletedRequirements> {
-  if (cache && Date.now() - cache.at < 4000) return cache.value;
+export async function loadDeletedRequirements(opts?: { fresh?: boolean }): Promise<DeletedRequirements> {
+  if (!opts?.fresh && cache && Date.now() - cache.at < 4000) return cache.value;
   try {
     const { data, error } = await supabaseServer
       .from("portal_settings")
@@ -123,7 +123,7 @@ export function isRequirementDeleted(
 export async function markRequirementsDeleted(
   rows: Array<{ id?: string; fileName?: string; jdText?: string; brId?: string }>
 ): Promise<void> {
-  const deleted = await loadDeletedRequirements();
+  const deleted = await loadDeletedRequirements({ fresh: true });
   const ids = new Set(deleted.ids);
   const brIds = new Set(deleted.brIds);
   const groupKeys = new Set(deleted.groupKeys);
@@ -146,7 +146,7 @@ export async function markRequirementsDeleted(
 export async function unmarkRequirementsDeleted(
   rows: Array<{ id?: string; fileName?: string; jdText?: string; brId?: string }>
 ): Promise<void> {
-  const deleted = await loadDeletedRequirements();
+  const deleted = await loadDeletedRequirements({ fresh: true });
   const ids = new Set(deleted.ids);
   const brIds = new Set(deleted.brIds);
   const groupKeys = new Set(deleted.groupKeys);

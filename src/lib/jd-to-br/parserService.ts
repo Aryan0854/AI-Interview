@@ -56,6 +56,24 @@ export const parsePdf = async (buffer: Buffer): Promise<string> => {
  * @param buffer - File buffer
  * @returns Extracted raw text
  */
+function stripHtmlToText(html: string): string {
+  return html
+    .replace(/^\uFEFF/, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h\d|li|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 export const parseDocument = async (filename: string, buffer: Buffer): Promise<string> => {
   const ext = filename.split('.').pop()?.toLowerCase();
   
@@ -65,7 +83,11 @@ export const parseDocument = async (filename: string, buffer: Buffer): Promise<s
     return await parseDocx(buffer);
   } else if (ext === 'pdf') {
     return await parsePdf(buffer);
+  } else if (ext === 'html' || ext === 'htm') {
+    return stripHtmlToText(buffer.toString("utf8"));
+  } else if (ext === 'txt') {
+    return buffer.toString("utf8").replace(/^\uFEFF/, "").trim();
   } else {
-    throw new Error(`Unsupported file type: .${ext}. Only .docx and .pdf files are supported.`);
+    throw new Error(`Unsupported file type: .${ext}. Only .docx, .pdf, .txt, and .html files are supported.`);
   }
 };

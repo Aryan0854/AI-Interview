@@ -85,18 +85,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false });
       
     if (!dbError && dbJds) {
-      const deleted = await loadDeletedRequirements();
-      const hidden = dbJds.filter((row: any) => isRequirementDeleted(deleted, {
-        id: row.id,
-        fileName: row.file_name,
-        jdText: row.jd_text,
-      }));
-      if (hidden.length) {
-        await supabase
-          .from("job_descriptions")
-          .delete()
-          .in("id", hidden.map((row: any) => row.id).filter(Boolean));
-      }
+      const deleted = await loadDeletedRequirements({ fresh: true });
       jds = dbJds
         .filter((row: any) => !isRequirementDeleted(deleted, {
           id: row.id,
@@ -118,7 +107,7 @@ export async function GET(request: NextRequest) {
     if (jds.length === 0 && allowLocalDataFallback()) {
       await mkdir(getUploadsRoot(), { recursive: true });
       const localJds = await ensureJdsJson();
-      const deleted = await loadDeletedRequirements();
+      const deleted = await loadDeletedRequirements({ fresh: true });
       jds = localJds.filter((localJd: any) => !isRequirementDeleted(deleted, {
         id: localJd.id,
         fileName: localJd.fileName,
@@ -221,9 +210,9 @@ export async function POST(request: NextRequest) {
       }
 
       const ext = file.name.split(".").pop()?.toLowerCase();
-      const allowedExts = ["pdf", "doc", "docx", "txt"];
+      const allowedExts = ["pdf", "doc", "docx", "txt", "html", "htm"];
       if (!allowedExts.includes(ext || "")) {
-        return NextResponse.json({ error: "Invalid file type. Only PDF, Word, and Text files are allowed." }, { status: 400 });
+        return NextResponse.json({ error: "Invalid file type. Only PDF, Word, Text, and HTML files are allowed." }, { status: 400 });
       }
 
       if (file.size > 10 * 1024 * 1024) {
@@ -231,7 +220,7 @@ export async function POST(request: NextRequest) {
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
-      const extractedText = await resumeService.extractTextFromBuffer(buffer);
+      const extractedText = await resumeService.extractTextFromBuffer(buffer, file.name);
       fileName = file.name;
       jdText = extractedText;
     } else {

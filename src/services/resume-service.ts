@@ -234,13 +234,23 @@ export class ResumeService {
     signalProcessingDone(resume.id);
   }
 
-  async extractTextFromBuffer(buffer: Buffer): Promise<string> {
+  async extractTextFromBuffer(buffer: Buffer, filename?: string): Promise<string> {
     if (!buffer?.length) return "";
-    const head = buffer.slice(0, 256).toString("latin1").toLowerCase();
+    const ext = String(filename || "").split(".").pop()?.toLowerCase();
+    const head = buffer.slice(0, 1024).toString("utf8").replace(/^\uFEFF/, "").toLowerCase();
     const isPdf = buffer[0] === 0x25 && buffer[1] === 0x50;
     const isZip = buffer[0] === 0x50 && buffer[1] === 0x4b;
-    const isHtml = head.includes("<html") || head.includes("<!doctype html");
-    if (isHtml && !isPdf) return this.stripHtmlToText(buffer.toString("utf8"));
+    const isHtmlFile = ext === "html" || ext === "htm";
+    const looksLikeHtml =
+      isHtmlFile ||
+      head.includes("<html") ||
+      head.includes("<!doctype html") ||
+      head.includes("<head") ||
+      head.includes("<body") ||
+      /<(div|p|table|meta|span|h[1-6])[\s>]/.test(head);
+    if (looksLikeHtml && !isPdf && !isZip) {
+      return this.stripHtmlToText(buffer.toString("utf8").replace(/^\uFEFF/, ""));
+    }
     if (isPdf) return this.extractPDFBuffer(buffer);
     if (isZip) return this.extractDOCXBuffer(buffer);
     return buffer.toString("utf8");

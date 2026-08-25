@@ -1,4 +1,5 @@
 import { OpenAI } from 'openai';
+import { extractJdDisplaySkills, parseJdRequirements } from '@/lib/skill-match';
 
 // Predefined mock datasets for sample workspace documents
 const MOCK_L1_L2_JD = {
@@ -191,4 +192,18 @@ const runMockFallback = (text: string, filename?: string): any => {
 
   return extracted;
 };
+
+/** Parse a JD from the document text and filename. Does not call an AI model. */
+export function extractJdDetailsLocal(rawText: string, filename?: string): any {
+  const parsed = parseJdRequirements(rawText);
+  const fallback = runMockFallback(rawText, filename);
+  const skills = extractJdDisplaySkills(rawText);
+  return {
+    ...fallback,
+    job_title: parsed.title || fallback.job_title,
+    skills: skills.length ? skills : fallback.skills,
+    auto_req_id: filename || fallback.auto_req_id,
+  };
+}
+
 export { runMockFallback };

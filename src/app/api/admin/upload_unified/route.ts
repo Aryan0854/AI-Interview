@@ -31,7 +31,12 @@ const CATEGORY_MAP: Record<string, { docCategory?: DocCategory; refresh: string 
 
 function inferUploadCategory(filename: string, selected: string): string {
   const name = String(filename || "").toLowerCase();
+  const collapsed = name.replace(/\s+/g, "_");
   if (selected === "interview") return "interview";
+  if (/\d+\s*br\.(docx|doc|pdf|txt|html|htm)$/i.test(name)) return "jd";
+  if (/\.(xlsx|xls|csv)$/i.test(name) && (/\d+\s*br/i.test(name) || /br_rawdata/i.test(collapsed))) {
+    return "br";
+  }
   if (selected === "br") return "br";
   if (selected === "jd") return "jd";
   if (isCorpPoolRosterFileName(filename)) return "employee";
@@ -93,13 +98,14 @@ export async function POST(request: NextRequest) {
             ? { incomingJdFiles: [filename] }
             : undefined
       );
-      if (
-        category === "jd" &&
-        Number(refreshResult.convertedJDs || 0) === 0 &&
-        Number(refreshResult.processedBRs || 0) === 0
-      ) {
+      if (category === "jd" && Number(refreshResult.convertedJDs || 0) === 0) {
         throw new Error(
-          "The file was stored, but it could not be added to Requirements. Check System Logs, or the BR ID may still be blocked."
+          "The JD was stored, but it could not be added to Requirements. Check the file has readable text and a BR ID in the filename (for example 50656BR.docx or 50656BR.html)."
+        );
+      }
+      if (category === "br" && Number(refreshResult.incomingBrRows || 0) === 0) {
+        throw new Error(
+          "The BR file was stored, but no requirement rows were found. Use an Excel with an Auto req ID / BR ID column."
         );
       }
     } else if (mapping.refresh === 'candidates') {

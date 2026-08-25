@@ -79,8 +79,8 @@ export function validateFileSignature(buffer: Buffer, filename: string): boolean
     // DOC signature: d0cf11e0a1b11ae1
     return header.startsWith("D0CF11E0");
   }
-  if (ext === "txt") {
-    // Plain text verification: ensure it does not contain binary null/control bytes
+  if (ext === "txt" || ext === "html" || ext === "htm") {
+    // Plain text / HTML verification: ensure it does not contain binary null/control bytes
     try {
       const text = buffer.toString("utf8");
       return !/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text);

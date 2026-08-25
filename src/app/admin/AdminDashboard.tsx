@@ -2152,7 +2152,12 @@ export default function AdminDashboard() {
 
   const inferUnifiedCategory = (file: File, selected: string) => {
     const name = file.name.toLowerCase();
+    const collapsed = name.replace(/\s+/g, "_");
     if (selected === "interview") return "employee";
+    if (/\d+\s*br\.(docx|doc|pdf|txt|html|htm)$/i.test(name)) return "jd";
+    if (/\.(xlsx|xls|csv)$/i.test(name) && (/\d+\s*br/i.test(name) || /br_rawdata/i.test(collapsed))) {
+      return "br";
+    }
     if (selected === "br") return "br";
     if (selected === "jd") return "jd";
     if (isCorpPoolRosterFileName(file.name)) return "employee";
@@ -2198,10 +2203,16 @@ export default function AdminDashboard() {
         await loadLogs();
 
         const loaded = Number(result.refreshResult?.loaded);
+        const convertedJDs = Number(result.refreshResult?.convertedJDs);
+        const incomingBrRows = Number(result.refreshResult?.incomingBrRows);
         setActionSuccess(
           usedCategory === "employee" && Number.isFinite(loaded)
             ? `Corp Pool now has ${loaded} people.`
-            : `Upload and automated ingestion of ${file.name} successful.`
+            : usedCategory === "jd" && Number.isFinite(convertedJDs) && convertedJDs > 0
+              ? `Added ${convertedJDs} requirement${convertedJDs === 1 ? "" : "s"} from ${file.name}.`
+              : usedCategory === "br" && Number.isFinite(incomingBrRows) && incomingBrRows > 0
+                ? `Loaded ${incomingBrRows} requirement row${incomingBrRows === 1 ? "" : "s"} from ${file.name}.`
+                : `Upload and automated ingestion of ${file.name} successful.`
         );
         setTimeout(() => setActionSuccess(null), 3000);
       } else {
@@ -2283,9 +2294,56 @@ export default function AdminDashboard() {
     window.location.href = `/api/admin/logs?module=${logsModuleFilter}&download=true&token=${encodeURIComponent(token)}`;
   };
 
-  const handleExportInterviews = () => {
-    const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") || "" : "";
-    window.location.href = `/api/admin/interviews/export?token=${encodeURIComponent(token)}`;
+  const handleExportInterviews = async () => {
+    const shortlisted = scoredEmployees.filter((emp) => emp.shortlisted);
+    if (!shortlisted.length) {
+      setActionError("Shortlist at least one person in Corp Pool before exporting interviews.");
+      setTimeout(() => setActionError(null), 4000);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/admin/employees/export-shortlisted", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employees: shortlisted.map((emp) => ({
+            employee_id: emp.employee_id,
+            full_name: emp.full_name,
+            email: emp.email,
+            designation: emp.designation,
+            department: emp.department,
+            grade: emp.grade,
+            skills: emp.skills,
+            score: emp.score,
+            matchDecision: emp.matchDecision,
+            matchingSkills: emp.matchingSkills,
+            status: emp.status,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Export failed");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `corp_pool_shortlisted_${new Date().toISOString().split("T")[0]}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setActionSuccess(
+        `Downloaded Excel for ${shortlisted.length} shortlisted ${shortlisted.length === 1 ? "person" : "people"}.`
+      );
+      setTimeout(() => setActionSuccess(null), 3000);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to export interviews.");
+      setTimeout(() => setActionError(null), 4000);
+    }
   };
 
   const handleClearSystemLogs = async () => {
@@ -2542,9 +2600,7 @@ export default function AdminDashboard() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to delete Job Description");
 
-      const fileName = String(originalJd?.fileName || "");
-      const permanentlyGone = /50656\s*BR|50657\s*BR/i.test(fileName);
-      if (originalJd && !permanentlyGone) {
+      if (originalJd) {
         setUndoStack((prev) => [
           ...prev,
           {
@@ -6584,7 +6640,7 @@ export default function AdminDashboard() {
                   <span className="text-[10px] font-bold text-slate-750 dark:text-slate-250">Click or drop a file to upload</span>
                   <span className="text-[9px] text-slate-400 font-semibold leading-snug">
                     {uploadCategory === 'resume' && "Resumes, or drop a Corp Pool Excel/CSV to send it straight to Corp Pool"}
-                    {uploadCategory === 'jd' && "Converts JD → BR row in BR_RawData 3.xlsx & saves to backend"}
+                    {uploadCategory === 'jd' && "Accepts Word, PDF, TXT, or HTML. Converts JD → BR row in BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'br' && "Appends BR rows into BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'employee' && "Excel/CSV lists and resumes are added to Corp Pool. Deleted employees never come back."}
                   </span>
@@ -6595,7 +6651,7 @@ export default function AdminDashboard() {
                     className="hidden"
                     accept={
                       uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip,.csv,.xlsx,.xls' :
-                      uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt' :
+                      uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt,.html,.htm' :
                       uploadCategory === 'br' ? '.xlsx,.csv' :
                       '.csv,.xlsx,.xls,.pdf,.doc,.docx,.zip'
                     }
@@ -7553,7 +7609,7 @@ export default function AdminDashboard() {
                   <label className="block text-xs font-bold text-muted-foreground">JD File</label>
                   <input
                     type="file"
-                    accept=".pdf,.doc,.docx,.txt"
+                    accept=".pdf,.doc,.docx,.txt,.html,.htm"
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
                         setModalFile(e.target.files[0]);
@@ -7562,7 +7618,7 @@ export default function AdminDashboard() {
                     className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-slate-800 dark:file:text-slate-200"
                     required
                   />
-                  <p className="text-[10px] text-muted-foreground">Accepts PDF, Word, or TXT (Max 10MB)</p>
+                  <p className="text-[10px] text-muted-foreground">Accepts PDF, Word, TXT, or HTML (Max 10MB)</p>
                 </div>
               ) : (
                 <div className="space-y-2">

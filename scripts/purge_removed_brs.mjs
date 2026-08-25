@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: ".env" });
 
-const BLOCKED = new Set(["50656br", "50657br"]);
+const BLOCKED = new Set();
 const EXCEL_PATHS = [
   "docs/BR/BR_RawData 3.xlsx",
   "uploads/docs-cache/BR/BR_RawData 3.xlsx",

@@ -5,7 +5,7 @@ import ExcelJS from 'exceljs';
 import AdmZip from 'adm-zip';
 import { supabase } from '@/lib/db';
 import { resumeService } from '@/services/resume-service';
-import { extractJdDetails } from '@/lib/jd-to-br/aiService';
+import { extractJdDetailsLocal } from '@/lib/jd-to-br/aiService';
 import { writeLog } from '@/lib/structured-logger';
 import { interviewCSVService } from '@/services/interview-csv-service';
 import {
@@ -32,7 +32,7 @@ import { isCorpPoolDeleted, loadDeletedCorpPool } from '@/lib/deleted-corp-pool'
 const getUploadsRoot = () => getRuntimeUploadsRoot();
 
 const MASTER_BR_FILENAME = "BR_RawData 3.xlsx";
-const JD_DOCUMENT_EXT = /\.(docx|doc|pdf|txt)$/i;
+const JD_DOCUMENT_EXT = /\.(docx|doc|pdf|txt|html|htm)$/i;
 
 export interface EmployeeRecord {
   employee_id: string;
@@ -535,6 +535,31 @@ function collectSheetAutoReqIds(sheet: ExcelJS.Worksheet, idCol?: number): Set<s
   return ids;
 }
 
+function collectWorkbookAutoReqIds(workbook: ExcelJS.Workbook): string[] {
+  const ids = new Set<string>();
+  for (const sheet of workbook.worksheets) {
+    if (!isBrDataSheet(sheet.name)) continue;
+    const idCol = headerCol(readSheetHeaders(sheet), "auto req id", "br id", "id");
+    for (const id of collectSheetAutoReqIds(sheet, idCol)) ids.add(id);
+  }
+  return Array.from(ids);
+}
+
+async function restoreIncomingBrIds(ids: string[], blockedBrIds: Set<string>): Promise<string[]> {
+  const rows = ids
+    .map((autoReqId) => normalizeBrId(autoReqId))
+    .filter(Boolean)
+    .map((autoReqId) => ({
+      id: brIdToUuid(autoReqId),
+      brId: autoReqId,
+      fileName: autoReqId,
+    }));
+  if (!rows.length) return [];
+  await unmarkRequirementsDeleted(rows);
+  for (const row of rows) blockedBrIds.delete(row.brId.toLowerCase());
+  return rows.map((row) => row.id);
+}
+
 function nextAutoReqId(existing: Set<string>): string {
   let max = 40000;
   for (const id of existing) {
@@ -828,16 +853,18 @@ function autoReqIdFromLabel(fileName?: string): string {
 async function persistMasterRequirements(
   workbook: ExcelJS.Workbook,
   filename: string,
-  localJds: any[]
+  localJds: any[],
+  keepIds: Set<string> = new Set()
 ): Promise<number> {
   // BR/JD ingest only writes job_descriptions. Never delete employees, tests,
   // test_questions, or test_attempts — Employee Portal data is independent.
   const merged = mergeBrRequirements(parseBrWorkbook(workbook, filename));
-  const deleted = await loadDeletedRequirements();
+  const deleted = await loadDeletedRequirements({ fresh: true });
   const skippedIds = new Set<string>();
   const upsertRows = merged.flatMap((row) => {
     const jdUuid = brIdToUuid(row.autoReqId);
     if (
+      !keepIds.has(jdUuid) &&
       isRequirementDeleted(deleted, {
         id: jdUuid,
         brId: row.autoReqId,
@@ -894,6 +921,8 @@ async function persistMasterRequirements(
   }
 
   for (let i = localJds.length - 1; i >= 0; i -= 1) {
+    const localId = String(localJds[i].id || "");
+    if (keepIds.has(localId)) continue;
     if (
       isRequirementDeleted(deleted, {
         id: localJds[i].id,
@@ -901,12 +930,12 @@ async function persistMasterRequirements(
         jdText: localJds[i].jdText,
       })
     ) {
-      if (localJds[i].id) skippedIds.add(String(localJds[i].id));
+      if (localId) skippedIds.add(localId);
       localJds.splice(i, 1);
     }
   }
 
-  const toDelete = Array.from(skippedIds);
+  const toDelete = Array.from(skippedIds).filter((id) => !keepIds.has(id));
   for (let i = 0; i < toDelete.length; i += 50) {
     const chunk = toDelete.slice(i, i + 50);
     const { error } = await supabase.from("job_descriptions").delete().in("id", chunk);
@@ -1051,7 +1080,7 @@ function mergeBrRequirements(rows: ParsedBrRequirement[]): ParsedBrRequirement[]
 export async function refreshRequirements(opts?: {
   incomingBrFiles?: string[];
   incomingJdFiles?: string[];
-}): Promise<{ success: boolean; processedBRs: number; convertedJDs: number }> {
+}): Promise<{ success: boolean; processedBRs: number; convertedJDs: number; incomingBrRows: number }> {
   await ensureDocsStorage();
   await markRequirementsDeleted(
     PERMANENTLY_REMOVED_BR_IDS.map((brId) => ({ brId, fileName: brId }))
@@ -1066,6 +1095,8 @@ export async function refreshRequirements(opts?: {
 
   let processedBRs = 0;
   let convertedJDs = 0;
+  let incomingBrRows = 0;
+  const keepIds = new Set<string>();
   const restoredIncoming: Array<{
     id: string;
     jd_text: string;
@@ -1117,15 +1148,19 @@ export async function refreshRequirements(opts?: {
   } catch {}
 
   const xlsxBrFiles = brFiles.filter((f) => f.endsWith(".xlsx") || f.endsWith(".xls"));
-  const actualJdFiles = jdFiles.filter(
-    (f) => f.endsWith(".pdf") || f.endsWith(".docx") || f.endsWith(".doc") || f.endsWith(".txt")
-  );
+  const actualJdFiles = jdFiles.filter((f) => JD_DOCUMENT_EXT.test(f));
 
   const { workbook: masterWorkbook, filename: masterFilename } = await loadMasterBrWorkbook();
   const masterSheet = findMasterBrSheet(masterWorkbook);
   const masterHeaders = readSheetHeaders(masterSheet);
   const idCol = headerCol(masterHeaders, "auto req id", "br id", "id");
   const existingIds = collectSheetAutoReqIds(masterSheet, idCol);
+
+  if (incomingBr.has(masterFilename.toLowerCase())) {
+    const masterIds = Array.from(collectSheetAutoReqIds(masterSheet, idCol));
+    for (const id of await restoreIncomingBrIds(masterIds, blockedBrIds)) keepIds.add(id);
+    incomingBrRows += masterIds.length;
+  }
 
   for (const file of xlsxBrFiles) {
     if (file.toLowerCase() === masterFilename.toLowerCase()) continue;
@@ -1148,13 +1183,23 @@ export async function refreshRequirements(opts?: {
       const source = new ExcelJS.Workbook();
       const buffer = await readDocFileBuffer("BR", file);
       await source.xlsx.load(buffer as any);
+      const incomingIds = collectWorkbookAutoReqIds(source);
+      for (const id of await restoreIncomingBrIds(incomingIds, blockedBrIds)) keepIds.add(id);
       const added = appendBrWorkbookRows(source, masterSheet, masterHeaders, existingIds, blockedBrIds);
+      incomingBrRows += Math.max(added, incomingIds.length);
       if (added > 0) {
         await writeLog(
           "requirements",
           "MERGED_BR_INTO_MASTER",
           "success",
           `Appended ${added} BR row(s) from ${file} into ${masterFilename}`
+        );
+      } else if (incomingIds.length > 0) {
+        await writeLog(
+          "requirements",
+          "MERGED_BR_INTO_MASTER",
+          "success",
+          `Restored ${incomingIds.length} existing BR row(s) from ${file}`
         );
       }
       await deleteDocFile("BR", file);
@@ -1169,13 +1214,13 @@ export async function refreshRequirements(opts?: {
         (j: any) => String(j.fileName || "").toLowerCase().includes(file.toLowerCase())
       );
       const buffer = await readDocFileBuffer("JD", file);
-      const jdText = await resumeService.extractTextFromBuffer(buffer);
+      const jdText = await resumeService.extractTextFromBuffer(buffer, file);
       if (!jdText.trim()) {
         await writeLog("requirements", "CONVERT_JD_EMPTY", "failed", `No text extracted from JD ${file}`);
         continue;
       }
 
-      const details = await extractJdDetails(jdText, file);
+      const details = extractJdDetailsLocal(jdText, file);
       const linkedId = autoReqIdFromLabel(
         localJds.find((j: any) => String(j.fileName || "").toLowerCase().includes(file.toLowerCase()))?.fileName
       );
@@ -1195,15 +1240,26 @@ export async function refreshRequirements(opts?: {
         fileName: `${autoReqId} | ${file}`,
         jdText,
       };
-      const blocked = isRequirementDeleted(deletedRequirements, requirementParts)
-        || isPermanentlyRemovedBrId(autoReqId)
-        || blockedBrIds.has(autoReqId.toLowerCase());
-
-      if (incomingJd.has(file.toLowerCase()) && !blocked) {
-        await unmarkRequirementsDeleted([requirementParts]);
-      } else if (blocked) {
+      if (isPermanentlyRemovedBrId(autoReqId)) {
+        await writeLog(
+          "requirements",
+          "CONVERT_JD_BLOCKED",
+          "failed",
+          `Skipped ${file}: ${autoReqId} is permanently removed`
+        );
         continue;
-      } else if (!incomingJd.has(file.toLowerCase()) && alreadyLinked) {
+      }
+
+      if (incomingJd.has(file.toLowerCase())) {
+        await unmarkRequirementsDeleted([requirementParts]);
+        blockedBrIds.delete(autoReqId.toLowerCase());
+        keepIds.add(requirementParts.id);
+      } else if (
+        isRequirementDeleted(deletedRequirements, requirementParts) ||
+        blockedBrIds.has(autoReqId.toLowerCase())
+      ) {
+        continue;
+      } else if (alreadyLinked) {
         continue;
       }
 
@@ -1216,6 +1272,7 @@ export async function refreshRequirements(opts?: {
       );
       existingIds.add(autoReqId);
       convertedJDs++;
+      keepIds.add(requirementParts.id);
       restoredIncoming.push({
         id: brIdToUuid(autoReqId),
         jd_text: composeRequirementText(
@@ -1248,10 +1305,11 @@ export async function refreshRequirements(opts?: {
     );
   }
   await saveMasterBrWorkbook(masterWorkbook, masterFilename);
-  processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds);
+  processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds, keepIds);
 
+  const deletedAfterIngest = await loadDeletedRequirements({ fresh: true });
   const liveRestored = restoredIncoming.filter((row) =>
-    !isRequirementDeleted(deletedRequirements, {
+    !isRequirementDeleted(deletedAfterIngest, {
       id: row.id,
       fileName: row.file_name,
       jdText: row.jd_text,
@@ -1288,7 +1346,7 @@ export async function refreshRequirements(opts?: {
     console.error("Failed to write local backup for requirements refresh:", writeErr);
   }
 
-  return { success: true, processedBRs, convertedJDs };
+  return { success: true, processedBRs, convertedJDs, incomingBrRows };
 }
 
 /**
@@ -1328,7 +1386,7 @@ export async function syncSelectedRequirementToMaster(jdId: string): Promise<{
     return { success: true, appended: false, autoReqId };
   }
 
-  const details = await extractJdDetails(jdText, dbJd.file_name || "");
+  const details = extractJdDetailsLocal(jdText, dbJd.file_name || "");
   if (!autoReqId) autoReqId = nextAutoReqId(existingIds);
 
   writeMappedRow(
