@@ -27,7 +27,7 @@ import {
   PERMANENTLY_REMOVED_BR_IDS,
   unmarkRequirementsDeleted,
 } from '@/lib/deleted-requirements';
-import { isCorpPoolDeleted, loadDeletedCorpPool } from '@/lib/deleted-corp-pool';
+import { isCorpPoolDeleted, loadDeletedCorpPool, unmarkCorpPoolDeleted } from '@/lib/deleted-corp-pool';
 
 const getUploadsRoot = () => getRuntimeUploadsRoot();
 
@@ -1521,15 +1521,28 @@ export async function refreshCandidates(activeJdId?: string): Promise<{ success:
 /**
  * 3. Employee Pool Refresh: Scans /docs/Corp Pool
  */
+function looksLikeExcelBuffer(buffer: Buffer): boolean {
+  return Boolean(buffer?.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b);
+}
+
 export async function refreshEmployees(
   activeJdId?: string,
-  opts?: { incomingCorpPoolFiles?: string[] }
+  opts?: {
+    incomingCorpPoolFiles?: string[];
+    incomingFileBuffers?: Array<{ filename: string; buffer: Buffer }>;
+  }
 ): Promise<{ success: boolean; loaded: number }> {
   await ensureDocsStorage();
   const reclaimed = await reclaimMisfiledCorpPoolRosters();
   const incomingSet = new Set(
     (opts?.incomingCorpPoolFiles || []).map((f) => corpPoolFileKey(f))
   );
+  const fileBuffers = new Map<string, Buffer>();
+  for (const item of opts?.incomingFileBuffers || []) {
+    const stored = sanitizeCorpPoolFileName(item.filename);
+    fileBuffers.set(stored, item.buffer);
+    incomingSet.add(corpPoolFileKey(stored));
+  }
   if (incomingSet.size > 0) {
     for (const file of reclaimed) incomingSet.add(corpPoolFileKey(file));
   }
@@ -1537,9 +1550,13 @@ export async function refreshEmployees(
   if (incomingSet.size > 0) {
     files = files.filter((f) => incomingSet.has(corpPoolFileKey(f)));
   }
+  for (const stored of fileBuffers.keys()) {
+    if (!files.some((f) => corpPoolFileKey(f) === corpPoolFileKey(stored))) {
+      files.push(stored);
+    }
+  }
 
   const expandedFiles: string[] = [];
-  const fileBuffers = new Map<string, Buffer>();
   const usedZipNames = new Set<string>();
   for (const file of files) {
     if (!/\.zip$/i.test(file)) {
@@ -1549,7 +1566,7 @@ export async function refreshEmployees(
     let extracted = 0;
     let skipped = 0;
     try {
-      const zipBuffer = await readDocFileBuffer("Corp Pool", file);
+      const zipBuffer = fileBuffers.get(file) || await readDocFileBuffer("Corp Pool", file);
       const zip = new AdmZip(zipBuffer);
       for (const entry of zip.getEntries()) {
         try {
@@ -1652,17 +1669,29 @@ export async function refreshEmployees(
     if (dbJd) jdSkills = dbJd.jd_text;
   }
   
+  const bufferFor = (file: string): Buffer | undefined => {
+    const direct = fileBuffers.get(file);
+    if (direct) return direct;
+    const key = corpPoolFileKey(file);
+    for (const [name, buf] of fileBuffers) {
+      if (corpPoolFileKey(name) === key) return buf;
+    }
+    return undefined;
+  };
+
   const csvFiles = files.filter((f) => f.toLowerCase().endsWith(".csv"));
   const xlsxFiles = files.filter((f) => {
     const name = f.toLowerCase();
-    return name.endsWith(".xlsx") || name.endsWith(".xls");
+    if (name.endsWith(".xlsx") || name.endsWith(".xls")) return true;
+    const buf = bufferFor(f);
+    return Boolean(buf && looksLikeExcelBuffer(buf) && !/\.(pdf|docx|doc|txt|csv)$/i.test(name));
   });
   const cvFiles = files.filter((f) => /\.(pdf|docx|doc|txt)$/i.test(f));
 
   // A. Process Excel files
   for (const file of xlsxFiles) {
     try {
-      const buffer = fileBuffers.get(file) || await readDocFileBuffer("Corp Pool", file);
+      const buffer = bufferFor(file) || await readDocFileBuffer("Corp Pool", file);
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer as any);
 
@@ -1806,7 +1835,7 @@ export async function refreshEmployees(
   // B. Process CSV files
   for (const file of csvFiles) {
     try {
-      const buffer = fileBuffers.get(file) || await readDocFileBuffer("Corp Pool", file);
+      const buffer = bufferFor(file) || await readDocFileBuffer("Corp Pool", file);
       const rows = parseCorpPoolCsv(buffer);
       if (rows.length <= 1) continue;
 
@@ -1882,7 +1911,7 @@ export async function refreshEmployees(
 
   for (const file of cvFiles) {
     try {
-      const buffer = fileBuffers.get(file) || await readDocFileBuffer("Corp Pool", file);
+      const buffer = bufferFor(file) || await readDocFileBuffer("Corp Pool", file);
       if (!buffer?.length) {
         await writeLog("employee", "PARSE_CV_EMPTY", "failed", `Corp Pool CV ${file} is empty`);
         continue;
@@ -1944,6 +1973,9 @@ export async function refreshEmployees(
   
   loaded = uniqueParsedEmployees.length;
   const incomingUpload = incomingSet.size > 0;
+  if (incomingUpload) {
+    await unmarkCorpPoolDeleted([], [...incomingSet, ...files]);
+  }
   const deletedPool = await loadDeletedCorpPool();
   const parsedBeforeTombstone = uniqueParsedEmployees.length;
   const liveParsed = uniqueParsedEmployees.filter(
@@ -1952,6 +1984,23 @@ export async function refreshEmployees(
   uniqueParsedEmployees.length = 0;
   uniqueParsedEmployees.push(...liveParsed);
   loaded = uniqueParsedEmployees.length;
+
+  const jsonPath = join(getUploadsRoot(), "employees.json");
+  let existingList: EmployeeRecord[] = [];
+  try {
+    const persisted = await readPersistedJson("employees.json");
+    if (persisted) existingList = JSON.parse(persisted) as EmployeeRecord[];
+  } catch {}
+  if (existingList.length === 0) {
+    try {
+      const raw = await readFile(jsonPath, "utf8");
+      existingList = JSON.parse(raw) as EmployeeRecord[];
+    } catch {}
+  }
+  if (!Array.isArray(existingList)) existingList = [];
+  existingList = existingList.filter(
+    (emp) => emp?.employee_id && !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
+  );
 
   if (uniqueParsedEmployees.length === 0) {
     if (incomingUpload && parsedBeforeTombstone === 0) {
@@ -1970,28 +2019,11 @@ export async function refreshEmployees(
       incomingUpload ? "INCOMING_CORP_POOL_ALL_DELETED" : "SKIP_EMPTY_CORP_POOL",
       "success",
       incomingUpload
-        ? "Uploaded people were previously deleted and were not restored"
+        ? `Uploaded people were previously deleted and were not restored; Corp Pool still has ${existingList.length}`
         : "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
     );
-    return { success: true, loaded: 0 };
+    return { success: true, loaded: existingList.length };
   }
-
-  const jsonPath = join(getUploadsRoot(), "employees.json");
-  let existingList: EmployeeRecord[] = [];
-  try {
-    const persisted = await readPersistedJson("employees.json");
-    if (persisted) existingList = JSON.parse(persisted) as EmployeeRecord[];
-  } catch {}
-  if (existingList.length === 0) {
-    try {
-      const raw = await readFile(jsonPath, "utf8");
-      existingList = JSON.parse(raw) as EmployeeRecord[];
-    } catch {}
-  }
-  if (!Array.isArray(existingList)) existingList = [];
-  existingList = existingList.filter(
-    (emp) => emp?.employee_id && !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
-  );
 
   const byId = new Map<string, EmployeeRecord>();
   const byEmail = new Map<string, string>();
@@ -2056,9 +2088,7 @@ export async function refreshEmployees(
 
   const serialized = JSON.stringify(finalEmployees, null, 2);
   await writeFile(jsonPath, serialized, "utf8");
-  await writePersistedJson("employees.json", serialized).catch((err) => {
-    console.warn("Failed to persist employees.json to app-data:", err);
-  });
+  await writePersistedJson("employees.json", serialized);
   cacheStore.invalidate("employees");
   await writeLog(
     "employee",

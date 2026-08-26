@@ -30,8 +30,35 @@ async function ensureAppDataBucket() {
   }
 }
 
+function localFileIsFresh(runtimePath: string, maxAgeMs = 5 * 60 * 1000): boolean {
+  try {
+    if (!fs.existsSync(runtimePath)) return false;
+    return Date.now() - fs.statSync(runtimePath).mtimeMs < maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
 export async function readPersistedJson(filename: string): Promise<string | null> {
   const runtimePath = join(getRuntimeUploadsRoot(), filename);
+
+  const readLocal = async (): Promise<string | null> => {
+    try {
+      if (fs.existsSync(runtimePath)) {
+        return await readFile(runtimePath, "utf8");
+      }
+    } catch {
+      // fall through
+    }
+    return null;
+  };
+
+  const localText = await readLocal();
+  // Same-instance writes land on disk first. Prefer that copy for a few minutes so
+  // GET does not replace it with a stale cloud object (upsert lag / failed upload).
+  if (localText && localFileIsFresh(runtimePath)) {
+    return localText;
+  }
 
   // In Azure/Vercel, a stale local cache (including an empty wipe leftover) must
   // not hide the cloud copy that other instances wrote.
@@ -41,6 +68,8 @@ export async function readPersistedJson(filename: string): Promise<string | null
       const { data, error } = await supabaseServer.storage.from(APP_DATA_BUCKET).download(filename);
       if (!error && data) {
         const text = await data.text();
+        const stillFresh = localText && localFileIsFresh(runtimePath);
+        if (stillFresh) return localText;
         await ensureRuntimeUploadsDir();
         await writeFile(runtimePath, text, "utf8");
         return text;
@@ -50,13 +79,7 @@ export async function readPersistedJson(filename: string): Promise<string | null
     }
   }
 
-  try {
-    if (fs.existsSync(runtimePath)) {
-      return await readFile(runtimePath, "utf8");
-    }
-  } catch {
-    // fall through
-  }
+  if (localText) return localText;
 
   try {
     const staticPath = getStaticDataPath(filename);
@@ -81,12 +104,15 @@ export async function writePersistedJson(filename: string, content: string): Pro
   if (isCloudDeployment()) {
     try {
       await ensureAppDataBucket();
-      await supabaseServer.storage.from(APP_DATA_BUCKET).upload(filename, content, {
+      const { error } = await supabaseServer.storage.from(APP_DATA_BUCKET).upload(filename, content, {
         contentType: "application/json",
         upsert: true,
+        cacheControl: "0",
       });
+      if (error) throw error;
     } catch (e) {
       console.warn(`Supabase write failed for ${filename}:`, e);
+      throw e;
     }
   }
 }

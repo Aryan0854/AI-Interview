@@ -122,21 +122,26 @@ export async function readDocFileBuffer(
   const localPath = join(localDir(category), filename);
   const cached = cachePath(category, filename);
 
-  try {
-    if (fs.existsSync(localPath)) {
-      const localBuffer = await readFile(localPath);
-      if (localBuffer.length > 0) return localBuffer;
+  const readIfPresent = async (fullPath: string): Promise<Buffer | null> => {
+    try {
+      if (!fs.existsSync(fullPath)) return null;
+      const buf = await readFile(fullPath);
+      return buf.length > 0 ? buf : null;
+    } catch {
+      return null;
     }
-  } catch {
-    // fall through
-  }
-  try {
-    if (fs.existsSync(cached)) {
-      const cachedBuffer = await readFile(cached);
-      if (cachedBuffer.length > 0) return cachedBuffer;
-    }
-  } catch {
-    // fall through
+  };
+
+  // Cloud ingest writes the fresh file to docs-cache first. Prefer that over a
+  // leftover docs/ copy with the same name, which would parse stale bytes.
+  if (useCloudDocsStorage()) {
+    const cachedBuffer = await readIfPresent(cached);
+    if (cachedBuffer) return cachedBuffer;
+  } else {
+    const localBuffer = await readIfPresent(localPath);
+    if (localBuffer) return localBuffer;
+    const cachedBuffer = await readIfPresent(cached);
+    if (cachedBuffer) return cachedBuffer;
   }
 
   if (useCloudDocsStorage()) {
@@ -146,6 +151,8 @@ export async function readDocFileBuffer(
       .from(DOCS_BUCKET)
       .download(objectPath);
     if (error || !data) {
+      const localFallback = await readIfPresent(localPath);
+      if (localFallback) return localFallback;
       throw new Error(error?.message || `Cloud doc not found: ${objectPath}`);
     }
     const buffer = Buffer.from(await data.arrayBuffer());

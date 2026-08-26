@@ -112,7 +112,10 @@ export async function POST(request: NextRequest) {
     } else if (mapping.refresh === 'candidates') {
       refreshResult = await refreshCandidates(activeJdId);
     } else if (mapping.refresh === 'employees') {
-      refreshResult = await refreshEmployees(activeJdId, { incomingCorpPoolFiles: [filename] });
+      refreshResult = await refreshEmployees(activeJdId, {
+        incomingCorpPoolFiles: [filename],
+        incomingFileBuffers: [{ filename, buffer }],
+      });
     } else if (mapping.refresh === 'interviews') {
       refreshResult = await refreshInterviews();
     }

@@ -686,9 +686,7 @@ export async function POST(request: NextRequest) {
 
       const serialized = JSON.stringify(employees, null, 2);
       await writeFile(jsonPath, serialized, "utf8");
-      await writePersistedJson("employees.json", serialized).catch((err) => {
-        console.warn("Failed to persist employees.json after shortlist:", err);
-      });
+      await writePersistedJson("employees.json", serialized);
       cacheStore.invalidate("employees");
 
       await writeLog(
@@ -784,9 +782,7 @@ export async function PATCH(request: NextRequest) {
 
     const serialized = JSON.stringify(employees, null, 2);
     await writeFile(jsonPath, serialized, "utf8");
-    await writePersistedJson("employees.json", serialized).catch((err) => {
-      console.warn("Failed to persist employees.json after Corp Pool edit:", err);
-    });
+    await writePersistedJson("employees.json", serialized);
     cacheStore.invalidate("employees");
 
     await writeLog(
@@ -853,9 +849,7 @@ export async function DELETE(request: NextRequest) {
 
     const serialized = JSON.stringify(remaining, null, 2);
     await writeFile(jsonPath, serialized, "utf8");
-    await writePersistedJson("employees.json", serialized).catch((err) => {
-      console.warn("Failed to persist employees.json after Corp Pool delete:", err);
-    });
+    await writePersistedJson("employees.json", serialized);
     cacheStore.invalidate("employees");
 
     const personalResume = (file: string) => /\.(pdf|docx|doc|txt)$/i.test(file);
