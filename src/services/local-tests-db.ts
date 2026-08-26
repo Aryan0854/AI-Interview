@@ -20,6 +20,14 @@ export interface LocalTest {
   created_at: string;
   topic_title?: string;
   subject_title?: string;
+  // Added by migrations/20260823081000_employee_auth_and_scoring_columns.sql — kept in
+  // sync here so the local-JSON fallback store models the same shape as the live DB.
+  session_recording_url?: string | null;
+  proctoring?: any;
+  score_correct?: number | null;
+  score_total?: number | null;
+  score_percent?: number | null;
+  ai_analysis?: any;
 }
 
 export interface LocalTestQuestion {
@@ -102,7 +110,15 @@ export class LocalTestsDb {
       started_at: row.started_at,
       completed_at: row.completed_at,
       in_progress: inProgress,
-      created_at: row.created_at
+      created_at: row.created_at,
+      topic_title: row.topic_title,
+      subject_title: row.subject_title,
+      session_recording_url: row.session_recording_url ?? null,
+      proctoring: row.proctoring ?? null,
+      score_correct: row.score_correct ?? null,
+      score_total: row.score_total ?? null,
+      score_percent: row.score_percent ?? null,
+      ai_analysis: row.ai_analysis ?? null
     };
   }
 
@@ -274,6 +290,12 @@ export class LocalTestsDb {
       if (updates.started_at !== undefined) payload.started_at = updates.started_at;
       if (updates.completed_at !== undefined) payload.completed_at = updates.completed_at;
       if (updates.in_progress !== undefined) payload.in_progress = updates.in_progress ? JSON.stringify(updates.in_progress) : null;
+      if (updates.session_recording_url !== undefined) payload.session_recording_url = updates.session_recording_url;
+      if (updates.proctoring !== undefined) payload.proctoring = updates.proctoring;
+      if (updates.score_correct !== undefined) payload.score_correct = updates.score_correct;
+      if (updates.score_total !== undefined) payload.score_total = updates.score_total;
+      if (updates.score_percent !== undefined) payload.score_percent = updates.score_percent;
+      if (updates.ai_analysis !== undefined) payload.ai_analysis = updates.ai_analysis;
 
       const { data, error } = await supabase
         .from("tests")
@@ -463,6 +485,15 @@ export class LocalTestsDb {
       const db = await this.loadDB();
       return db.test_attempts.filter((a) => a.employee_id === employeeId);
     }
+  }
+
+  /**
+   * Counts how many of the given attempts were correct for a specific test. Used as a
+   * fallback wherever `test.score_correct`/`score_percent` haven't been persisted yet
+   * (e.g. older records from before the scoring columns migration).
+   */
+  static scoreFromAttempts(attempts: LocalTestAttempt[], test: Pick<LocalTest, "id">): number {
+    return attempts.filter((a) => a.test_id === test.id && a.is_correct).length;
   }
 }
 
