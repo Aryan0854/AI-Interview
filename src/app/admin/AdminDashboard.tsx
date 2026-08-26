@@ -35,6 +35,7 @@ import {
   Pin,
   Layers,
   KeyRound,
+  Check,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { formatPortalTimestamp } from "@/lib/portal-format";
@@ -488,6 +489,16 @@ function extractJobTitleFromJd(text: string, fallback = "Untitled requirement"):
   return fallback;
 }
 
+function applyJobTitleToJd(text: string, newTitle: string): string {
+  const title = newTitle.replace(/\s+/g, " ").trim();
+  const raw = String(text || "").trim();
+  if (!title) return raw;
+  if (/^Job Title:\s*/im.test(raw)) {
+    return raw.replace(/^Job Title:\s*.+$/im, `Job Title: ${title}`);
+  }
+  return `Job Title: ${title}\n\n${raw}`.trim();
+}
+
 function requirementCreatedDayKey(createdAt: unknown): string {
   const d = new Date(String(createdAt || ""));
   if (Number.isNaN(d.getTime())) return "";
@@ -501,6 +512,112 @@ function formatRequirementDayLabel(dayKey: string): string {
   const [y, m, d] = dayKey.split("-").map(Number);
   if (!y || !m || !d) return dayKey;
   return new Date(y, m - 1, d).toLocaleDateString();
+}
+
+function requirementFileParts(fileName?: string): { brNo: string; filename: string } {
+  const raw = String(fileName || "Pasted Job Description").trim() || "Pasted Job Description";
+  if (raw.includes(" | ")) {
+    const idx = raw.indexOf(" | ");
+    return { brNo: raw.slice(0, idx).trim() || "N/A", filename: raw.slice(idx + 3).trim() || raw };
+  }
+  if (/^\d+BR$/i.test(raw)) return { brNo: raw, filename: raw };
+  return { brNo: "N/A", filename: raw };
+}
+
+function composeRequirementFileName(brNo: string, filename: string): string {
+  const br = brNo.trim();
+  const file = filename.trim() || "Pasted Job Description";
+  if (!br || br.toUpperCase() === "N/A") return file;
+  return `${br} | ${file}`;
+}
+
+function dateInputToCreatedAt(dateStr: string, previous?: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return previous || new Date().toISOString();
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const prior = previous ? new Date(previous) : null;
+  const hours = prior && !Number.isNaN(prior.getTime()) ? prior.getHours() : 12;
+  const minutes = prior && !Number.isNaN(prior.getTime()) ? prior.getMinutes() : 0;
+  return new Date(year, month - 1, day, hours, minutes, 0).toISOString();
+}
+
+function InlineCellEditor({
+  value,
+  onSave,
+  onCancel,
+  className,
+  type = "text",
+  placeholder,
+}: {
+  value: string;
+  onSave: (next: string) => void;
+  onCancel: () => void;
+  className?: string;
+  type?: string;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = React.useState(value);
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type={type}
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSave(draft);
+          if (e.key === "Escape") onCancel();
+        }}
+        className={className || "w-24 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"}
+        autoFocus
+      />
+      <button
+        type="button"
+        onClick={() => onSave(draft)}
+        className="p-1 rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
+        title="Save"
+      >
+        <CheckCircle2 className="w-3.5 h-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="p-1 rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+        title="Cancel"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function ShortlistToggle({
+  shortlisted,
+  onClick,
+  compact = true,
+}: {
+  shortlisted: boolean;
+  onClick: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className={`shortlist-btn ${shortlisted ? "is-on" : "is-off"} ${compact ? "h-7 px-2.5 text-[10px]" : "h-9 px-5 text-xs"}`}
+    >
+      {shortlisted ? (
+        <>
+          <Check className="w-3.5 h-3.5 shortlist-check" />
+          Shortlisted
+        </>
+      ) : (
+        "Shortlist"
+      )}
+    </button>
+  );
 }
 
 function requirementDuplicateKey(jd: { id?: string; jdText?: string }): string {
@@ -630,8 +747,19 @@ export default function AdminDashboard() {
   const [editingRmEmail, setEditingRmEmail] = useState<string>("");
   const [editingBrId, setEditingBrId] = useState<string | null>(null);
   const [editingBrValue, setEditingBrValue] = useState<string>("");
+  const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
+  const [editingTitleValue, setEditingTitleValue] = useState<string>("");
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState<string>("");
   const [editingSkillsId, setEditingSkillsId] = useState<string | null>(null);
   const [editingSkillsValue, setEditingSkillsValue] = useState<string>("");
+  const [editingEmployeeKey, setEditingEmployeeKey] = useState<string | null>(null);
+  const [editingEmployeeValue, setEditingEmployeeValue] = useState<string>("");
+  const [corpPoolListFilter, setCorpPoolListFilter] = useState<"all" | "shortlisted">("all");
+  const employeesRef = useRef<any[]>([]);
+  const shortlistIntentRef = useRef<Map<string, boolean>>(new Map());
+  const shortlistFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shortlistFlushInFlightRef = useRef(false);
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [jdText, setJdText] = useState("");
   const [isJdLoading, setIsJdLoading] = useState(false);
@@ -876,6 +1004,31 @@ export default function AdminDashboard() {
     }
   }, [logsModuleFilter, logsStatusFilter, logsSearch]);
 
+  useEffect(() => {
+    const flushPending = () => {
+      if (shortlistFlushTimerRef.current) {
+        clearTimeout(shortlistFlushTimerRef.current);
+        shortlistFlushTimerRef.current = null;
+      }
+      const changes = Array.from(shortlistIntentRef.current.entries()).map(([employeeId, shortlisted]) => ({
+        employeeId,
+        shortlisted,
+      }));
+      if (!changes.length) return;
+      shortlistIntentRef.current.clear();
+      void adminFetch("/api/admin/employees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changes }),
+      });
+    };
+    window.addEventListener("beforeunload", flushPending);
+    return () => {
+      window.removeEventListener("beforeunload", flushPending);
+      flushPending();
+    };
+  }, []);
+
   const handleToggleResumeSelect = (id: string) => {
     setSelectedResumeIds(prev => 
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
@@ -990,6 +1143,7 @@ export default function AdminDashboard() {
 
   const handleToggleAllEmployees = () => {
     const filtered = employees.filter(emp => {
+      if (corpPoolListFilter === "shortlisted" && !emp.shortlisted) return false;
       if (!employeeSearch) return true;
       const term = employeeSearch.toLowerCase();
       return (
@@ -2105,9 +2259,10 @@ export default function AdminDashboard() {
     try {
       const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "all";
       const jdQuery = `&activeJdId=${encodeURIComponent(sendJdId)}`;
+      const emailQuery = adminEmail ? `&email=${encodeURIComponent(adminEmail)}` : "";
       for (const step of steps) {
         setPipelineStatus(`Ingestion: Scanning & refreshing ${step}...`);
-        const res = await fetch(`/api/admin/refresh?type=${step}${jdQuery}`, {
+        const res = await adminFetch(`/api/admin/refresh?type=${step}${jdQuery}${emailQuery}`, {
           method: "POST"
         });
         const result = await res.json();
@@ -2177,13 +2332,14 @@ export default function AdminDashboard() {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("category", category);
+    if (adminEmail) formData.append("actorEmail", adminEmail);
     const sendJdId = (selectedJdId && !selectedJdId.includes("@")) ? selectedJdId : "";
     if (sendJdId) {
       formData.append("activeJdId", sendJdId);
     }
 
     try {
-      const res = await fetch("/api/admin/upload_unified", {
+        const res = await adminFetch("/api/admin/upload_unified", {
         method: "POST",
         body: formData
       });
@@ -2236,22 +2392,143 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleShortlistEmployee = async (employeeId: string) => {
+  employeesRef.current = employees;
+
+  const flushShortlistIntent = () => {
+    if (shortlistFlushInFlightRef.current) {
+      scheduleShortlistFlush();
+      return;
+    }
+    const changes = Array.from(shortlistIntentRef.current.entries()).map(([employeeId, shortlisted]) => ({
+      employeeId,
+      shortlisted,
+    }));
+    shortlistIntentRef.current.clear();
+    if (!changes.length) return;
+
+    shortlistFlushInFlightRef.current = true;
+    void adminFetch("/api/admin/employees", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changes }),
+    })
+      .then(async (res) => {
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok || !result.success) {
+          throw new Error(result.error || "Failed");
+        }
+      })
+      .catch((err: any) => {
+        setActionError(`Shortlist save failed: ${err.message}`);
+        setTimeout(() => setActionError(null), 4000);
+        void loadEmployees({ fresh: true });
+      })
+      .finally(() => {
+        shortlistFlushInFlightRef.current = false;
+        if (shortlistIntentRef.current.size > 0) {
+          scheduleShortlistFlush();
+        }
+      });
+  };
+
+  const scheduleShortlistFlush = () => {
+    if (shortlistFlushTimerRef.current) clearTimeout(shortlistFlushTimerRef.current);
+    shortlistFlushTimerRef.current = setTimeout(() => {
+      shortlistFlushTimerRef.current = null;
+      flushShortlistIntent();
+    }, 280);
+  };
+
+  const applyShortlistValues = (nextById: Map<string, boolean>) => {
+    for (const [id, value] of nextById) {
+      shortlistIntentRef.current.set(id, value);
+    }
+    employeesRef.current = employeesRef.current.map((emp) =>
+      nextById.has(emp.employee_id) ? { ...emp, shortlisted: Boolean(nextById.get(emp.employee_id)) } : emp
+    );
+    setEmployees((prev) =>
+      prev.map((emp) =>
+        nextById.has(emp.employee_id) ? { ...emp, shortlisted: Boolean(nextById.get(emp.employee_id)) } : emp
+      )
+    );
+    setActiveEmployee((prev: any) =>
+      prev && nextById.has(prev.employee_id)
+        ? { ...prev, shortlisted: Boolean(nextById.get(prev.employee_id)) }
+        : prev
+    );
+    scheduleShortlistFlush();
+  };
+
+  const handleShortlistEmployee = (employeeId: string) => {
+    const pending = shortlistIntentRef.current.get(employeeId);
+    const previousValue =
+      typeof pending === "boolean"
+        ? pending
+        : Boolean(employeesRef.current.find((emp) => emp.employee_id === employeeId)?.shortlisted);
+    applyShortlistValues(new Map([[employeeId, !previousValue]]));
+  };
+
+  const handleBulkShortlistEmployees = (shortlisted: boolean, ids?: string[]) => {
+    const targetIds = ids?.length ? ids : selectedEmployeeIds;
+    if (!targetIds.length) return;
+    applyShortlistValues(new Map(targetIds.map((id) => [id, shortlisted])));
+    setSelectedEmployeeIds([]);
+    setActionSuccess(
+      shortlisted
+        ? `Shortlisted ${targetIds.length} ${targetIds.length === 1 ? "person" : "people"}.`
+        : `Removed ${targetIds.length} from the shortlist.`
+    );
+    setTimeout(() => setActionSuccess(null), 2500);
+  };
+
+  const handleUpdateCorpPoolEmployee = async (
+    employeeId: string,
+    field: "full_name" | "employee_id" | "department" | "skills" | "designation" | "score",
+    value: string
+  ) => {
+    const updates: Record<string, string | number> = {};
+    if (field === "score") {
+      const parsed = Number(String(value).replace(/%/g, "").trim());
+      if (!Number.isFinite(parsed)) {
+        setActionError("Score must be a number between 0 and 100.");
+        setTimeout(() => setActionError(null), 4000);
+        return;
+      }
+      updates.score = parsed;
+    } else {
+      updates[field] = value.trim();
+      if (field !== "skills" && field !== "department" && !updates[field]) {
+        setActionError("This field cannot be empty.");
+        setTimeout(() => setActionError(null), 4000);
+        return;
+      }
+    }
     try {
-      const res = await fetch("/api/admin/employees", {
-        method: "POST",
+      const res = await adminFetch("/api/admin/employees", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ employeeId })
+        body: JSON.stringify({ employeeId, updates }),
       });
       const result = await res.json();
-      if (result.success) {
-        setEmployees(prev => prev.map(e => e.employee_id === employeeId ? { ...e, shortlisted: !e.shortlisted } : e));
-      } else {
-        throw new Error(result.error || "Failed");
+      if (!res.ok || !result.success) throw new Error(result.error || "Failed to update employee");
+      const saved = result.employee;
+      setEmployees((prev) =>
+        prev.map((emp) => (emp.employee_id === employeeId ? { ...emp, ...saved } : emp))
+      );
+      setActiveEmployee((prev: any) =>
+        prev?.employee_id === employeeId ? { ...prev, ...saved } : prev
+      );
+      if (field === "employee_id" && saved?.employee_id && saved.employee_id !== employeeId) {
+        setSelectedEmployeeIds((prev) =>
+          prev.map((id) => (id === employeeId ? saved.employee_id : id))
+        );
       }
+      setEditingEmployeeKey(null);
+      setActionSuccess("Corp Pool row updated.");
+      setTimeout(() => setActionSuccess(null), 2500);
     } catch (err: any) {
-      setActionError(`Shortlist toggle failed: ${err.message}`);
-      setTimeout(() => setActionError(null), 3000);
+      setActionError(err.message || "Failed to update Corp Pool row");
+      setTimeout(() => setActionError(null), 4000);
     }
   };
 
@@ -2630,14 +2907,15 @@ export default function AdminDashboard() {
     setIsJdLoading(true);
     try {
       const originalJd = jds.find((j) => j.id === jdId);
-      const response = await fetch("/api/admin/jd", {
+      const response = await adminFetch("/api/admin/jd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jdId: jdId,
           jd: currentJdText,
           rmEmail: newRmEmail.trim().toLowerCase(),
-          fileName: currentFileName
+          fileName: currentFileName,
+          createdAt: originalJd?.createdAt
         }),
       });
       const data = await response.json();
@@ -2674,24 +2952,21 @@ export default function AdminDashboard() {
       return;
     }
     
-    // Construct new filename
-    let filenamePart = currentFileName || "Pasted Job Description";
-    if (filenamePart.includes(" | ")) {
-      filenamePart = filenamePart.split(" | ")[1];
-    }
-    const newFileName = `${newBrId.trim()} | ${filenamePart}`;
+    const { filename: filenamePart } = requirementFileParts(currentFileName);
+    const newFileName = composeRequirementFileName(newBrId.trim(), filenamePart);
     
     setIsJdLoading(true);
     try {
       const originalJd = jds.find((j) => j.id === jdId);
-      const response = await fetch("/api/admin/jd", {
+      const response = await adminFetch("/api/admin/jd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jdId: jdId,
           jd: currentJdText,
           rmEmail: currentRmEmail,
-          fileName: newFileName
+          fileName: newFileName,
+          createdAt: originalJd?.createdAt
         }),
       });
       const data = await response.json();
@@ -2721,6 +2996,82 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleUpdateJobTitle = async (jdId: string, currentJdText: string, currentFileName: string, newTitle: string, currentRmEmail: string) => {
+    if (!newTitle.trim()) {
+      setActionError("Title cannot be empty.");
+      setTimeout(() => setActionError(null), 4000);
+      return;
+    }
+    const updatedJdText = applyJobTitleToJd(currentJdText, newTitle);
+    setIsJdLoading(true);
+    try {
+      const originalJd = jds.find((j) => j.id === jdId);
+      const response = await adminFetch("/api/admin/jd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jdId,
+          jd: updatedJdText,
+          rmEmail: currentRmEmail,
+          fileName: currentFileName,
+          createdAt: originalJd?.createdAt
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to update title");
+      if (originalJd) {
+        setUndoStack((prev) => [...prev, { type: "update", jd: { ...originalJd } }]);
+      }
+      setActionSuccess("Title updated successfully.");
+      setTimeout(() => setActionSuccess(null), 3000);
+      await loadJobDescriptions(adminEmail);
+      setEditingTitleId(null);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to update title");
+      setTimeout(() => setActionError(null), 4000);
+    } finally {
+      setIsJdLoading(false);
+    }
+  };
+
+  const handleUpdateCreatedDate = async (jdId: string, currentJdText: string, currentFileName: string, currentRmEmail: string, dateValue: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+      setActionError("Enter a valid date.");
+      setTimeout(() => setActionError(null), 4000);
+      return;
+    }
+    const originalJd = jds.find((j) => j.id === jdId);
+    const createdAt = dateInputToCreatedAt(dateValue, originalJd?.createdAt);
+    setIsJdLoading(true);
+    try {
+      const response = await adminFetch("/api/admin/jd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jdId,
+          jd: currentJdText,
+          rmEmail: currentRmEmail,
+          fileName: currentFileName,
+          createdAt
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to update date");
+      if (originalJd) {
+        setUndoStack((prev) => [...prev, { type: "update", jd: { ...originalJd } }]);
+      }
+      setActionSuccess("Created date updated successfully.");
+      setTimeout(() => setActionSuccess(null), 3000);
+      await loadJobDescriptions(adminEmail);
+      setEditingDateId(null);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to update date");
+      setTimeout(() => setActionError(null), 4000);
+    } finally {
+      setIsJdLoading(false);
+    }
+  };
+
   const handleUpdateSkills = async (jdId: string, currentJdText: string, currentFileName: string, newSkillsString: string, currentRmEmail: string) => {
     // Strip old Skills: ... prefix if it exists
     let rawJd = currentJdText;
@@ -2738,14 +3089,15 @@ export default function AdminDashboard() {
     setIsJdLoading(true);
     try {
       const originalJd = jds.find((j) => j.id === jdId);
-      const response = await fetch("/api/admin/jd", {
+      const response = await adminFetch("/api/admin/jd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jdId: jdId,
           jd: updatedJdText,
           rmEmail: currentRmEmail,
-          fileName: currentFileName
+          fileName: currentFileName,
+          createdAt: originalJd?.createdAt
         }),
       });
       const data = await response.json();
@@ -2780,7 +3132,7 @@ export default function AdminDashboard() {
     const lastAction = undoStack[undoStack.length - 1];
     setIsJdLoading(true);
     try {
-      const response = await fetch("/api/admin/jd", {
+      const response = await adminFetch("/api/admin/jd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3905,7 +4257,8 @@ export default function AdminDashboard() {
     if (!jdIsActive) return employees;
     return employees.map((emp) => {
       const result = calculateSkillMatch(employeeMatchText(emp), jdText);
-      const score = Number(result.score) || 0;
+      const computed = Number(result.score) || 0;
+      const score = typeof emp.score_override === "number" ? emp.score_override : computed;
       return {
         ...emp,
         score,
@@ -3981,6 +4334,7 @@ export default function AdminDashboard() {
 
   const filteredEmployees = scoredEmployees
     .filter(emp => {
+      if (corpPoolListFilter === "shortlisted" && !emp.shortlisted) return false;
       if (!employeeSearch) return true;
       const term = employeeSearch.toLowerCase();
       return (
@@ -3990,12 +4344,35 @@ export default function AdminDashboard() {
       );
     })
     .sort((a, b) => {
+      if (Boolean(a.shortlisted) !== Boolean(b.shortlisted)) {
+        return a.shortlisted ? -1 : 1;
+      }
       const scoreDelta = (b.score || 0) - (a.score || 0);
       if (scoreDelta !== 0) return scoreDelta;
       const matchDelta = (b.matchingSkills?.length || 0) - (a.matchingSkills?.length || 0);
       if (matchDelta !== 0) return matchDelta;
       return String(a.full_name || "").localeCompare(String(b.full_name || ""));
     });
+
+  const shortlistedCount = scoredEmployees.filter((emp) => emp.shortlisted).length;
+  const qualifiedUnshortlistedIds = scoredEmployees
+    .filter((emp) => !emp.shortlisted && Number(emp.score) >= QUALIFIED_COVERAGE_PERCENT)
+    .map((emp) => emp.employee_id);
+  const jdIsSelectedForFit =
+    Boolean(selectedJdId) && selectedJdId !== "all" && Boolean(jdSavedText.trim());
+
+  const handleShortlistQualified = () => {
+    if (!qualifiedUnshortlistedIds.length) {
+      setActionError(
+        jdIsSelectedForFit
+          ? `No unshortlisted people at ${QUALIFIED_COVERAGE_PERCENT}%+ recruiter fit.`
+          : "Select a requirement first to shortlist by recruiter fit."
+      );
+      setTimeout(() => setActionError(null), 3000);
+      return;
+    }
+    handleBulkShortlistEmployees(true, qualifiedUnshortlistedIds);
+  };
 
   const bestMatch = scoredEmployees.length > 0
     ? scoredEmployees.reduce((best, current) => (current.score || 0) > (best.score || 0) ? current : best, scoredEmployees[0])
@@ -4300,26 +4677,21 @@ export default function AdminDashboard() {
                               <th className="p-3 w-20">BR ID</th>
                               <th className="p-3 w-1/4">Requirement / File</th>
                               <th className="p-3 w-1/4">Extracted Skills</th>
-                              <th className="p-3 w-32">Creator / RM</th>
-                              <th className="p-3 w-24">Created Date</th>
+                              <th className="p-3 w-40">Creator / RM</th>
+                              <th className="p-3 w-28">Created Date</th>
                               <th className="p-3 w-40 text-center">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-indigo-50/50 dark:divide-slate-800/50">
                             {visibleRequirementRows.map(({ jd: j, isDuplicate, ogJd }) => {
-                                let brNo = "N/A";
-                                let filename = j.fileName || "Pasted Job Description";
-                                if (filename.includes(" | ")) {
-                                  const parts = filename.split(" | ");
-                                  brNo = parts[0];
-                                  filename = parts[1];
-                                } else if (filename.match(/^\d+BR$/i)) {
-                                  brNo = filename;
-                                }
+                                const { brNo, filename } = requirementFileParts(j.fileName);
                                 const jobTitle = extractJobTitleFromJd(j.jdText, filename);
                                 const isActive = activeJdIdForHighlight === j.id;
                                 const isExpanded = expandedJdId === j.id;
                                 const skills = extractSkillsFromText(j.jdText);
+                                const createdDayKey = requirementCreatedDayKey(j.createdAt);
+                                const createdDateLabel = createdDayKey ? formatRequirementDayLabel(createdDayKey) : "—";
+                                const creatorEmail = String(j.rmEmail || "").trim() || "—";
 
                                 let ogBrNo = "";
                                 if (isDuplicate && ogJd) {
@@ -4366,30 +4738,13 @@ export default function AdminDashboard() {
                                         <div className="flex items-center gap-1.5">
                                           {isDuplicate && <span className="text-amber-550 dark:text-amber-400 font-black text-xs">↳</span>}
                                           {editingBrId === j.id ? (
-                                            <div className="flex items-center gap-1">
-                                              <input
-                                                type="text"
-                                                value={editingBrValue}
-                                                onChange={(e) => setEditingBrValue(e.target.value)}
-                                                className="w-20 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
-                                                placeholder="BR ID"
-                                                autoFocus
-                                              />
-                                              <button
-                                                onClick={() => handleUpdateBrId(j.id, j.jdText, j.fileName, editingBrValue, j.rmEmail)}
-                                                className="p-1 rounded text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
-                                                title="Save"
-                                              >
-                                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                              </button>
-                                              <button
-                                                onClick={() => setEditingBrId(null)}
-                                                className="p-1 rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                                                title="Cancel"
-                                              >
-                                                <X className="w-3.5 h-3.5" />
-                                              </button>
-                                            </div>
+                                            <InlineCellEditor
+                                              value={editingBrValue}
+                                              placeholder="BR ID"
+                                              className="w-20 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                              onSave={(next) => handleUpdateBrId(j.id, j.jdText, j.fileName, next, j.rmEmail)}
+                                              onCancel={() => setEditingBrId(null)}
+                                            />
                                           ) : (
                                             <div className="flex items-center gap-1 group">
                                               {brNo !== "N/A" ? (
@@ -4399,26 +4754,47 @@ export default function AdminDashboard() {
                                               ) : (
                                                 <span className="text-slate-400 italic">No BR ID</span>
                                               )}
-                                              {adminEmail === "admin@infinite.com" && (
-                                                <button
-                                                  onClick={() => {
-                                                    setEditingBrId(j.id);
-                                                    setEditingBrValue(brNo === "N/A" ? "" : brNo);
-                                                  }}
-                                                  className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                                                  title="Edit BR ID"
-                                                >
-                                                  <Edit2 className="w-3 h-3" />
-                                                </button>
-                                              )}
+                                              <button
+                                                onClick={() => {
+                                                  setEditingBrId(j.id);
+                                                  setEditingBrValue(brNo === "N/A" ? "" : brNo);
+                                                }}
+                                                className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                                title="Edit BR ID"
+                                              >
+                                                <Edit2 className="w-3 h-3" />
+                                              </button>
                                             </div>
                                           )}
                                         </div>
                                       </td>
                                       <td className={`p-3 ${isDuplicate ? "pl-6" : ""}`}>
-                                        <div className="font-bold text-slate-800 dark:text-slate-200 max-w-[220px] truncate" title={jobTitle}>
-                                          {jobTitle}
-                                        </div>
+                                        {editingTitleId === j.id ? (
+                                          <InlineCellEditor
+                                            value={editingTitleValue}
+                                            placeholder="Job title"
+                                            className="w-48 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                            onSave={(next) => handleUpdateJobTitle(j.id, j.jdText, j.fileName, next, j.rmEmail)}
+                                            onCancel={() => setEditingTitleId(null)}
+                                          />
+                                        ) : (
+                                          <div className="flex items-center gap-1 group max-w-[220px]">
+                                            <div className="font-bold text-slate-800 dark:text-slate-200 truncate" title={jobTitle}>
+                                              {jobTitle}
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setEditingTitleId(j.id);
+                                                setEditingTitleValue(jobTitle);
+                                              }}
+                                              className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0"
+                                              title="Edit title"
+                                            >
+                                              <Edit2 className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        )}
                                         <div className="text-[10px] text-slate-400 font-semibold max-w-[220px] truncate" title={filename}>
                                           {filename}
                                         </div>
@@ -4495,7 +4871,7 @@ export default function AdminDashboard() {
                                               type="text"
                                               value={editingRmEmail}
                                               onChange={(e) => setEditingRmEmail(e.target.value)}
-                                              className="w-24 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                              className="w-40 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
                                               placeholder="RM Email"
                                               autoFocus
                                             />
@@ -4516,15 +4892,15 @@ export default function AdminDashboard() {
                                           </div>
                                         ) : (
                                           <div className="flex items-center gap-1 group">
-                                            <span className="truncate max-w-[110px]" title={j.rmEmail}>
-                                              {j.rmEmail}
+                                            <span className="max-w-[160px] break-all font-semibold text-slate-700 dark:text-slate-200" title={creatorEmail}>
+                                              {creatorEmail}
                                             </span>
                                             <button
                                               onClick={() => {
                                                 setEditingJdId(j.id);
-                                                setEditingRmEmail(j.rmEmail || "admin@infinite.com");
+                                                setEditingRmEmail(j.rmEmail || "");
                                               }}
-                                              className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                              className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0"
                                               title="Edit Creator / RM"
                                             >
                                               <Edit2 className="w-3 h-3" />
@@ -4533,7 +4909,31 @@ export default function AdminDashboard() {
                                         )}
                                       </td>
                                       <td className="p-3 text-slate-500 font-medium whitespace-nowrap">
-                                        {new Date(j.createdAt).toLocaleDateString()}
+                                        {editingDateId === j.id ? (
+                                          <InlineCellEditor
+                                            type="date"
+                                            value={editingDateValue}
+                                            className="w-32 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                            onSave={(next) => handleUpdateCreatedDate(j.id, j.jdText, j.fileName, j.rmEmail, next)}
+                                            onCancel={() => setEditingDateId(null)}
+                                          />
+                                        ) : (
+                                          <div className="flex items-center gap-1 group">
+                                            <span title={j.createdAt ? new Date(j.createdAt).toLocaleString() : ""}>
+                                              {createdDateLabel}
+                                            </span>
+                                            <button
+                                              onClick={() => {
+                                                setEditingDateId(j.id);
+                                                setEditingDateValue(createdDayKey);
+                                              }}
+                                              className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                              title="Edit created date"
+                                            >
+                                              <Edit2 className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        )}
                                       </td>
                                       <td className="p-3 text-center">
                                         <div className="flex items-center justify-center gap-1.5">
@@ -4658,12 +5058,17 @@ export default function AdminDashboard() {
                             <span className="text-xl md:text-2xl font-black text-slate-400 block mt-1 leading-none">N/A</span>
                           )}
                         </div>
-                        <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
+                        <button
+                          type="button"
+                          onClick={() => setCorpPoolListFilter(corpPoolListFilter === "shortlisted" ? "all" : "shortlisted")}
+                          className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center hover:border-violet-300 dark:hover:border-violet-700 transition-colors"
+                          title="Show shortlisted people"
+                        >
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Shortlisted</span>
                           <span className="text-xl md:text-2xl font-black text-violet-600 dark:text-fuchsia-400">
-                            {scoredEmployees.filter(e => e.shortlisted).length}
+                            {shortlistedCount}
                           </span>
-                        </div>
+                        </button>
                         <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-border rounded-2xl shadow-sm text-center">
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">Avg Match Score</span>
                           <span className="text-xl md:text-2xl font-black text-primary">
@@ -4674,16 +5079,54 @@ export default function AdminDashboard() {
 
                       {/* Search and export controls */}
                       <div className="flex flex-col sm:flex-row gap-3 justify-between items-center shrink-0">
-                        <div className="w-full sm:w-72 relative">
-                          <input
-                            type="text"
-                            placeholder="Search Corp Pool..."
-                            value={employeeSearch}
-                            onChange={(e) => setEmployeeSearch(e.target.value)}
-                            className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
-                          />
+                        <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                          <div className="w-full sm:w-72 relative">
+                            <input
+                              type="text"
+                              placeholder="Search Corp Pool..."
+                              value={employeeSearch}
+                              onChange={(e) => setEmployeeSearch(e.target.value)}
+                              className="w-full rounded-xl border border-border bg-slate-50/50 dark:bg-slate-950 p-2.5 pl-3 text-xs font-semibold text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-200"
+                            />
+                          </div>
+                          <div className="flex rounded-xl border border-border overflow-hidden shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setCorpPoolListFilter("all")}
+                              className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider ${
+                                corpPoolListFilter === "all"
+                                  ? "bg-indigo-600 text-white"
+                                  : "bg-slate-50 dark:bg-slate-950 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900"
+                              }`}
+                            >
+                              All ({scoredEmployees.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCorpPoolListFilter("shortlisted")}
+                              className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-l border-border ${
+                                corpPoolListFilter === "shortlisted"
+                                  ? "bg-violet-600 text-white"
+                                  : "bg-slate-50 dark:bg-slate-950 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900"
+                              }`}
+                            >
+                              Shortlisted ({shortlistedCount})
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex gap-2 w-full sm:w-auto">
+                        <div className="flex gap-2 w-full sm:w-auto flex-wrap justify-end">
+                          {jdIsSelectedForFit && (
+                            <Button
+                              size="sm"
+                              disabled={qualifiedUnshortlistedIds.length === 0}
+                              onClick={handleShortlistQualified}
+                              className="flex-1 sm:flex-none rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 font-bold text-xs"
+                              title={`Shortlist everyone at ${QUALIFIED_COVERAGE_PERCENT}%+ recruiter fit for the selected requirement`}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Shortlist qualified ({qualifiedUnshortlistedIds.length})
+                            </Button>
+                          )}
                           {employees.filter(e => e.shortlisted).length > 0 && (
                             <Button
                               onClick={handleDispatchEmployeeMails}
@@ -4725,7 +5168,7 @@ export default function AdminDashboard() {
                           <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
                             {selectedEmployeeIds.length} employee{selectedEmployeeIds.length > 1 ? "s" : ""} selected for bulk actions
                           </span>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
                             <Button
                               variant="outline"
                               size="sm"
@@ -4783,6 +5226,7 @@ export default function AdminDashboard() {
                                 <th className="p-3">Department</th>
                                 <th className="p-3">Skills</th>
                                 <th className="p-3">Score</th>
+                                <th className="p-3 text-center">Shortlist</th>
                                 <th className="p-3 text-center">Actions</th>
                               </tr>
                             </thead>
@@ -4791,7 +5235,9 @@ export default function AdminDashboard() {
                                 const skillChips = personSkillChips(emp);
                                 return (
                                   <tr key={emp.employee_id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors duration-150 ${
-                                    selectedEmployeeIds.includes(emp.employee_id) ? "bg-indigo-50/20 dark:bg-indigo-950/20" : ""
+                                    emp.shortlisted
+                                      ? "bg-violet-50/70 dark:bg-violet-950/25"
+                                      : selectedEmployeeIds.includes(emp.employee_id) ? "bg-indigo-50/20 dark:bg-indigo-950/20" : ""
                                   }`}>
                                     <td className="p-3 text-center">
                                       <input
@@ -4802,43 +5248,192 @@ export default function AdminDashboard() {
                                       />
                                     </td>
                                     <td className="p-3 font-semibold">
-                                      <div>{emp.full_name}</div>
-                                      <div className="text-[10px] text-slate-400 font-medium">{emp.designation}</div>
+                                      {editingEmployeeKey === `${emp.employee_id}:full_name` ? (
+                                        <InlineCellEditor
+                                          value={editingEmployeeValue}
+                                          className="w-36 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                          onSave={(next) => handleUpdateCorpPoolEmployee(emp.employee_id, "full_name", next)}
+                                          onCancel={() => setEditingEmployeeKey(null)}
+                                        />
+                                      ) : (
+                                        <div className="flex items-center gap-1 group">
+                                          <div>{emp.full_name}</div>
+                                          {emp.shortlisted && (
+                                            <span className="text-[9px] font-black uppercase tracking-wider text-violet-700 dark:text-violet-300 bg-violet-100 dark:bg-violet-950/60 px-1.5 py-0.5 rounded-md">
+                                              Shortlisted
+                                            </span>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingEmployeeKey(`${emp.employee_id}:full_name`);
+                                              setEditingEmployeeValue(emp.full_name || "");
+                                            }}
+                                            className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            title="Edit name"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
+                                      {editingEmployeeKey === `${emp.employee_id}:designation` ? (
+                                        <InlineCellEditor
+                                          value={editingEmployeeValue}
+                                          className="w-36 mt-1 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                          onSave={(next) => handleUpdateCorpPoolEmployee(emp.employee_id, "designation", next)}
+                                          onCancel={() => setEditingEmployeeKey(null)}
+                                        />
+                                      ) : (
+                                        <div className="flex items-center gap-1 group">
+                                          <div className="text-[10px] text-slate-400 font-medium">{emp.designation}</div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingEmployeeKey(`${emp.employee_id}:designation`);
+                                              setEditingEmployeeValue(emp.designation || "");
+                                            }}
+                                            className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            title="Edit designation"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
                                     </td>
-                                    <td className="p-3 font-bold text-slate-500">{emp.employee_id}</td>
-                                    <td className="p-3 text-muted-foreground font-semibold">{emp.department}</td>
-                                    <td className="p-3">
-                                      <div className="flex flex-wrap gap-1 max-w-[220px]">
-                                        {skillChips.length > 0 ? (
-                                          skillChips.slice(0, 4).map((s: string, i: number) => (
-                                            <Badge key={`${s}-${i}`} className="bg-slate-100 dark:bg-slate-800 border-0 text-slate-700 dark:text-slate-200 text-[9px] px-1.5 py-0">
-                                              {s}
-                                            </Badge>
-                                          ))
-                                        ) : (
-                                          <span className="text-slate-400 text-[10px]">No skills listed</span>
-                                        )}
-                                        {skillChips.length > 4 && (
-                                          <span className="text-[9px] text-slate-400 font-bold">+{skillChips.length - 4} more</span>
-                                        )}
-                                      </div>
+                                    <td className="p-3 font-bold text-slate-500">
+                                      {editingEmployeeKey === `${emp.employee_id}:employee_id` ? (
+                                        <InlineCellEditor
+                                          value={editingEmployeeValue}
+                                          className="w-24 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                          onSave={(next) => handleUpdateCorpPoolEmployee(emp.employee_id, "employee_id", next)}
+                                          onCancel={() => setEditingEmployeeKey(null)}
+                                        />
+                                      ) : (
+                                        <div className="flex items-center gap-1 group">
+                                          <span>{emp.employee_id}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingEmployeeKey(`${emp.employee_id}:employee_id`);
+                                              setEditingEmployeeValue(emp.employee_id || "");
+                                            }}
+                                            className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            title="Edit employee ID"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-muted-foreground font-semibold">
+                                      {editingEmployeeKey === `${emp.employee_id}:department` ? (
+                                        <InlineCellEditor
+                                          value={editingEmployeeValue}
+                                          className="w-28 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                          onSave={(next) => handleUpdateCorpPoolEmployee(emp.employee_id, "department", next)}
+                                          onCancel={() => setEditingEmployeeKey(null)}
+                                        />
+                                      ) : (
+                                        <div className="flex items-center gap-1 group">
+                                          <span>{emp.department}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingEmployeeKey(`${emp.employee_id}:department`);
+                                              setEditingEmployeeValue(emp.department || "");
+                                            }}
+                                            className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            title="Edit department"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
                                     </td>
                                     <td className="p-3">
-                                      <span
-                                        className={`font-black text-sm ${
-                                          Number(emp.score) >= QUALIFIED_COVERAGE_PERCENT ? 'text-emerald-600 dark:text-emerald-400' : (Number(emp.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
-                                        }`}
-                                        title={emp.matchRationale || (emp.requiredCount
-                                            ? `${emp.matchedCount}/${emp.requiredCount} required JD skills`
-                                            : undefined)}
-                                      >
-                                        {emp.score}%
-                                      </span>
+                                      {editingEmployeeKey === `${emp.employee_id}:skills` ? (
+                                        <InlineCellEditor
+                                          value={editingEmployeeValue}
+                                          className="w-48 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                          onSave={(next) => handleUpdateCorpPoolEmployee(emp.employee_id, "skills", next)}
+                                          onCancel={() => setEditingEmployeeKey(null)}
+                                        />
+                                      ) : (
+                                        <div className="flex items-center gap-1 group">
+                                          <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                            {skillChips.length > 0 ? (
+                                              skillChips.slice(0, 4).map((s: string, i: number) => (
+                                                <Badge key={`${s}-${i}`} className="bg-slate-100 dark:bg-slate-800 border-0 text-slate-700 dark:text-slate-200 text-[9px] px-1.5 py-0">
+                                                  {s}
+                                                </Badge>
+                                              ))
+                                            ) : (
+                                              <span className="text-slate-400 text-[10px]">No skills listed</span>
+                                            )}
+                                            {skillChips.length > 4 && (
+                                              <span className="text-[9px] text-slate-400 font-bold">+{skillChips.length - 4} more</span>
+                                            )}
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingEmployeeKey(`${emp.employee_id}:skills`);
+                                              setEditingEmployeeValue(emp.skills || skillChips.join(", "));
+                                            }}
+                                            className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0"
+                                            title="Edit skills"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-3">
+                                      {editingEmployeeKey === `${emp.employee_id}:score` ? (
+                                        <InlineCellEditor
+                                          value={editingEmployeeValue}
+                                          className="w-16 p-1 text-[10px] font-bold rounded border border-indigo-200 bg-white text-slate-800 outline-none focus:ring-1 focus:ring-indigo-400 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200"
+                                          onSave={(next) => handleUpdateCorpPoolEmployee(emp.employee_id, "score", next)}
+                                          onCancel={() => setEditingEmployeeKey(null)}
+                                        />
+                                      ) : (
+                                        <div className="flex items-center gap-1 group">
+                                          <span
+                                            className={`font-black text-sm ${
+                                              Number(emp.score) >= QUALIFIED_COVERAGE_PERCENT ? 'text-emerald-600 dark:text-emerald-400' : (Number(emp.score) >= 40 ? 'text-amber-500' : 'text-rose-500')
+                                            }`}
+                                            title={emp.matchRationale || (emp.requiredCount
+                                                ? `${emp.matchedCount}/${emp.requiredCount} required JD skills`
+                                                : undefined)}
+                                          >
+                                            {emp.score}%
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingEmployeeKey(`${emp.employee_id}:score`);
+                                              setEditingEmployeeValue(String(emp.score ?? ""));
+                                            }}
+                                            className="p-0.5 rounded text-slate-400 hover:text-indigo-650 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            title="Edit score"
+                                          >
+                                            <Edit2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      )}
                                       {emp.matchDecision && (
                                         <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mt-0.5">
                                           {emp.matchDecision}
                                         </div>
                                       )}
+                                    </td>
+                                    <td className="p-3">
+                                      <div className="flex items-center justify-center">
+                                        <ShortlistToggle
+                                          shortlisted={Boolean(emp.shortlisted)}
+                                          onClick={() => handleShortlistEmployee(emp.employee_id)}
+                                        />
+                                      </div>
                                     </td>
                                     <td className="p-3">
                                       <div className="flex items-center justify-center gap-1.5">
@@ -4849,18 +5444,6 @@ export default function AdminDashboard() {
                                           className="h-7 text-[10px] font-bold text-muted-foreground hover:bg-slate-100"
                                         >
                                           View
-                                        </Button>
-                                        <Button
-                                          variant={emp.shortlisted ? "default" : "outline"}
-                                          size="sm"
-                                          onClick={() => handleShortlistEmployee(emp.employee_id)}
-                                          className={`h-7 text-[10px] font-bold ${
-                                            emp.shortlisted
-                                              ? 'bg-violet-600 hover:bg-violet-700 text-white'
-                                              : 'border-violet-200 text-violet-700 hover:bg-violet-50'
-                                          }`}
-                                        >
-                                          {emp.shortlisted ? "Deselect" : "Shortlist"}
                                         </Button>
                                         <Button
                                           variant="destructive"
@@ -4881,6 +5464,15 @@ export default function AdminDashboard() {
                                   </tr>
                                 );
                               })}
+                              {filteredEmployees.length === 0 && (
+                                <tr>
+                                  <td colSpan={8} className="text-center py-12 text-slate-400 italic">
+                                    {corpPoolListFilter === "shortlisted"
+                                      ? "No shortlisted people yet. Click Shortlist on a row, or Shortlist qualified after selecting a requirement."
+                                      : "No people in Corp Pool match this search."}
+                                  </td>
+                                </tr>
+                              )}
                             </tbody>
                           </table>
                         </div>
@@ -7533,20 +8125,11 @@ export default function AdminDashboard() {
                 >
                   Close
                 </Button>
-                <Button
-                  type="button"
-                  onClick={async () => {
-                    await handleShortlistEmployee(activeEmployee.employee_id);
-                    setActiveEmployee((prev: any) => prev ? { ...prev, shortlisted: !prev.shortlisted } : null);
-                  }}
-                  className={`rounded-xl px-5 font-bold text-xs ${
-                    activeEmployee.shortlisted
-                      ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-500/20'
-                      : 'bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-indigo-500/25'
-                  }`}
-                >
-                  {activeEmployee.shortlisted ? "Deselect" : "Shortlist"}
-                </Button>
+                <ShortlistToggle
+                  shortlisted={Boolean(activeEmployee.shortlisted)}
+                  compact={false}
+                  onClick={() => handleShortlistEmployee(activeEmployee.employee_id)}
+                />
               </div>
             </div>
           </Card>

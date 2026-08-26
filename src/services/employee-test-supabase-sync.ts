@@ -166,13 +166,21 @@ export async function syncTestToSupabase(
   employeeUuid: string,
   questions?: LocalTestQuestion[]
 ): Promise<void> {
-  const row = buildTestRow(test, employeeUuid);
-  const { error } = await supabase.from("tests").upsert(row, { onConflict: "id" });
-  if (error) throw error;
+  const { preserveCompletedTestOnUpsert, snapshotEmployeeTestBackup } = await import(
+    "@/services/employee-test-backup"
+  );
+  const writeMode = await preserveCompletedTestOnUpsert(test);
+  if (writeMode === "write") {
+    const row = buildTestRow(test, employeeUuid);
+    const { error } = await supabase.from("tests").upsert(row, { onConflict: "id" });
+    if (error) throw error;
+  }
 
   if (questions && questions.length > 0) {
     await syncQuestionsToSupabase(questions);
   }
+
+  void snapshotEmployeeTestBackup(test.id, test.status === "completed" ? "submit" : "upsert");
 }
 
 export async function syncProductTestBundle(

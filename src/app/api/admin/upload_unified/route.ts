@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
     const filename = mapping.docCategory === "Corp Pool"
       ? sanitizeCorpPoolFileName(file.name)
       : file.name;
+    const actorEmail = String(formData.get("actorEmail") || formData.get("adminEmail") || "").trim().toLowerCase();
 
     if (category === 'interview') {
       const csvPath = join(getUploadsRoot(), "candidate_interview_data.csv");
@@ -93,10 +94,10 @@ export async function POST(request: NextRequest) {
     if (mapping.refresh === 'requirements') {
       refreshResult = await refreshRequirements(
         category === "br"
-          ? { incomingBrFiles: [filename] }
+          ? { incomingBrFiles: [filename], actorEmail }
           : category === "jd"
-            ? { incomingJdFiles: [filename] }
-            : undefined
+            ? { incomingJdFiles: [filename], actorEmail }
+            : { actorEmail }
       );
       if (category === "jd" && Number(refreshResult.convertedJDs || 0) === 0) {
         throw new Error(

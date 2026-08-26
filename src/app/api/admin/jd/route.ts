@@ -33,6 +33,18 @@ const getJdPath = () => {
   return join(getUploadsRoot(), "job_description.txt");
 };
 
+function parseRequirementCreatedAt(raw: string, fallback: string): string {
+  const value = String(raw || "").trim();
+  if (!value) return fallback;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0).toISOString();
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return parsed.toISOString();
+}
+
 // Migrate old job_description.txt to JSON if it exists and JSON doesn't
 async function ensureJdsJson() {
   const jsonPath = getJdsJsonPath();
@@ -199,6 +211,7 @@ export async function POST(request: NextRequest) {
     let fileName = "Pasted Job Description";
     let jdId = "";
     let isUpdate = false;
+    let requestedCreatedAt = "";
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
@@ -228,17 +241,23 @@ export async function POST(request: NextRequest) {
       jdText = body.jd;
       rmEmail = body.rmEmail || "admin@infinite.com";
       jdId = body.jdId;
+      if (typeof body.createdAt === "string") {
+        requestedCreatedAt = body.createdAt.trim();
+      }
       if (jdId) {
         isUpdate = true;
         // Try getting existing file name from DB
         try {
           const { data: existing } = await supabase
             .from('job_descriptions')
-            .select('file_name')
+            .select('file_name, created_at, rm_email')
             .eq('id', jdId)
             .maybeSingle();
           if (existing?.file_name) {
             fileName = existing.file_name;
+          }
+          if (!requestedCreatedAt && existing?.created_at) {
+            requestedCreatedAt = existing.created_at;
           }
         } catch (dbErr) {}
         
@@ -249,6 +268,9 @@ export async function POST(request: NextRequest) {
             const existingLocal = localJds.find((j: any) => j.id === jdId);
             if (existingLocal?.fileName) {
               fileName = existingLocal.fileName;
+            }
+            if (!requestedCreatedAt && existingLocal?.createdAt) {
+              requestedCreatedAt = existingLocal.createdAt;
             }
           } catch (localErr) {}
         }
@@ -270,7 +292,7 @@ export async function POST(request: NextRequest) {
     }
 
     const id = jdId || crypto.randomUUID();
-    const createdAt = new Date().toISOString();
+    const createdAt = parseRequirementCreatedAt(requestedCreatedAt, new Date().toISOString());
 
     // 1. Persist to Supabase Database
     const { error: dbError } = await supabase.from('job_descriptions').upsert({
@@ -291,7 +313,7 @@ export async function POST(request: NextRequest) {
       if (isUpdate) {
         localJds = localJds.map((j: any) => 
           j.id === id 
-            ? { ...j, jdText: jdText.trim(), rmEmail: rmEmail.toLowerCase().trim(), fileName } 
+            ? { ...j, jdText: jdText.trim(), rmEmail: rmEmail.toLowerCase().trim(), fileName, createdAt } 
             : j
         );
       } else {

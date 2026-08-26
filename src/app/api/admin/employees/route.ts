@@ -191,7 +191,7 @@ export async function GET(request: NextRequest) {
         const matchResult = calculateSkillMatch(employeeMatchText(emp), jdText);
         return {
           ...emp,
-          score: matchResult.score,
+          score: typeof emp.score_override === "number" ? emp.score_override : matchResult.score,
           matchingSkills: matchResult.matchingSkills,
         };
       });
@@ -628,10 +628,100 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let employeeId: any = null;
+    let employeeId: any = null;
+    try {
+      const body = await request.json().catch(() => ({}));
+      const changeList = Array.isArray(body.changes)
+        ? body.changes
+            .map((row: any) => ({
+              employeeId: String(row?.employeeId || "").trim(),
+              shortlisted: typeof row?.shortlisted === "boolean" ? row.shortlisted : null,
+            }))
+            .filter((row: { employeeId: string; shortlisted: boolean | null }) => row.employeeId && row.shortlisted !== null)
+        : [];
+      const requestedIds = Array.isArray(body.employeeIds)
+        ? body.employeeIds.map((id: unknown) => String(id || "").trim()).filter(Boolean)
+        : [];
+      employeeId = body.employeeId;
+      if (employeeId) requestedIds.push(String(employeeId).trim());
+      for (const row of changeList) requestedIds.push(row.employeeId);
+      const uniqueIds = Array.from(new Set(requestedIds.filter(Boolean)));
+      if (uniqueIds.length === 0) {
+        return NextResponse.json({ error: "Employee ID is required" }, { status: 400 });
+      }
+
+      const jsonPath = getEmployeesJsonPath();
+      let employees: EmployeeRecord[] = [];
+      try {
+        const persisted = await readPersistedJson("employees.json");
+        const raw = persisted || (await readFile(jsonPath, "utf8"));
+        const parsed = JSON.parse(raw) as EmployeeRecord[];
+        const seen = new Set<string>();
+        employees = parsed.filter(emp => {
+          if (!emp.employee_id) return true;
+          if (seen.has(emp.employee_id)) return false;
+          seen.add(emp.employee_id);
+          return true;
+        });
+      } catch (e) {
+        return NextResponse.json({ error: "Employees not loaded" }, { status: 404 });
+      }
+
+      const setTo = typeof body.shortlisted === "boolean" ? body.shortlisted : null;
+      const changeMap = new Map(changeList.map((row: { employeeId: string; shortlisted: boolean }) => [row.employeeId, row.shortlisted]));
+      const updated: EmployeeRecord[] = [];
+      for (const id of uniqueIds) {
+        const matched = employees.find(e => e.employee_id === id);
+        if (!matched) continue;
+        if (changeMap.has(id)) {
+          matched.shortlisted = Boolean(changeMap.get(id));
+        } else {
+          matched.shortlisted = setTo === null ? !matched.shortlisted : setTo;
+        }
+        updated.push(matched);
+      }
+      if (updated.length === 0) {
+        return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+      }
+
+      const serialized = JSON.stringify(employees, null, 2);
+      await writeFile(jsonPath, serialized, "utf8");
+      await writePersistedJson("employees.json", serialized).catch((err) => {
+        console.warn("Failed to persist employees.json after shortlist:", err);
+      });
+      cacheStore.invalidate("employees");
+
+      await writeLog(
+        'employee',
+        uniqueIds.length > 1 ? 'SHORTLIST_EMPLOYEES_BULK' : 'SHORTLIST_EMPLOYEE',
+        'success',
+        uniqueIds.length > 1
+          ? `Set shortlist=${setTo} for ${updated.length} employee(s)`
+          : `Toggled shortlist for employee ID ${uniqueIds[0]}: shortlisted=${updated[0].shortlisted}`
+      );
+
+      return NextResponse.json({
+        success: true,
+        employee: updated[0],
+        employees: updated,
+        updatedCount: updated.length,
+      });
+  } catch (error: any) {
+    await writeLog('employee', 'SHORTLIST_EMPLOYEE_FAILED', 'failed', `Failed to toggle shortlist for employee ID ${employeeId || 'unknown'}: ${error.message}`);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  if (!authenticateAdminRequest(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let employeeId: string = "";
   try {
     const body = await request.json().catch(() => ({}));
-    employeeId = body.employeeId;
+    employeeId = String(body.employeeId || "").trim();
+    const updates = (body.updates && typeof body.updates === "object") ? body.updates : {};
     if (!employeeId) {
       return NextResponse.json({ error: "Employee ID is required" }, { status: 400 });
     }
@@ -641,37 +731,79 @@ export async function POST(request: NextRequest) {
     try {
       const persisted = await readPersistedJson("employees.json");
       const raw = persisted || (await readFile(jsonPath, "utf8"));
-      const parsed = JSON.parse(raw) as EmployeeRecord[];
-      const seen = new Set<string>();
-      employees = parsed.filter(emp => {
-        if (!emp.employee_id) return true;
-        if (seen.has(emp.employee_id)) return false;
-        seen.add(emp.employee_id);
-        return true;
-      });
-    } catch (e) {
+      employees = JSON.parse(raw) as EmployeeRecord[];
+    } catch {
+      return NextResponse.json({ error: "Employees not loaded" }, { status: 404 });
+    }
+    if (!Array.isArray(employees)) {
       return NextResponse.json({ error: "Employees not loaded" }, { status: 404 });
     }
 
-    const matched = employees.find(e => e.employee_id === employeeId);
+    const matched = employees.find((emp) => emp.employee_id === employeeId);
     if (!matched) {
       return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
 
-    // Toggle shortlisted state
-    matched.shortlisted = !matched.shortlisted;
+    const nextId = String(updates.employee_id ?? matched.employee_id).trim();
+    if (!nextId) {
+      return NextResponse.json({ error: "Employee ID cannot be empty." }, { status: 400 });
+    }
+    if (nextId !== employeeId && employees.some((emp) => emp.employee_id === nextId)) {
+      return NextResponse.json({ error: `Employee ID ${nextId} already exists.` }, { status: 409 });
+    }
+
+    const stringFields: Array<keyof EmployeeRecord> = [
+      "full_name",
+      "email",
+      "department",
+      "skills",
+      "designation",
+      "grade",
+      "status",
+      "product",
+    ];
+    for (const field of stringFields) {
+      if (updates[field] !== undefined) {
+        (matched as any)[field] = String(updates[field] ?? "");
+      }
+    }
+
+    if (updates.score !== undefined || updates.score_override !== undefined) {
+      const rawScore = updates.score_override !== undefined ? updates.score_override : updates.score;
+      const parsed = Number(rawScore);
+      if (!Number.isFinite(parsed)) {
+        return NextResponse.json({ error: "Score must be a number." }, { status: 400 });
+      }
+      const clamped = Math.max(0, Math.min(100, Math.round(parsed)));
+      matched.score = clamped;
+      matched.score_override = clamped;
+    }
+
+    matched.employee_id = nextId;
+    matched.manually_edited = true;
+
     const serialized = JSON.stringify(employees, null, 2);
     await writeFile(jsonPath, serialized, "utf8");
     await writePersistedJson("employees.json", serialized).catch((err) => {
-      console.warn("Failed to persist employees.json after shortlist:", err);
+      console.warn("Failed to persist employees.json after Corp Pool edit:", err);
     });
     cacheStore.invalidate("employees");
 
-    await writeLog('employee', 'SHORTLIST_EMPLOYEE', 'success', `Toggled shortlist for employee ID ${employeeId}: shortlisted=${matched.shortlisted}`);
+    await writeLog(
+      "employee",
+      "UPDATE_CORP_POOL_EMPLOYEE",
+      "success",
+      `Updated Corp Pool employee ${employeeId}${nextId !== employeeId ? ` -> ${nextId}` : ""}`
+    );
 
     return NextResponse.json({ success: true, employee: matched });
   } catch (error: any) {
-    await writeLog('employee', 'SHORTLIST_EMPLOYEE_FAILED', 'failed', `Failed to toggle shortlist for employee ID ${employeeId || 'unknown'}: ${error.message}`);
+    await writeLog(
+      "employee",
+      "UPDATE_CORP_POOL_EMPLOYEE_FAILED",
+      "failed",
+      `Failed to update Corp Pool employee ${employeeId || "unknown"}: ${error.message}`
+    );
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

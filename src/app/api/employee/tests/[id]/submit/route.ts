@@ -255,6 +255,13 @@ export async function POST(
 
     cacheStore.invalidate("employees");
 
+    try {
+      const { snapshotEmployeeTestBackup } = await import("@/services/employee-test-backup");
+      await snapshotEmployeeTestBackup(id, "submit");
+    } catch (backupErr) {
+      console.warn("Failed to backup submitted test:", backupErr);
+    }
+
     return NextResponse.json({
       success: true,
       testId: id,

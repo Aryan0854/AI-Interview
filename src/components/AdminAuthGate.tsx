@@ -195,15 +195,15 @@ export default function AdminAuthGate({ children }: { children: React.ReactNode 
       setCountdown(30);
       clearTimeout(idleTimer);
       
-      // Start 3 minute idle timeout (180,000 ms)
+      // Start 20 minute idle timeout (1,200,000 ms)
       idleTimer = setTimeout(() => {
         setIsIdle(true);
-      }, 180000);
+      }, 20 * 60 * 1000);
     };
 
     resetTimerRef.current = resetTimer;
 
-    const events = ["mousemove", "keydown", "click", "scroll"];
+    const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
     events.forEach(event => {
       window.addEventListener(event, resetTimer);
     });

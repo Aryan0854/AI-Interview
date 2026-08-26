@@ -1,4 +1,4 @@
-import { join } from "path";
+import { dirname, join } from "path";
 import fs from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { supabaseServer } from "@/lib/db";
@@ -89,4 +89,50 @@ export async function writePersistedJson(filename: string, content: string): Pro
       console.warn(`Supabase write failed for ${filename}:`, e);
     }
   }
+}
+
+/** Nested JSON backups (employee tests). History files are never deleted. */
+export async function writePersistedBackup(relativePath: string, content: string): Promise<void> {
+  const safePath = String(relativePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!safePath || safePath.includes("..")) return;
+
+  await ensureRuntimeUploadsDir();
+  const runtimePath = join(getRuntimeUploadsRoot(), ...safePath.split("/"));
+  await mkdir(dirname(runtimePath), { recursive: true });
+  await writeFile(runtimePath, content, "utf8");
+
+  if (isCloudDeployment()) {
+    try {
+      await ensureAppDataBucket();
+      await supabaseServer.storage.from(APP_DATA_BUCKET).upload(safePath, content, {
+        contentType: "application/json",
+        upsert: true,
+      });
+    } catch (e) {
+      console.warn(`Supabase backup write failed for ${safePath}:`, e);
+    }
+  }
+}
+
+export async function readPersistedBackup(relativePath: string): Promise<string | null> {
+  const safePath = String(relativePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!safePath || safePath.includes("..")) return null;
+
+  if (isCloudDeployment()) {
+    try {
+      await ensureAppDataBucket();
+      const { data, error } = await supabaseServer.storage.from(APP_DATA_BUCKET).download(safePath);
+      if (!error && data) return await data.text();
+    } catch (e) {
+      console.warn(`Supabase backup read failed for ${safePath}:`, e);
+    }
+  }
+
+  try {
+    const runtimePath = join(getRuntimeUploadsRoot(), ...safePath.split("/"));
+    if (fs.existsSync(runtimePath)) return await readFile(runtimePath, "utf8");
+  } catch {
+    // fall through
+  }
+  return null;
 }

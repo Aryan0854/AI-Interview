@@ -210,10 +210,20 @@ export class LocalTestsDb {
   }
 
   private async syncTestToSupabaseRow(test: LocalTest): Promise<void> {
+    const { preserveCompletedTestOnUpsert, snapshotEmployeeTestBackup } = await import(
+      "@/services/employee-test-backup"
+    );
     const employeeUuid = await resolveEmployeeUuid(test.employee_id);
-    const row = buildTestRow(test, employeeUuid);
-    const { error } = await supabase.from("tests").upsert(row, { onConflict: "id" });
-    if (error) throw error;
+    const writeMode = await preserveCompletedTestOnUpsert(test);
+    if (writeMode === "write") {
+      const row = buildTestRow(test, employeeUuid);
+      const { error } = await supabase.from("tests").upsert(row, { onConflict: "id" });
+      if (error) throw error;
+    }
+    void snapshotEmployeeTestBackup(
+      test.id,
+      test.status === "completed" ? "submit" : "upsert"
+    );
   }
   static scoreFromAttempts(
     attempts: LocalTestAttempt[],

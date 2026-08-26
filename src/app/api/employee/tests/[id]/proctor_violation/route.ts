@@ -64,6 +64,13 @@ export async function POST(
       console.warn("Failed to sync proctoring to Supabase:", syncErr);
     }
 
+    try {
+      const { snapshotEmployeeTestBackup } = await import("@/services/employee-test-backup");
+      await snapshotEmployeeTestBackup(testId, "proctor");
+    } catch (backupErr) {
+      console.warn("Failed to backup proctoring snapshot:", backupErr);
+    }
+
     const shouldAutoSubmit =
       proctoring.autoSubmitted &&
       !existing.autoSubmitted &&

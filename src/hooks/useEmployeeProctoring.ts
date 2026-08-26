@@ -409,6 +409,73 @@ export function useEmployeeProctoring(options: {
     };
   }, [phase, camStream, mediaRecorderRef, triggerProctorWarning, intentionalRecorderStopRef]);
 
+  // Camera on but no face (privacy slider / covered lens / left frame)
+  useEffect(() => {
+    if (phase !== "running" || !camStream) return;
+
+    let missingSince: number | null = null;
+    let canvas: HTMLCanvasElement | null = null;
+    const FaceDetectorCtor = (window as Window & {
+      FaceDetector?: new (opts?: { fastMode?: boolean; maxDetectedFaces?: number }) => {
+        detect: (image: CanvasImageSource) => Promise<Array<unknown>>;
+      };
+    }).FaceDetector;
+    let detector: InstanceType<NonNullable<typeof FaceDetectorCtor>> | null = null;
+    if (typeof FaceDetectorCtor === "function") {
+      try {
+        detector = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 2 });
+      } catch {
+        detector = null;
+      }
+    }
+
+    const sampleIsBlankOrNoFace = async (): Promise<boolean> => {
+      const video = videoRef.current;
+      if (!video || video.readyState < 2) return false;
+      if (!canvas) canvas = document.createElement("canvas");
+      canvas.width = 80;
+      canvas.height = 60;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return false;
+      ctx.drawImage(video, 0, 0, 80, 60);
+      const pixels = ctx.getImageData(0, 0, 80, 60).data;
+      let sum = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        sum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+      }
+      const mean = sum / (pixels.length / 4);
+      if (mean < 16) return true;
+      if (!detector) return false;
+      try {
+        const faces = await detector.detect(video);
+        return faces.length === 0;
+      } catch {
+        return mean < 22;
+      }
+    };
+
+    const id = setInterval(() => {
+      void (async () => {
+        const missing = await sampleIsBlankOrNoFace();
+        const now = Date.now();
+        if (missing) {
+          if (missingSince == null) missingSince = now;
+          else if (now - missingSince >= 3000) {
+            triggerProctorWarning(
+              "Face Missing",
+              "Camera is on but no face is visible (covered lens, privacy slider, or left frame)"
+            );
+            missingSince = now;
+          }
+        } else {
+          missingSince = null;
+        }
+      })();
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [phase, camStream, triggerProctorWarning, videoRef]);
+
   // ── Face + gaze tracking (clmtrackr) + multi-face (FaceDetector) ─
   useEffect(() => {
     if (phase !== "running" || !camStream) return;

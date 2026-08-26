@@ -973,9 +973,9 @@ export default function TestRunnerClient({ testId }: { testId: string }) {
           </div>
         </div>
       )}
-      {/* Floating webcam proctoring box */}
+      {/* Floating webcam proctoring box — stays visible so face-in-frame can be checked */}
       {phase === "running" && (
-        <div className="fixed bottom-6 right-6 w-44 h-32 rounded-2xl overflow-hidden border-2 border-indigo-500 shadow-xl bg-slate-950 z-50">
+        <div className="fixed bottom-6 right-6 w-44 h-32 rounded-2xl overflow-hidden border-2 border-indigo-500 shadow-xl bg-slate-950 z-50 pointer-events-none">
           <video
             ref={videoRef}
             muted

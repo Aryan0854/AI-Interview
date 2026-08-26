@@ -19,10 +19,11 @@ export async function POST(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const type = searchParams.get('type');
   const activeJdId = searchParams.get('activeJdId') || undefined;
+  const actorEmail = (searchParams.get('email') || "").trim().toLowerCase();
 
   try {
     if (type === 'requirements') {
-      const res = await refreshRequirements();
+      const res = await refreshRequirements({ actorEmail });
       return NextResponse.json({ ...res, success: true });
     } else if (type === 'sync-selected') {
       const res = await syncSelectedRequirementToMaster(activeJdId || "");

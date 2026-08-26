@@ -48,6 +48,10 @@ export interface EmployeeRecord {
   score: number;
   matchingSkills: string[];
   source_file?: string;
+  /** Admin-set match score; wins over JD auto-match until cleared. */
+  score_override?: number | null;
+  /** When true, a later Corp Pool scan keeps these edited profile fields. */
+  manually_edited?: boolean;
 }
 
 /**
@@ -467,6 +471,20 @@ function isJdDocumentRequirementName(name: string): boolean {
   return JD_DOCUMENT_EXT.test(String(name || ""));
 }
 
+function isRealRmEmail(value?: string | null): boolean {
+  const email = String(value || "").trim().toLowerCase();
+  return email.includes("@") && email !== "admin@infinite.com";
+}
+
+function preferRmEmail(existing?: string | null, incoming?: string | null, actor?: string | null, preferActor = false): string {
+  const normalize = (value?: string | null) => String(value || "").trim().toLowerCase();
+  if (!preferActor && isRealRmEmail(existing)) return normalize(existing);
+  if (isRealRmEmail(incoming)) return normalize(incoming);
+  if (isRealRmEmail(actor) && (preferActor || !normalize(existing))) return normalize(actor);
+  if (isRealRmEmail(existing)) return normalize(existing);
+  return normalize(existing) || normalize(incoming) || "admin@infinite.com";
+}
+
 function isMasterExcelRequirementName(name: string): boolean {
   const fileName = String(name || "");
   if (isJdDocumentRequirementName(fileName)) return false;
@@ -854,7 +872,8 @@ async function persistMasterRequirements(
   workbook: ExcelJS.Workbook,
   filename: string,
   localJds: any[],
-  keepIds: Set<string> = new Set()
+  keepIds: Set<string> = new Set(),
+  actorEmail = ""
 ): Promise<number> {
   // BR/JD ingest only writes job_descriptions. Never delete employees, tests,
   // test_questions, or test_attempts — Employee Portal data is independent.
@@ -882,30 +901,32 @@ async function persistMasterRequirements(
     const newLocalJd = {
       id: jdUuid,
       jdText: row.composedText,
-      rmEmail: row.rmEmail,
+      rmEmail: preferRmEmail("", row.rmEmail, actorEmail, true),
       fileName: `${row.autoReqId} | ${filename}`,
       createdAt: new Date().toISOString(),
     };
     const existingIdx = localJds.findIndex((j: any) => j.id === jdUuid);
     if (existingIdx !== -1) {
-      const existingName = String(localJds[existingIdx].fileName || "");
+      const existing = localJds[existingIdx];
+      const existingName = String(existing.fileName || "");
+      const keepJdDoc = isJdDocumentRequirementName(existingName);
       localJds[existingIdx] = {
-        ...localJds[existingIdx],
-        ...newLocalJd,
-        fileName: isJdDocumentRequirementName(existingName)
-          ? localJds[existingIdx].fileName
-          : newLocalJd.fileName,
-        createdAt: localJds[existingIdx].createdAt || newLocalJd.createdAt,
+        ...existing,
+        jdText: keepJdDoc && existing.jdText ? existing.jdText : newLocalJd.jdText,
+        rmEmail: preferRmEmail(existing.rmEmail, row.rmEmail, actorEmail),
+        fileName: keepJdDoc ? existing.fileName : newLocalJd.fileName,
+        createdAt: existing.createdAt || newLocalJd.createdAt,
       };
     } else {
       localJds.push(newLocalJd);
     }
+    const saved = localJds.find((j: any) => j.id === jdUuid) || newLocalJd;
     return [{
-      id: jdUuid,
-      jd_text: newLocalJd.jdText,
-      rm_email: newLocalJd.rmEmail,
-      file_name: localJds.find((j: any) => j.id === jdUuid)?.fileName || newLocalJd.fileName,
-      created_at: localJds.find((j: any) => j.id === jdUuid)?.createdAt || newLocalJd.createdAt,
+      id: saved.id,
+      jd_text: saved.jdText,
+      rm_email: saved.rmEmail,
+      file_name: saved.fileName,
+      created_at: saved.createdAt,
     }];
   });
 
@@ -1006,7 +1027,7 @@ function parseBrWorkbook(workbook: ExcelJS.Workbook, sourceFile: string): Parsed
     const titleIdx = findColIdx(["designation", "job title", "role", "position"]);
     const skillsIdx = findColIdx(["mandatory skills", "skills", "detailed skills"]);
     const jdIdx = findColIdx(["job description", "jd"]);
-    const rmIdx = findColIdx(["rm name", "reporting manager"]);
+    const rmIdx = findColIdx(["rm email", "recruiter", "requester id", "rm name", "reporting manager"]);
 
     for (let r = headerRowIdx + 1; r < sheetData.length; r++) {
       const row = sheetData[r];
@@ -1080,6 +1101,7 @@ function mergeBrRequirements(rows: ParsedBrRequirement[]): ParsedBrRequirement[]
 export async function refreshRequirements(opts?: {
   incomingBrFiles?: string[];
   incomingJdFiles?: string[];
+  actorEmail?: string;
 }): Promise<{ success: boolean; processedBRs: number; convertedJDs: number; incomingBrRows: number }> {
   await ensureDocsStorage();
   await markRequirementsDeleted(
@@ -1090,6 +1112,7 @@ export async function refreshRequirements(opts?: {
   const jdFiles = await listDocFiles("JD");
   const incomingBr = new Set((opts?.incomingBrFiles || []).map((f) => f.toLowerCase()));
   const incomingJd = new Set((opts?.incomingJdFiles || []).map((f) => f.toLowerCase()));
+  const actorEmail = String(opts?.actorEmail || "").trim().toLowerCase();
   const deletedRequirements = await loadDeletedRequirements();
   const blockedBrIds = deletedBrIdSet(deletedRequirements);
 
@@ -1273,6 +1296,7 @@ export async function refreshRequirements(opts?: {
       existingIds.add(autoReqId);
       convertedJDs++;
       keepIds.add(requirementParts.id);
+      const existingJd = localJds.find((j: any) => j.id === requirementParts.id);
       restoredIncoming.push({
         id: brIdToUuid(autoReqId),
         jd_text: composeRequirementText(
@@ -1280,9 +1304,14 @@ export async function refreshRequirements(opts?: {
           [...new Set([...(details.skills || []), ...(details.tools || [])].filter(Boolean))].join(", "),
           jdText
         ) || jdText,
-        rm_email: "admin@infinite.com",
+        rm_email: preferRmEmail(
+          existingJd?.rmEmail,
+          "",
+          actorEmail,
+          incomingJd.has(file.toLowerCase())
+        ),
         file_name: `${autoReqId} | ${file}`,
-        created_at: new Date().toISOString(),
+        created_at: existingJd?.createdAt || new Date().toISOString(),
       });
       await writeLog(
         "requirements",
@@ -1305,7 +1334,7 @@ export async function refreshRequirements(opts?: {
     );
   }
   await saveMasterBrWorkbook(masterWorkbook, masterFilename);
-  processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds, keepIds);
+  processedBRs = await persistMasterRequirements(masterWorkbook, masterFilename, localJds, keepIds, actorEmail);
 
   const deletedAfterIngest = await loadDeletedRequirements({ fresh: true });
   const liveRestored = restoredIncoming.filter((row) =>
@@ -1992,6 +2021,24 @@ export async function refreshEmployees(
         ...parsed,
         employee_id: keepId,
         shortlisted: previous.shortlisted,
+        score_override: previous.score_override,
+        manually_edited: previous.manually_edited,
+        ...(previous.manually_edited
+          ? {
+              full_name: previous.full_name,
+              email: previous.email,
+              department: previous.department,
+              skills: previous.skills,
+              designation: previous.designation,
+              grade: previous.grade,
+              product: previous.product,
+              status: previous.status,
+            }
+          : {}),
+        score:
+          typeof previous.score_override === "number"
+            ? previous.score_override
+            : parsed.score,
       });
       if (email) byEmail.set(email, keepId);
       updated++;

@@ -229,6 +229,64 @@
   color: inherit;
 }
 
+.shortlist-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  transition:
+    background-color 0.35s ease,
+    color 0.35s ease,
+    border-color 0.35s ease,
+    box-shadow 0.35s ease,
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.shortlist-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.shortlist-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.shortlist-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+.shortlist-btn.is-off {
+  background: transparent;
+  color: #6d28d9;
+  border-color: #ddd6fe;
+}
+.shortlist-btn.is-off:hover:not(:disabled) {
+  background: #f5f3ff;
+}
+.dark .shortlist-btn.is-off {
+  color: #c4b5fd;
+  border-color: rgba(139, 92, 246, 0.35);
+}
+.dark .shortlist-btn.is-off:hover:not(:disabled) {
+  background: rgba(76, 29, 149, 0.25);
+}
+.shortlist-btn.is-on {
+  background: #7c3aed;
+  color: #fff;
+  box-shadow: 0 8px 18px -10px rgba(124, 58, 237, 0.7);
+}
+.shortlist-btn.is-on:hover:not(:disabled) {
+  background: #6d28d9;
+}
+.shortlist-check {
+  animation: shortlist-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes shortlist-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  70% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 /* Admin proctoring player — Plyr custom controls (no native browser UI) */
 .plyr-video-player {
   --plyr-color-main: #818cf8;
