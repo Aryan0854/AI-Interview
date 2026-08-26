@@ -4,10 +4,13 @@ import fs from 'fs';
 import path from 'path';
 
 // --- CONFIGURATION ---
-const QUESTION_BANK_FILE = 'c:/Users/aryanmi/OneDrive - Infinite Computer Solutions (India) Limited/Desktop/Interviee/Question Bank-20th July \'26.xlsx';
-const RESOURCE_FILE = 'c:/Users/aryanmi/OneDrive - Infinite Computer Solutions (India) Limited/Desktop/Interviee/Resource details less tahn 3.5 rating.xlsx';
+// NOTE: these were previously hardcoded to one contributor's local OneDrive path
+// (only ran on that machine). Overridable via env vars; default to files placed at the
+// project root so the script is portable across machines/CI.
+const QUESTION_BANK_FILE = process.env.IMPORT_QUESTION_BANK_FILE || path.join(process.cwd(), "Question Bank-20th July '26.xlsx");
+const RESOURCE_FILE = process.env.IMPORT_RESOURCE_FILE || path.join(process.cwd(), 'Resource details less tahn 3.5 rating.xlsx');
 const OUTPUT_FILE = 'Processed_Candidate_Mappings.xlsx';
-const ACCOUNTS_STORE_FILE = 'c:/Users/aryanmi/OneDrive - Infinite Computer Solutions (India) Limited/Desktop/Interviee/src/data/employee-accounts.json';
+const ACCOUNTS_STORE_FILE = process.env.IMPORT_ACCOUNTS_STORE_FILE || path.join(process.cwd(), 'src', 'data', 'employee-accounts.json');
 const AUTH_SECRET = "dev-employee-auth-secret"; // We assume it's this or process.env
 
 // We bypass the actual DB connection for this script by generating SQL statements
@@ -16,7 +19,9 @@ const AUTH_SECRET = "dev-employee-auth-secret"; // We assume it's this or proces
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: 'c:/Users/aryanmi/OneDrive - Infinite Computer Solutions (India) Limited/Desktop/Interviee/.env.local' });
+// Defaults to the project root .env.local (dotenv's normal behavior) instead of a
+// hardcoded path that only existed on one contributor's machine.
+dotenv.config();
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
