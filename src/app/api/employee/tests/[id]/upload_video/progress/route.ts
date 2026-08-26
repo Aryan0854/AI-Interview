@@ -7,6 +7,7 @@ import {
 } from "@/lib/employee-test-video";
 import { markProctorVideoUploaded, normalizeProctoring } from "@/lib/employee-proctoring";
 import { localTestsDb } from "@/services/local-tests-db";
+import { cacheStore } from "@/lib/cache-store";
 import { syncLocalTestStateToSupabase } from "@/services/employee-test-supabase-sync";
 
 export const runtime = "nodejs";
@@ -61,6 +62,8 @@ export async function POST(
     } catch (syncErr) {
       console.warn("Failed to sync progress video URL to Supabase:", syncErr);
     }
+
+    cacheStore.invalidate("employees");
 
     return NextResponse.json({ success: true, bytes: buffer.length, videoUrl });
   } catch (error: any) {

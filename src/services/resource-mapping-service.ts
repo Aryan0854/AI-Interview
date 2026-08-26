@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { derivePortalTestStatus, type PortalTestStatus } from "@/lib/portal-test-status";
 import { formatProductDisplayName, formatTopicTitleForDisplay } from "@/lib/product-display-name";
+import { normalizeEmployeeId } from "@/lib/employee-test-access";
 import { readPersistedJson } from "@/lib/runtime-data";
 
 export interface ResourcePortalEmployee {
@@ -70,10 +71,6 @@ let credentialsCache: { at: number; rows: PortalProfileRow[] } | null = null;
 let profilesJsonCache: { at: number; rows: PortalProfileRow[] } | null = null;
 const EXCEL_CACHE_MS = 5 * 60 * 1000;
 const PROFILES_JSON_CACHE_MS = 5 * 60 * 1000;
-
-function normalizeEmployeeId(value: string | null | undefined): string {
-  return String(value ?? "").trim();
-}
 
 function pickField(get: (key: string) => string, keys: string[]): string {
   for (const key of keys) {
@@ -364,23 +361,34 @@ export function mergeResourcePortalData(
   manifest: Record<string, string>
 ): ResourcePortalEmployee[] {
   const testsByEmployee = new Map<string, any[]>();
-  for (const test of allTestResults) {
-    const key = normalizeEmployeeId(test.employeeId);
-    if (!key) continue;
+  const pushTest = (rawKey: unknown, test: any) => {
+    const key = normalizeEmployeeId(rawKey as string);
+    if (!key) return;
     const list = testsByEmployee.get(key) || [];
-    list.push(test);
+    if (!list.some((row) => row.id === test.id)) list.push(test);
     testsByEmployee.set(key, list);
+  };
+  for (const test of allTestResults) {
+    pushTest(test.employeeId, test);
+    pushTest(test.employeeUuid, test);
+    pushTest(test.employeeCode, test);
   }
 
   return mappingRows.map((row) => {
-    const empTests = testsByEmployee.get(normalizeEmployeeId(row.employee_id)) || [];
-    const manifestTestId = manifest[row.employee_id] ?? manifest[normalizeEmployeeId(row.employee_id)] ?? null;
-    const completed = empTests.filter((test) => test.status === "completed");
+    const empKey = normalizeEmployeeId(row.employee_id);
+    const empTests = testsByEmployee.get(empKey) || [];
+    const manifestTestId = manifest[row.employee_id] ?? manifest[empKey] ?? null;
+    const completed = empTests
+      .filter((test) => String(test.status || "").toLowerCase() === "completed")
+      .sort(
+        (a, b) =>
+          new Date(b.completedAt || 0).getTime() - new Date(a.completedAt || 0).getTime()
+      );
 
-    // Keep the current assignment (manifest) as primary when present — do not hide Supabase rows.
-    // If that assignment is completed, use it; otherwise keep the live assignment and still
-    // expose every attempt under `tests` (including older completed ones).
+    // A finished attempt always wins over a leftover pending assignment with a different test id.
     const assignedTest =
+      empTests.find((test) => test.id === manifestTestId && String(test.status).toLowerCase() === "completed") ??
+      empTests.find((test) => test.topicId === "resource-product-assessment" && String(test.status).toLowerCase() === "completed") ??
       empTests.find((test) => test.id === manifestTestId) ??
       empTests.find((test) => test.topicId === "resource-product-assessment") ??
       null;
@@ -388,8 +396,9 @@ export function mergeResourcePortalData(
       completed.find((test) => test.id === assignedTest?.id) ??
       completed.find((test) => test.id === manifestTestId) ??
       completed.find((test) => test.topicId === "resource-product-assessment") ??
+      completed[0] ??
       null;
-    const primaryTest = primaryCompleted ?? assignedTest ?? completed[0] ?? empTests[0] ?? null;
+    const primaryTest = primaryCompleted ?? assignedTest ?? empTests[0] ?? null;
 
     const score =
       primaryCompleted != null

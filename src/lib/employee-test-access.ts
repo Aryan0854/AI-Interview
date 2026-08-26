@@ -2,7 +2,34 @@ import { supabase } from "@/lib/db";
 import { localTestsDb } from "@/services/local-tests-db";
 
 export function normalizeEmployeeId(value: string | null | undefined): string {
-  return String(value ?? "").trim();
+  let text = String(value ?? "").trim();
+  if (!text) return "";
+  if (/^\d+\.0+$/.test(text)) text = text.slice(0, text.indexOf("."));
+  return text;
+}
+
+export function isEmployeeUuid(value: string | null | undefined): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    String(value ?? "").trim()
+  );
+}
+
+/** Prefer the numeric/HR emp code over a UUID so admin mapping rows can match live tests. */
+export function displayEmployeeCode(opts: {
+  employeeCode?: string | null;
+  employeeId?: string | null;
+  linkedCode?: string | null;
+  linkedName?: string | null;
+}): string {
+  const code = normalizeEmployeeId(opts.employeeCode);
+  if (code && !isEmployeeUuid(code)) return code;
+  const linked = normalizeEmployeeId(opts.linkedCode);
+  if (linked && !isEmployeeUuid(linked)) return linked;
+  const owner = normalizeEmployeeId(opts.employeeId);
+  if (owner && !isEmployeeUuid(owner)) return owner;
+  const fromName = normalizeEmployeeId(opts.linkedName);
+  if (/^\d{4,}$/.test(fromName)) return fromName;
+  return linked || code || owner;
 }
 
 export function employeeOwnsTest(

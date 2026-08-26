@@ -4157,7 +4157,10 @@ export default function AdminDashboard() {
                 </button>
                 {canViewEmployeePortal && (
                 <button
-                  onClick={() => setActiveTab("employee-portal")}
+                  onClick={() => {
+                    setActiveTab("employee-portal");
+                    void loadEmployees({ fresh: true });
+                  }}
                   className={`flex-1 min-w-0 py-3.5 px-2 sm:px-3 lg:px-4 font-black text-xs sm:text-sm transition-all duration-300 border-b-2 flex items-center justify-center gap-1.5 sm:gap-2 flex-shrink-0 whitespace-nowrap ${
                     activeTab === "employee-portal"
                       ? "border-indigo-600 text-indigo-700 bg-card dark:text-violet-400"

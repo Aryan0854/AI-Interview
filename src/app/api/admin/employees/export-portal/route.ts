@@ -17,6 +17,7 @@ import {
 } from "@/services/employee-test-attempts-service";
 import { getPortalTestStatusLabel, formatPortalScore, portalScorePercent, portalScoreExcelFontArgb } from "@/lib/portal-test-status";
 import { formatTopicTitleForDisplay, formatProductDisplayName } from "@/lib/product-display-name";
+import { displayEmployeeCode, isEmployeeUuid, normalizeEmployeeId } from "@/lib/employee-test-access";
 import {
   formatProctorViolationsForExport,
   getPortalPrimaryProctoring,
@@ -50,12 +51,21 @@ async function loadAllTestResults(): Promise<any[]> {
       const employeeUuidMap = new Map<string, { employee_id: string; full_name: string }>();
       (employeeRows ?? []).forEach((row) => {
         if (row.id) employeeUuidMap.set(row.id, row);
+        const code = normalizeEmployeeId(row.employee_id);
+        if (code) employeeUuidMap.set(code, row);
       });
 
       (dbTests ?? []).forEach((test) => {
-        const linked = employeeUuidMap.get(String(test.employee_id ?? ""));
-        const empId = (test as any).employee_code || linked?.employee_id;
-        if (!empId) return;
+        const linked =
+          employeeUuidMap.get(String(test.employee_id ?? "")) ||
+          employeeUuidMap.get(normalizeEmployeeId((test as any).employee_code));
+        const empId = displayEmployeeCode({
+          employeeCode: (test as any).employee_code,
+          employeeId: test.employee_id,
+          linkedCode: linked?.employee_id,
+          linkedName: linked?.full_name,
+        });
+        if (!empId || isEmployeeUuid(empId)) return;
 
         const totalQs = (test as any).score_total ?? test.total_questions ?? 25;
         const score = (test as any).score_correct ?? 0;

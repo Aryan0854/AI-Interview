@@ -5,6 +5,7 @@ import { localTestsDb } from "@/services/local-tests-db";
 import { syncSubmitToSupabase } from "@/services/employee-test-supabase-sync";
 import { canSubmitTest, normalizeProctoring } from "@/lib/employee-proctoring";
 import { getOwnedTest } from "@/lib/employee-test-access";
+import { cacheStore } from "@/lib/cache-store";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -251,6 +252,8 @@ export async function POST(
     } catch (syncErr) {
       console.error("Supabase sync after submit failed (test row may already be saved):", syncErr);
     }
+
+    cacheStore.invalidate("employees");
 
     return NextResponse.json({
       success: true,

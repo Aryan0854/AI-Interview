@@ -20,6 +20,7 @@ import {
 } from '@/services/resource-mapping-service';
 import { normalizeProctoring } from '@/lib/employee-proctoring';
 import { listEmployeeTestRecordingIds } from '@/lib/employee-test-video';
+import { displayEmployeeCode, isEmployeeUuid, normalizeEmployeeId } from '@/lib/employee-test-access';
 
 const getUploadsRoot = () => getRuntimeUploadsRoot();
 
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
     };
   };
 
-  const cached = !skipCache && cacheStore.get("employees", 120000, activeJdId);
+  const cached = !skipCache && cacheStore.get("employees", 8000, activeJdId);
   if (cached && !isExport) {
     // Never trust a cached payload that lost live test results while roster still has assignments.
     const cachedResults = Array.isArray(cached.allTestResults) ? cached.allTestResults.length : 0;
@@ -199,15 +200,6 @@ export async function GET(request: NextRequest) {
     }
   };
 
-  const resolveEmployeeCode = (code: unknown, name: unknown): string | null => {
-    const fromCode = String(code ?? "").trim();
-    if (fromCode) return fromCode;
-    // Some completed rows store the numeric emp id in employee_name when employee_code is null.
-    const fromName = String(name ?? "").trim();
-    if (/^\d{4,}$/.test(fromName)) return fromName;
-    return null;
-  };
-
   const pushResultRow = (row: {
     id: string;
     employeeUuid: string | null;
@@ -262,6 +254,8 @@ export async function GET(request: NextRequest) {
         if (!data?.length) break;
         for (const row of data) {
           if (row.id) employeeUuidMap.set(row.id, row);
+          const code = normalizeEmployeeId(row.employee_id);
+          if (code) employeeUuidMap.set(code, row);
         }
         if (data.length < pageSize) break;
         from += pageSize;
@@ -293,12 +287,15 @@ export async function GET(request: NextRequest) {
     const employeeUuidMap = await loadEmployeeUuidMap();
 
     for (const test of dbTests) {
-      const linked = employeeUuidMap.get(String(test.employee_id ?? ""));
-      const empId = resolveEmployeeCode(
-        test.employee_code || linked?.employee_id,
-        linked?.full_name
-      );
-      if (!empId) continue;
+      const owner = String(test.employee_id ?? "");
+      const linked = employeeUuidMap.get(owner) || employeeUuidMap.get(normalizeEmployeeId(test.employee_code));
+      const empId = displayEmployeeCode({
+        employeeCode: test.employee_code,
+        employeeId: test.employee_id,
+        linkedCode: linked?.employee_id,
+        linkedName: linked?.full_name,
+      });
+      if (!empId || isEmployeeUuid(empId)) continue;
 
       const totalQs = test.score_total ?? test.total_questions ?? 25;
       const score = test.score_correct ?? 0;
@@ -308,7 +305,7 @@ export async function GET(request: NextRequest) {
 
       pushResultRow({
         id: test.id,
-        employeeUuid: test.employee_id,
+        employeeUuid: isEmployeeUuid(owner) ? owner : linked ? owner : null,
         employeeId: empId,
         employeeName: linked?.full_name || empId,
         topicId: test.topic_id,
@@ -352,8 +349,11 @@ export async function GET(request: NextRequest) {
     }
 
     for (const row of viewRows) {
-      const empId = resolveEmployeeCode(row.employee_code, row.employee_name);
-      if (!empId) continue;
+      const empId = displayEmployeeCode({
+        employeeCode: row.employee_code,
+        linkedName: row.employee_name,
+      });
+      if (!empId || isEmployeeUuid(empId)) continue;
 
       const totalQs = row.score_total ?? row.total_questions ?? 25;
       const score = row.score_correct ?? 0;
@@ -455,8 +455,12 @@ export async function GET(request: NextRequest) {
       const resultIndexById = new Map(allTestResults.map((t, idx) => [t.id, idx]));
 
       localTests.tests.forEach((test) => {
-        const empId = test.employee_code || test.employee_id;
-        if (!empId) return;
+        const empId = displayEmployeeCode({
+          employeeCode: test.employee_code,
+          employeeId: test.employee_id,
+        });
+        if (!empId || isEmployeeUuid(empId)) return;
+        const matchingEmp = employeesById.get(String(empId).trim().toUpperCase());
 
         const testAttempts = attemptsByTest.get(test.id) || [];
         const answeredCount = testAttempts.length;
@@ -486,7 +490,6 @@ export async function GET(request: NextRequest) {
             completedAt: keepCompleted ? existing.completedAt : test.completed_at,
           };
         } else {
-          const matchingEmp = employeesById.get(String(empId).trim().toUpperCase());
           allTestResults.push({
             id: test.id,
             employeeUuid: empId,
