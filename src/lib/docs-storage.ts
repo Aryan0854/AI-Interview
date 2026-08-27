@@ -5,7 +5,7 @@ import { supabaseServer } from "@/lib/db";
 import { getRuntimeUploadsRoot } from "@/lib/runtime-data";
 import { isCloudDeployment } from "@/lib/container-runtime";
 
-export type DocCategory = "BR" | "JD" | "Resumes" | "Corp Pool";
+export type DocCategory = "BR" | "JD" | "Resumes" | "Corp Pool" | "Portal Mapping";
 
 const DOCS_BUCKET = "docs-ingest";
 
@@ -14,6 +14,7 @@ const LOCAL_DIRS: Record<DocCategory, string> = {
   JD: "JD",
   Resumes: "Resumes",
   "Corp Pool": "Corp Pool",
+  "Portal Mapping": "Portal Mapping",
 };
 
 export function useCloudDocsStorage(): boolean {

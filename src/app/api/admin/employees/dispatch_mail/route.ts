@@ -172,7 +172,9 @@ export async function POST(request: NextRequest) {
 
     let targets: MailRecipient[] = [];
 
-    if (Array.isArray(body.recipients) && body.recipients.length > 0) {
+    // Employee Portal invites may name recipients directly. Corp Pool mail is
+    // shortlisted-only, even when specific employeeIds are passed.
+    if (portalMode && Array.isArray(body.recipients) && body.recipients.length > 0) {
       targets = normalizeRecipients(body.recipients);
     } else {
       const jsonPath = getEmployeesJsonPath();
@@ -184,13 +186,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Employee pool not loaded" }, { status: 404 });
       }
 
+      const shortlisted = Array.isArray(employees)
+        ? employees.filter((e: any) => e?.shortlisted)
+        : [];
       const targetEmployeeIds = body.employeeIds;
       if (Array.isArray(targetEmployeeIds) && targetEmployeeIds.length > 0) {
+        const idSet = new Set(targetEmployeeIds.map((id: unknown) => String(id)));
         targets = normalizeRecipients(
-          employees.filter((e: any) => targetEmployeeIds.includes(e.employee_id))
+          shortlisted.filter((e: any) => idSet.has(String(e.employee_id)))
         );
       } else {
-        targets = normalizeRecipients(employees.filter((e: any) => e.shortlisted));
+        targets = normalizeRecipients(shortlisted);
       }
     }
 

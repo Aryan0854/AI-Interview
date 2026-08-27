@@ -6,6 +6,12 @@ import { derivePortalTestStatus, type PortalTestStatus } from "@/lib/portal-test
 import { formatProductDisplayName, formatTopicTitleForDisplay } from "@/lib/product-display-name";
 import { normalizeEmployeeId } from "@/lib/employee-test-access";
 import { readPersistedJson } from "@/lib/runtime-data";
+import { ensureDocsStorage, listDocFiles, readDocFileBuffer, writeDocFile } from "@/lib/docs-storage";
+import {
+  isPortalCredentialsFileName,
+  isPortalMappingFileName,
+  PORTAL_MAPPING_STORED_NAME,
+} from "@/lib/portal-mapping-file";
 
 export interface ResourcePortalEmployee {
   employee_id: string;
@@ -63,6 +69,12 @@ const MAPPING_FILE = resolveExcelFile("Resource_Question_Mapping.xlsx");
 const CREDENTIALS_FILE = resolveExcelFile("Employee_User_Credentials.xlsx");
 const ACCOUNTS_FILE = join(process.cwd(), "src", "data", "employee-accounts.json");
 const PROFILES_JSON_FILE = join(process.cwd(), "src", "data", "resource_portal_profiles.json");
+const LOCAL_MAPPING_SEED_PATHS = [
+  MAPPING_FILE,
+  join(process.cwd(), "NON-Needed docs", PORTAL_MAPPING_STORED_NAME),
+];
+
+let mappingSeedStarted = false;
 
 type PortalProfileRow = Omit<ResourcePortalEmployee, "test_id" | "test_status" | "score" | "tests">;
 
@@ -138,31 +150,33 @@ export async function loadResourcePortalProfilesFromJson(): Promise<PortalProfil
   }
 }
 
-export async function loadAssignedQuestionsForEmployee(employeeId: string): Promise<string[]> {
-  const normId = normalizeEmployeeId(employeeId);
-  const jsonRows = await loadResourcePortalProfilesFromJson();
-  const fromJson = jsonRows.find((row) => normalizeEmployeeId(row.employee_id) === normId);
-  if (fromJson?.assigned_questions?.length) {
-    return fromJson.assigned_questions;
-  }
-
-  const mappingRows = await loadResourceQuestionMapping();
-  const fromMapping = mappingRows.find((row) => normalizeEmployeeId(row.employee_id) === normId);
-  return fromMapping?.assigned_questions ?? [];
+export function invalidatePortalMappingCaches(): void {
+  mappingCache = null;
+  profilesJsonCache = null;
 }
 
-export async function loadResourceQuestionMapping(): Promise<PortalProfileRow[]> {
-  const jsonRows = await loadResourcePortalProfilesFromJson();
-  if (jsonRows.length > 0) {
-    return jsonRows;
+export async function excelLooksLikePortalMapping(buffer: Buffer): Promise<boolean> {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as any);
+    for (const ws of workbook.worksheets) {
+      const last = Math.min(5, Math.max(ws.rowCount || 0, ws.actualRowCount || 0, 1));
+      for (let n = 1; n <= last; n++) {
+        const values = ((ws.getRow(n).values as any[]) || []);
+        if (
+          values.some((value) => /assigned question\s*\d+/i.test(clean(value)))
+        ) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    return false;
   }
+  return false;
+}
 
-  if (mappingCache && Date.now() - mappingCache.at < EXCEL_CACHE_MS) {
-    return mappingCache.rows;
-  }
-
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(MAPPING_FILE);
+function parsePortalMappingWorkbook(workbook: ExcelJS.Workbook): PortalProfileRow[] {
   const sheet = workbook.worksheets[0];
   if (!sheet) return [];
 
@@ -244,9 +258,94 @@ export async function loadResourceQuestionMapping(): Promise<PortalProfileRow[]>
     });
   });
 
-  const rows = Array.from(rowMap.values());
-  mappingCache = { at: Date.now(), rows };
-  return rows;
+  return Array.from(rowMap.values());
+}
+
+async function parsePortalMappingBuffer(buffer: Buffer): Promise<PortalProfileRow[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as any);
+  return parsePortalMappingWorkbook(workbook);
+}
+
+function pickPortalMappingFile(files: string[]): string | null {
+  const usable = files.filter((name) => /\.(xlsx|xls)$/i.test(name) && !isPortalCredentialsFileName(name));
+  return usable.find(isPortalMappingFileName) || usable[0] || null;
+}
+
+async function seedPortalMappingFile(): Promise<void> {
+  await ensureDocsStorage();
+  const existing = pickPortalMappingFile(await listDocFiles("Portal Mapping"));
+  if (existing) return;
+
+  for (const candidate of LOCAL_MAPPING_SEED_PATHS) {
+    if (!existsSync(candidate) || isPortalCredentialsFileName(candidate)) continue;
+    const buffer = await readFile(candidate);
+    if (!buffer.length) continue;
+    await writeDocFile("Portal Mapping", PORTAL_MAPPING_STORED_NAME, buffer);
+    return;
+  }
+}
+
+function seedPortalMappingOnce(): void {
+  if (mappingSeedStarted) return;
+  mappingSeedStarted = true;
+  void seedPortalMappingFile().catch((err) => {
+    mappingSeedStarted = false;
+    console.warn("Portal mapping cloud seed skipped:", err);
+  });
+}
+
+export async function loadAssignedQuestionsForEmployee(employeeId: string): Promise<string[]> {
+  const normId = normalizeEmployeeId(employeeId);
+  const jsonRows = await loadResourcePortalProfilesFromJson();
+  const fromJson = jsonRows.find((row) => normalizeEmployeeId(row.employee_id) === normId);
+  if (fromJson?.assigned_questions?.length) {
+    return fromJson.assigned_questions;
+  }
+
+  const mappingRows = await loadResourceQuestionMapping();
+  const fromMapping = mappingRows.find((row) => normalizeEmployeeId(row.employee_id) === normId);
+  return fromMapping?.assigned_questions ?? [];
+}
+
+export async function loadResourceQuestionMapping(): Promise<PortalProfileRow[]> {
+  seedPortalMappingOnce();
+
+  const jsonRows = await loadResourcePortalProfilesFromJson();
+  if (jsonRows.length > 0) {
+    return jsonRows;
+  }
+
+  if (mappingCache && Date.now() - mappingCache.at < EXCEL_CACHE_MS) {
+    return mappingCache.rows;
+  }
+
+  try {
+    await ensureDocsStorage();
+    const mappingFile = pickPortalMappingFile(await listDocFiles("Portal Mapping"));
+    if (mappingFile) {
+      const rows = await parsePortalMappingBuffer(await readDocFileBuffer("Portal Mapping", mappingFile));
+      mappingCache = { at: Date.now(), rows };
+      return rows;
+    }
+  } catch (err) {
+    console.warn("Cloud portal mapping unavailable:", err);
+  }
+
+  try {
+    if (existsSync(MAPPING_FILE)) {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(MAPPING_FILE);
+      const rows = parsePortalMappingWorkbook(workbook);
+      mappingCache = { at: Date.now(), rows };
+      return rows;
+    }
+  } catch (err) {
+    console.warn("Local portal mapping workbook unavailable:", err);
+  }
+
+  mappingCache = { at: Date.now(), rows: [] };
+  return [];
 }
 
 export async function loadEmployeeCredentialsRoster(): Promise<PortalProfileRow[]> {
@@ -456,13 +555,14 @@ export function mergeResourcePortalData(
 
 /**
  * Build portal employee rows.
- * Always merges Resource_Question_Mapping.xlsx so assigned question text is visible in admin.
+ * Always merges mapping question text so assigned questions are visible in admin.
  * Uses accounts JSON for the roster when present (fast), Excel as fallback.
  */
 export async function buildResourcePortalEmployees(
   allTestResults: any[],
   manifest: Record<string, string>
 ): Promise<ResourcePortalEmployee[]> {
+  seedPortalMappingOnce();
   const [accountRows, manifestRows, jsonProfileRows] = await Promise.all([
     loadPortalRosterFromAccounts(),
     loadManifestRows(),

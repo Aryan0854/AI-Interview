@@ -13,6 +13,15 @@ import {
   isCorpPoolRosterFileName,
   excelLooksLikeCorpPoolRoster,
 } from '@/services/automation-service';
+import {
+  excelLooksLikePortalMapping,
+  invalidatePortalMappingCaches,
+} from '@/services/resource-mapping-service';
+import {
+  isPortalCredentialsFileName,
+  isPortalMappingFileName,
+  PORTAL_MAPPING_STORED_NAME,
+} from '@/lib/portal-mapping-file';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -26,6 +35,7 @@ const CATEGORY_MAP: Record<string, { docCategory?: DocCategory; refresh: string 
   jd: { docCategory: "JD", refresh: "requirements" },
   br: { docCategory: "BR", refresh: "requirements" },
   employee: { docCategory: "Corp Pool", refresh: "employees" },
+  "portal-mapping": { docCategory: "Portal Mapping", refresh: "portal-mapping" },
   interview: { refresh: "interviews" },
 };
 
@@ -39,6 +49,8 @@ function inferUploadCategory(filename: string, selected: string): string {
   }
   if (selected === "br") return "br";
   if (selected === "jd") return "jd";
+  if (isPortalMappingFileName(filename)) return "portal-mapping";
+  if (selected === "portal-mapping") return "portal-mapping";
   if (isCorpPoolRosterFileName(filename)) return "employee";
   if (name.endsWith(".csv")) return "employee";
   return selected || "resume";
@@ -63,12 +75,27 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (isPortalCredentialsFileName(file.name)) {
+      return NextResponse.json(
+        { error: "Credential workbooks are not uploaded. Use Resource_Question_Mapping.xlsx only." },
+        { status: 400 }
+      );
+    }
+
     let category = inferUploadCategory(file.name, selectedCategory);
+    if (
+      category !== "portal-mapping" &&
+      /\.(xlsx|xls)$/i.test(file.name) &&
+      (await excelLooksLikePortalMapping(buffer))
+    ) {
+      category = "portal-mapping";
+    }
     if (
       category !== "employee" &&
       category !== "interview" &&
       category !== "br" &&
       category !== "jd" &&
+      category !== "portal-mapping" &&
       /\.(xlsx|xls)$/i.test(file.name) &&
       (await excelLooksLikeCorpPoolRoster(buffer))
     ) {
@@ -80,7 +107,9 @@ export async function POST(request: NextRequest) {
     }
     const filename = mapping.docCategory === "Corp Pool"
       ? sanitizeCorpPoolFileName(file.name)
-      : file.name;
+      : mapping.docCategory === "Portal Mapping"
+        ? PORTAL_MAPPING_STORED_NAME
+        : file.name;
     const actorEmail = String(formData.get("actorEmail") || formData.get("adminEmail") || "").trim().toLowerCase();
 
     if (category === 'interview') {
@@ -116,6 +145,9 @@ export async function POST(request: NextRequest) {
         incomingCorpPoolFiles: [filename],
         incomingFileBuffers: [{ filename, buffer }],
       });
+    } else if (mapping.refresh === 'portal-mapping') {
+      invalidatePortalMappingCaches();
+      refreshResult = { stored: filename, liveSource: "json-snapshot" };
     } else if (mapping.refresh === 'interviews') {
       refreshResult = await refreshInterviews();
     }

@@ -67,6 +67,7 @@ import { formatProductDisplayName } from "@/lib/product-display-name";
 import { getPortalPrimaryProctoring } from "@/lib/portal-proctor-display";
 import { calculateSkillMatch, candidateMatchText, employeeMatchText, extractJdDisplaySkills, QUALIFIED_COVERAGE_PERCENT, type SkillBreakdownItem, type ScoreParts } from "@/lib/skill-match";
 import { clearAdminAccessFlags, readAdminAccessFlags, storeAdminAccessFlags } from "@/lib/admin-accounts";
+import { isPortalMappingFileName } from "@/lib/portal-mapping-file";
 
 function portalEmployeeName(account: { full_name?: string | null; employee_id?: string | null }): string {
   const name = account.full_name?.trim();
@@ -470,6 +471,45 @@ function adminFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Respo
 }
 
 const fetch = adminFetch;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithTimeout(input: string, ms: number, label: string): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), ms);
+  try {
+    return await adminFetch(input, { signal: controller.signal });
+  } catch (err) {
+    console.warn(`[admin] ${label} failed/timed out after ${ms}ms`, err);
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function fetchJsonWithRetry(
+  url: string,
+  opts: { timeoutMs: number; retries?: number; label: string }
+): Promise<any | null> {
+  const retries = opts.retries ?? 2;
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    const res = await fetchWithTimeout(url, opts.timeoutMs, `${opts.label}#${attempt}`);
+    if (res?.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && typeof data === "object") return data;
+    }
+    if (attempt <= retries) await delay(400 * attempt);
+  }
+  return null;
+}
+
+function isPortalSettingsPayload(data: any): boolean {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  if (typeof data.showSystemLogsViewer === "boolean") return true;
+  return !data.error && Object.keys(data).length > 0;
+}
 
 function extractSkillsFromText(text: string): string[] {
   return extractJdDisplaySkills(text);
@@ -878,7 +918,6 @@ export default function AdminDashboard() {
   const [isEmployeesLoading, setIsEmployeesLoading] = useState(false);
   const [isExportingPortal, setIsExportingPortal] = useState(false);
   const [isDispatchingMails, setIsDispatchingMails] = useState(false);
-  const [isBulkDispatchingMails, setIsBulkDispatchingMails] = useState(false);
   const [portalMailSendingId, setPortalMailSendingId] = useState<string | null>(null);
   const [isBulkPortalMailing, setIsBulkPortalMailing] = useState(false);
   const [isBulkPortalDownloading, setIsBulkPortalDownloading] = useState(false);
@@ -1168,35 +1207,6 @@ export default function AdminDashboard() {
     setDeleteModalError(null);
   };
 
-  const handleBulkDispatchEmployees = async () => {
-    if (selectedEmployeeIds.length === 0) return;
-    const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") || "" : "";
-    setIsBulkDispatchingMails(true);
-    setActionError(null);
-    setActionSuccess(null);
-    try {
-      const response = await fetch("/api/admin/employees/dispatch_mail", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ token, adminEmail, employeeIds: selectedEmployeeIds }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to dispatch email invitations.");
-      }
-      setActionSuccess(`Successfully dispatched assessment invitations to ${data.count} selected employee(s).`);
-      setSelectedEmployeeIds([]);
-      await loadEmails();
-    } catch (err: any) {
-      console.error(err);
-      setActionError(err.message || "Failed to dispatch emails.");
-    } finally {
-      setIsBulkDispatchingMails(false);
-    }
-  };
-
   const loadResumes = async (emailToUse?: string, opts?: { silent?: boolean }) => {
     const email = emailToUse || adminEmail;
     if (!opts?.silent) setLoading(true);
@@ -1276,10 +1286,13 @@ export default function AdminDashboard() {
     const seq = ++emailsFetchSeqRef.current;
     if (!opts?.silent) setIsEmailsLoading(true);
     try {
-      const res = await fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`);
-      const data = await res.json();
+      const data = await fetchJsonWithRetry(`/api/admin/emails?email=${encodeURIComponent(email)}`, {
+        timeoutMs: 45000,
+        retries: 2,
+        label: "emails",
+      });
       if (seq !== emailsFetchSeqRef.current) return;
-      if (Array.isArray(data.emails)) {
+      if (Array.isArray(data?.emails)) {
         applyEmails(data.emails);
       } else {
         console.warn("[admin] emails payload missing emails[]; keeping prior state");
@@ -1294,9 +1307,16 @@ export default function AdminDashboard() {
   const loadResetLogs = async () => {
     setIsLogsLoading(true);
     try {
-      const res = await fetch("/api/admin/reset_logs");
-      const data = await res.json();
-      setResetLogs(data.logs || []);
+      const data = await fetchJsonWithRetry("/api/admin/reset_logs", {
+        timeoutMs: 30000,
+        retries: 2,
+        label: "reset_logs",
+      });
+      if (Array.isArray(data?.logs)) {
+        setResetLogs(data.logs);
+      } else {
+        console.warn("[admin] reset_logs payload missing/timed out; keeping prior state");
+      }
     } catch (err) {
       console.error("Failed to fetch reset logs", err);
     } finally {
@@ -2040,9 +2060,15 @@ export default function AdminDashboard() {
       const moduleParam = logsModuleFilter;
       const statusParam = logsStatusFilter;
       const searchParam = encodeURIComponent(logsSearch);
-      const res = await fetch(`/api/admin/logs?module=${moduleParam}&status=${statusParam}&search=${searchParam}`);
-      const data = await res.json();
-      setSystemLogs(data.logs || []);
+      const data = await fetchJsonWithRetry(
+        `/api/admin/logs?module=${moduleParam}&status=${statusParam}&search=${searchParam}`,
+        { timeoutMs: 30000, retries: 2, label: "logs" }
+      );
+      if (Array.isArray(data?.logs)) {
+        setSystemLogs(data.logs);
+      } else {
+        console.warn("[admin] logs payload missing/timed out; keeping prior state");
+      }
     } catch (err) {
       console.error("Failed to fetch system logs", err);
     } finally {
@@ -2052,9 +2078,12 @@ export default function AdminDashboard() {
 
   const loadPortalSettings = async () => {
     try {
-      const res = await fetch("/api/portal_settings");
-      const data = await res.json();
-      if (data && typeof data === "object") {
+      const data = await fetchJsonWithRetry("/api/portal_settings", {
+        timeoutMs: 20000,
+        retries: 2,
+        label: "portal_settings",
+      });
+      if (isPortalSettingsPayload(data)) {
         setPortalSettings({
           showSystemLogsViewer: data.showSystemLogsViewer !== false,
         });
@@ -2073,54 +2102,52 @@ export default function AdminDashboard() {
     setIsLogsLoading(true);
     setIsSystemLogsLoading(true);
 
+    let emailsRetrying = false;
+    let logsRetrying = false;
+    let resetLogsRetrying = false;
+
     try {
       const sendJdId =
         selectedJdId && !selectedJdId.includes("@") ? selectedJdId : "all";
-      const withTimeout = <T,>(promise: Promise<T>, ms: number, label: string): Promise<T | null> =>
-        Promise.race([
-          promise,
-          new Promise<null>((resolve) =>
-            setTimeout(() => {
-              console.warn(`[admin] ${label} timed out after ${ms}ms`);
-              resolve(null);
-            }, ms)
-          ),
-        ]);
-
-      // Load all dashboard datasets together — never clear prior state on timeout/partial failure
-      const [jdRes, resumesRes, emailsRes, employeesRes, resetLogsRes, logsRes, settingsRes] =
-        await Promise.all([
-          withTimeout(fetch(`/api/admin/jd?email=${encodeURIComponent(email)}`), 60000, "jd"),
-          withTimeout(fetch(`/api/admin/resumes?email=${encodeURIComponent(email)}`), 60000, "resumes"),
-          withTimeout(fetch(`/api/admin/emails?email=${encodeURIComponent(email)}`), 20000, "emails"),
-          withTimeout(
-            fetch(`/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1&email=${encodeURIComponent(email)}`),
-            60000,
-            "employees"
-          ),
-          withTimeout(fetch("/api/admin/reset_logs"), 15000, "reset_logs"),
-          withTimeout(
-            fetch(
-              `/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`
-            ),
-            15000,
-            "logs"
-          ),
-          withTimeout(fetch("/api/portal_settings").catch(() => null), 10000, "portal_settings"),
-        ]);
 
       const [jdData, resumesData, emailsData, employeesData, resetLogsData, logsData, settingsData] =
         await Promise.all([
-          jdRes ? jdRes.json().catch(() => ({})) : Promise.resolve({}),
-          resumesRes ? resumesRes.json().catch(() => ({})) : Promise.resolve({}),
-          emailsRes ? emailsRes.json().catch(() => ({})) : Promise.resolve({}),
-          employeesRes ? employeesRes.json().catch(() => ({})) : Promise.resolve({}),
-          resetLogsRes ? resetLogsRes.json().catch(() => ({})) : Promise.resolve({}),
-          logsRes ? logsRes.json().catch(() => ({})) : Promise.resolve({}),
-          settingsRes ? settingsRes.json().catch(() => ({})) : Promise.resolve({}),
+          fetchJsonWithRetry(`/api/admin/jd?email=${encodeURIComponent(email)}`, {
+            timeoutMs: 60000,
+            retries: 1,
+            label: "jd",
+          }),
+          fetchJsonWithRetry(`/api/admin/resumes?email=${encodeURIComponent(email)}`, {
+            timeoutMs: 60000,
+            retries: 1,
+            label: "resumes",
+          }),
+          fetchJsonWithRetry(`/api/admin/emails?email=${encodeURIComponent(email)}`, {
+            timeoutMs: 45000,
+            retries: 2,
+            label: "emails",
+          }),
+          fetchJsonWithRetry(
+            `/api/admin/employees?activeJdId=${encodeURIComponent(sendJdId)}&fresh=1&email=${encodeURIComponent(email)}`,
+            { timeoutMs: 60000, retries: 1, label: "employees" }
+          ),
+          fetchJsonWithRetry("/api/admin/reset_logs", {
+            timeoutMs: 30000,
+            retries: 2,
+            label: "reset_logs",
+          }),
+          fetchJsonWithRetry(
+            `/api/admin/logs?module=${logsModuleFilter}&status=${logsStatusFilter}&search=${encodeURIComponent(logsSearch)}`,
+            { timeoutMs: 30000, retries: 2, label: "logs" }
+          ),
+          fetchJsonWithRetry("/api/portal_settings", {
+            timeoutMs: 20000,
+            retries: 2,
+            label: "portal_settings",
+          }),
         ]);
 
-      const fetchedJds = Array.isArray(jdData.jds) ? jdData.jds : null;
+      const fetchedJds = Array.isArray(jdData?.jds) ? jdData.jds : null;
       if (fetchedJds) {
         setJds(fetchedJds);
 
@@ -2152,48 +2179,56 @@ export default function AdminDashboard() {
         await loadJobDescriptions(email);
       }
 
-      if (Array.isArray(resumesData.resumes)) {
+      if (Array.isArray(resumesData?.resumes)) {
         setResumes(resumesData.resumes);
-      } else if (resumesRes) {
-        console.warn("[admin] resumes payload missing resumes[]; keeping prior state");
       } else {
-        console.warn("[admin] resumes timed out; keeping prior state");
+        console.warn("[admin] resumes payload missing/timed out; keeping prior state");
       }
 
-      if (Array.isArray(emailsData.emails)) {
+      if (Array.isArray(emailsData?.emails)) {
         applyEmails(emailsData.emails);
-      } else if (emailsRes) {
-        console.warn("[admin] emails payload missing emails[]; keeping prior state");
       } else {
-        console.warn("[admin] emails timed out; keeping prior state");
+        console.warn("[admin] emails payload missing/timed out; retrying");
+        emailsRetrying = true;
+        void loadEmails(email);
       }
 
-      if (Array.isArray(employeesData.employees)) {
+      if (Array.isArray(employeesData?.employees)) {
         setEmployees(employeesData.employees);
-      } else if (employeesRes) {
-        console.warn("[admin] employees payload missing employees[]; keeping prior state");
       } else {
-        console.warn("[admin] employees timed out; keeping prior state");
+        console.warn("[admin] employees payload missing/timed out; retrying");
+        void loadEmployees({ fresh: true });
       }
 
-      if (Array.isArray(employeesData.allTestResults)) {
+      if (Array.isArray(employeesData?.allTestResults)) {
         setAllTestResults(employeesData.allTestResults);
       }
-      if (Array.isArray(employeesData.resourcePortalEmployees)) {
+      if (Array.isArray(employeesData?.resourcePortalEmployees)) {
         setResourcePortalEmployees(employeesData.resourcePortalEmployees);
       }
 
-      if (Array.isArray(resetLogsData.logs)) {
+      if (Array.isArray(resetLogsData?.logs)) {
         setResetLogs(resetLogsData.logs);
+      } else {
+        console.warn("[admin] reset_logs payload missing/timed out; retrying");
+        resetLogsRetrying = true;
+        void loadResetLogs();
       }
-      if (Array.isArray(logsData.logs)) {
+      if (Array.isArray(logsData?.logs)) {
         setSystemLogs(logsData.logs);
+      } else {
+        console.warn("[admin] logs payload missing/timed out; retrying");
+        logsRetrying = true;
+        void loadLogs();
       }
 
-      if (settingsData && typeof settingsData === "object") {
+      if (isPortalSettingsPayload(settingsData)) {
         setPortalSettings({
           showSystemLogsViewer: settingsData.showSystemLogsViewer !== false,
         });
+      } else {
+        console.warn("[admin] portal_settings payload missing/timed out; retrying");
+        void loadPortalSettings();
       }
     } catch (err) {
       console.error("Failed to load initial data", err);
@@ -2202,10 +2237,10 @@ export default function AdminDashboard() {
       setDashboardReady(true);
       setLoading(false);
       setIsJdLoading(false);
-      setIsEmailsLoading(false);
+      if (!emailsRetrying) setIsEmailsLoading(false);
       setIsEmployeesLoading(false);
-      setIsLogsLoading(false);
-      setIsSystemLogsLoading(false);
+      if (!resetLogsRetrying) setIsLogsLoading(false);
+      if (!logsRetrying) setIsSystemLogsLoading(false);
     }
   };
 
@@ -2315,6 +2350,8 @@ export default function AdminDashboard() {
     }
     if (selected === "br") return "br";
     if (selected === "jd") return "jd";
+    if (isPortalMappingFileName(file.name)) return "portal-mapping";
+    if (selected === "portal-mapping") return "portal-mapping";
     if (isCorpPoolRosterFileName(file.name)) return "employee";
     if (name.endsWith(".csv")) return "employee";
     return selected;
@@ -2324,6 +2361,9 @@ export default function AdminDashboard() {
     const category = inferUnifiedCategory(file, uploadCategory);
     if (category === "employee" && uploadCategory !== "employee") {
       setUploadCategory("employee");
+    }
+    if (category === "portal-mapping" && uploadCategory !== "portal-mapping") {
+      setUploadCategory("portal-mapping");
     }
 
     setPipelineStatus(`Ingestion: Uploading ${file.name}...`);
@@ -2353,7 +2393,7 @@ export default function AdminDashboard() {
           await loadResumes();
         } else if (usedCategory === "jd" || usedCategory === "br") {
           await loadJobDescriptions();
-        } else if (usedCategory === "employee") {
+        } else if (usedCategory === "employee" || usedCategory === "portal-mapping") {
           await loadEmployees({ fresh: true });
         }
         await loadLogs();
@@ -2364,6 +2404,8 @@ export default function AdminDashboard() {
         setActionSuccess(
           usedCategory === "employee" && Number.isFinite(loaded)
             ? `Corp Pool now has ${loaded} people.`
+            : usedCategory === "portal-mapping"
+              ? `Stored ${file.name} in shared Portal Mapping. Live questions still use the current snapshot.`
             : usedCategory === "jd" && Number.isFinite(convertedJDs) && convertedJDs > 0
               ? `Added ${convertedJDs} requirement${convertedJDs === 1 ? "" : "s"} from ${file.name}.`
               : usedCategory === "br" && Number.isFinite(incomingBrRows) && incomingBrRows > 0
@@ -2540,6 +2582,16 @@ export default function AdminDashboard() {
   };
 
   const handleDispatchEmployeeMails = async () => {
+    const selectedShortlistedIds = selectedEmployeeIds.filter((id) =>
+      employees.some((emp) => emp.employee_id === id && emp.shortlisted)
+    );
+    const mailAllShortlisted = selectedEmployeeIds.length === 0;
+    if (!mailAllShortlisted && !selectedShortlistedIds.length) {
+      setActionError("Only shortlisted people can be sent mail. Shortlist them first.");
+      setTimeout(() => setActionError(null), 4000);
+      return;
+    }
+
     const token = typeof window !== "undefined" ? window.sessionStorage.getItem("admin_token") || "" : "";
     setIsDispatchingMails(true);
     setActionError(null);
@@ -2550,13 +2602,23 @@ export default function AdminDashboard() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ token, adminEmail }),
+        body: JSON.stringify(
+          mailAllShortlisted
+            ? { token, adminEmail }
+            : { token, adminEmail, employeeIds: selectedShortlistedIds }
+        ),
       });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Failed to dispatch email invitations.");
       }
-      setActionSuccess(`Successfully dispatched assessment invitation to ${data.count} shortlisted employee(s).`);
+      const skipped = mailAllShortlisted ? 0 : selectedEmployeeIds.length - selectedShortlistedIds.length;
+      setActionSuccess(
+        skipped > 0
+          ? `Sent mail to ${data.count} shortlisted ${data.count === 1 ? "person" : "people"}. ${skipped} not shortlisted ${skipped === 1 ? "was" : "were"} skipped.`
+          : `Successfully dispatched assessment invitation to ${data.count} shortlisted ${data.count === 1 ? "person" : "people"}.`
+      );
+      if (!mailAllShortlisted) setSelectedEmployeeIds([]);
       await loadEmails();
     } catch (err: any) {
       console.error(err);
@@ -5132,6 +5194,11 @@ export default function AdminDashboard() {
                               onClick={handleDispatchEmployeeMails}
                               disabled={isDispatchingMails}
                               className="flex-1 sm:flex-none rounded-xl bg-violet-600 hover:bg-violet-700 text-white gap-1.5 font-bold text-xs"
+                              title={
+                                selectedEmployeeIds.length > 0
+                                  ? "Mail is sent only to shortlisted people in this selection"
+                                  : "Mail is sent to all shortlisted people"
+                              }
                             >
                               {isDispatchingMails ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -5159,53 +5226,24 @@ export default function AdminDashboard() {
                             <Download className="w-3.5 h-3.5" />
                             Export Interviews
                           </Button>
-                        </div>
-                      </div>
-
-                      {/* Bulk action banner */}
-                      {selectedEmployeeIds.length > 0 && (
-                        <div className="flex items-center justify-between p-3.5 bg-indigo-50/50 dark:bg-slate-900/40 border border-border/80 rounded-2xl shadow-sm animate-fade-in shrink-0">
-                          <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
-                            {selectedEmployeeIds.length} employee{selectedEmployeeIds.length > 1 ? "s" : ""} selected for bulk actions
-                          </span>
-                          <div className="flex items-center gap-2 flex-wrap justify-end">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={isBulkDispatchingMails}
-                              onClick={handleBulkDispatchEmployees}
-                              className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 border border-indigo-200 dark:border-slate-700 text-primary hover:bg-secondary shadow-sm"
-                            >
-                              {isBulkDispatchingMails ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Dispatching...
-                                </>
-                              ) : (
-                                <>
-                                  <Mail className="w-3.5 h-3.5" /> Bulk Dispatch
-                                </>
-                              )}
-                            </Button>
+                          {selectedEmployeeIds.length > 0 && (
                             <Button
                               variant="destructive"
                               size="sm"
                               disabled={actionLoading === "bulk-employees-pool"}
                               onClick={handleBulkDeleteEmployees}
-                              className="h-8 text-xs font-bold rounded-xl flex items-center gap-1.5 px-3 bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-500/25"
+                              className="flex-1 sm:flex-none rounded-xl bg-red-600 hover:bg-red-700 text-white gap-1.5 font-bold text-xs shadow-sm shadow-red-500/25"
                             >
                               {actionLoading === "bulk-employees-pool" ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
-                                </>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                               ) : (
-                                <>
-                                  <Trash2 className="w-3.5 h-3.5" /> Delete Selected
-                                </>
+                                <Trash2 className="w-3.5 h-3.5" />
                               )}
+                              Delete Selected
                             </Button>
-                          </div>
+                          )}
                         </div>
-                      )}
+                      </div>
 
                       {/* Employee Table */}
                       <div className="border border-border rounded-2xl overflow-hidden">
@@ -5481,7 +5519,7 @@ export default function AdminDashboard() {
                 ) : activeTab === "employee-portal" && canViewEmployeePortal ? (
                   <div className="space-y-4">
                     <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/60 dark:bg-indigo-950/20 px-4 py-3 text-xs text-indigo-800 dark:text-indigo-200">
-                      Showing employee data from <span className="font-bold">Resource_Question_Mapping.xlsx</span> merged with live portal test results.
+                      Showing employee data from the portal mapping snapshot, merged with live portal test results.
                     </div>
 
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4 shrink-0">
@@ -6267,7 +6305,7 @@ export default function AdminDashboard() {
 
                                                 return (
                                                   <p className="text-[11px] text-slate-400 font-medium italic">
-                                                    No assigned question text found in Resource_Question_Mapping.xlsx for this employee.
+                                                    No assigned question text found in the portal mapping snapshot for this employee.
                                                   </p>
                                                 );
                                               })()}
@@ -6432,7 +6470,7 @@ export default function AdminDashboard() {
                                 <td colSpan={15} className="text-center py-12 text-slate-400">
                                   {resourcePortalEmployees.length === 0 ? (
                                     <span className="italic">
-                                      No employee mapping data found. Ensure Resource_Question_Mapping.xlsx exists in the excel folder.
+                                      No employee mapping data found. Upload Resource_Question_Mapping.xlsx as Portal Mapping, or keep the current snapshot in place.
                                     </span>
                                   ) : (
                                     <div className="flex flex-col items-center gap-2 px-6">
@@ -7215,6 +7253,7 @@ export default function AdminDashboard() {
                   <option value="jd">💼 Job Description (JD)</option>
                   <option value="br">📊 Business Requirement (BR)</option>
                   <option value="employee">👥 Corp Pool</option>
+                  <option value="portal-mapping">🗂️ Portal Mapping</option>
                 </select>
 
                 <div
@@ -7238,6 +7277,7 @@ export default function AdminDashboard() {
                     {uploadCategory === 'jd' && "Accepts Word, PDF, TXT, or HTML. Converts JD → BR row in BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'br' && "Appends BR rows into BR_RawData 3.xlsx & saves to backend"}
                     {uploadCategory === 'employee' && "Excel/CSV lists and resumes are added to Corp Pool. Deleted employees never come back."}
+                    {uploadCategory === 'portal-mapping' && "Stores Resource_Question_Mapping.xlsx in shared docs. Does not upload credential workbooks."}
                   </span>
                   <input
                     type="file"
@@ -7248,6 +7288,7 @@ export default function AdminDashboard() {
                       uploadCategory === 'resume' ? '.pdf,.doc,.docx,.zip,.csv,.xlsx,.xls' :
                       uploadCategory === 'jd' ? '.pdf,.doc,.docx,.txt,.html,.htm' :
                       uploadCategory === 'br' ? '.xlsx,.csv' :
+                      uploadCategory === 'portal-mapping' ? '.xlsx,.xls' :
                       '.csv,.xlsx,.xls,.pdf,.doc,.docx,.zip'
                     }
                   />
