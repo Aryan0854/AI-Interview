@@ -27,6 +27,8 @@ PRODUCT_KEY_ALIASES: dict[str, str] = {
     "AUSF/UDM": "UDM",
     "UDM": "UDM",
     "SDL DEPLOYMENT AND UPGRADE": "SDL",
+    "SDL VNF": "SDL",
+    "SDL-VNF": "SDL",
     "SDL": "SDL",
     "CMG": "CMG",
     "CMM": "CMM",
