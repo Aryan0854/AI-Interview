@@ -2406,14 +2406,11 @@ export default function AdminDashboard() {
 
         const loaded = Number(result.refreshResult?.loaded);
         const added = Number(result.refreshResult?.added);
-        const skippedDeleted = Number(result.refreshResult?.skippedDeleted);
         const convertedJDs = Number(result.refreshResult?.convertedJDs);
         const incomingBrRows = Number(result.refreshResult?.incomingBrRows);
         setActionSuccess(
-          usedCategory === "employee" && skippedDeleted > 0 && !(added > 0)
-            ? `Those people were deleted before and were not restored. Corp Pool still has ${loaded} ${loaded === 1 ? "person" : "people"}.`
-            : usedCategory === "employee" && Number.isFinite(added) && added > 0
-              ? `Added ${added} ${added === 1 ? "person" : "people"} to Corp Pool (${loaded} total).`
+          usedCategory === "employee" && Number.isFinite(added) && added > 0
+            ? `Added ${added} ${added === 1 ? "person" : "people"} to Corp Pool (${loaded} total).`
             : usedCategory === "employee" && Number.isFinite(loaded)
               ? `Corp Pool now has ${loaded} people.`
             : usedCategory === "portal-mapping"

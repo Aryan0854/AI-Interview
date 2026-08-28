@@ -1981,16 +1981,23 @@ export async function refreshEmployees(
   
   loaded = uniqueParsedEmployees.length;
   const incomingUpload = incomingSet.size > 0;
+  // A new Excel/CSV/resume upload restores only the people in THAT file.
+  // Other previously deleted Emp IDs stay out, so leftover Corp Pool files
+  // cannot bring old deleted rows back on a full scan.
   if (incomingUpload) {
-    await unmarkCorpPoolDeleted([], [...incomingSet, ...files]);
+    await unmarkCorpPoolDeleted(
+      uniqueParsedEmployees.map((emp) => emp.employee_id),
+      [...incomingSet, ...files]
+    );
   }
   const deletedPool = await loadDeletedCorpPool();
-  const parsedBeforeTombstone = uniqueParsedEmployees.length;
-  const liveParsed = uniqueParsedEmployees.filter(
-    (emp) => !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
-  );
-  uniqueParsedEmployees.length = 0;
-  uniqueParsedEmployees.push(...liveParsed);
+  if (!incomingUpload) {
+    const liveParsed = uniqueParsedEmployees.filter(
+      (emp) => !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
+    );
+    uniqueParsedEmployees.length = 0;
+    uniqueParsedEmployees.push(...liveParsed);
+  }
   loaded = uniqueParsedEmployees.length;
 
   const jsonPath = join(getUploadsRoot(), "employees.json");
@@ -2015,10 +2022,8 @@ export async function refreshEmployees(
     (emp) => emp?.employee_id && !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
   );
 
-  const skippedDeleted = Math.max(0, parsedBeforeTombstone - uniqueParsedEmployees.length);
-
   if (uniqueParsedEmployees.length === 0) {
-    if (incomingUpload && parsedBeforeTombstone === 0) {
+    if (incomingUpload) {
       await writeLog(
         "employee",
         "INCOMING_CORP_POOL_EMPTY",
@@ -2031,18 +2036,16 @@ export async function refreshEmployees(
     }
     await writeLog(
       "employee",
-      incomingUpload ? "INCOMING_CORP_POOL_ALL_DELETED" : "SKIP_EMPTY_CORP_POOL",
+      "SKIP_EMPTY_CORP_POOL",
       "success",
-      incomingUpload
-        ? `Uploaded people were previously deleted and were not restored; Corp Pool still has ${existingList.length}`
-        : "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
+      "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
     );
     return {
       success: true,
       loaded: existingList.length,
       added: 0,
       updated: 0,
-      skippedDeleted,
+      skippedDeleted: 0,
       employees: existingList,
     };
   }
@@ -2118,11 +2121,11 @@ export async function refreshEmployees(
     "SYNC_EMPLOYEE_POOL",
     "success",
     incomingUpload
-      ? `Corp Pool now has ${loaded} people (added ${added}, updated ${updated}${skippedDeleted ? `, skipped ${skippedDeleted} previously deleted` : ""})`
+      ? `Corp Pool now has ${loaded} people (added ${added}, updated ${updated})`
       : `Successfully loaded ${loaded} employees from /docs/Corp Pool`
   );
 
-  return { success: true, loaded, added, updated, skippedDeleted, employees: finalEmployees };
+  return { success: true, loaded, added, updated, skippedDeleted: 0, employees: finalEmployees };
 }
 
 /**
