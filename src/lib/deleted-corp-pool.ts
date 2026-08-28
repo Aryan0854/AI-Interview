@@ -31,9 +31,14 @@ export async function loadDeletedCorpPool(): Promise<DeletedCorpPool> {
       .select("value")
       .eq("key", SETTINGS_KEY)
       .maybeSingle();
-    if (error || !data?.value || typeof data.value !== "object") {
-      cache = { at: Date.now(), value: emptyDeleted() };
-      return cache.value;
+    if (error) {
+      console.warn("Failed to load deleted Corp Pool list:", error.message);
+      return cache?.value ?? emptyDeleted();
+    }
+    if (!data?.value || typeof data.value !== "object") {
+      const value = emptyDeleted();
+      cache = { at: Date.now(), value };
+      return value;
     }
     const raw = data.value as Record<string, unknown>;
     const value = { ids: cleanList(raw.ids), files: cleanList(raw.files) };
@@ -41,7 +46,7 @@ export async function loadDeletedCorpPool(): Promise<DeletedCorpPool> {
     return value;
   } catch (err) {
     console.warn("Failed to load deleted Corp Pool list:", err);
-    return emptyDeleted();
+    return cache?.value ?? emptyDeleted();
   }
 }
 
@@ -55,7 +60,7 @@ async function saveDeletedCorpPool(value: DeletedCorpPool): Promise<void> {
     { onConflict: "key" }
   );
   if (error) {
-    console.warn("Failed to save deleted Corp Pool list:", error.message);
+    throw new Error(`Failed to save deleted Corp Pool list: ${error.message}`);
   }
 }
 

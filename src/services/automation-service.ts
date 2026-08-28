@@ -16,6 +16,7 @@ import {
   deleteDocFile,
 } from '@/lib/docs-storage';
 import { writePersistedJson, readPersistedJson, getRuntimeUploadsRoot } from '@/lib/runtime-data';
+import { loadCorpPoolRoster, saveCorpPoolRoster } from '@/lib/corp-pool-store';
 import { cacheStore } from '@/lib/cache-store';
 import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
 import {
@@ -1531,7 +1532,14 @@ export async function refreshEmployees(
     incomingCorpPoolFiles?: string[];
     incomingFileBuffers?: Array<{ filename: string; buffer: Buffer }>;
   }
-): Promise<{ success: boolean; loaded: number }> {
+): Promise<{
+  success: boolean;
+  loaded: number;
+  added?: number;
+  updated?: number;
+  skippedDeleted?: number;
+  employees?: EmployeeRecord[];
+}> {
   await ensureDocsStorage();
   const reclaimed = await reclaimMisfiledCorpPoolRosters();
   const incomingSet = new Set(
@@ -1988,9 +1996,14 @@ export async function refreshEmployees(
   const jsonPath = join(getUploadsRoot(), "employees.json");
   let existingList: EmployeeRecord[] = [];
   try {
-    const persisted = await readPersistedJson("employees.json");
-    if (persisted) existingList = JSON.parse(persisted) as EmployeeRecord[];
+    existingList = await loadCorpPoolRoster<EmployeeRecord>();
   } catch {}
+  if (existingList.length === 0) {
+    try {
+      const persisted = await readPersistedJson("employees.json");
+      if (persisted) existingList = JSON.parse(persisted) as EmployeeRecord[];
+    } catch {}
+  }
   if (existingList.length === 0) {
     try {
       const raw = await readFile(jsonPath, "utf8");
@@ -2001,6 +2014,8 @@ export async function refreshEmployees(
   existingList = existingList.filter(
     (emp) => emp?.employee_id && !isCorpPoolDeleted(deletedPool, { id: emp.employee_id })
   );
+
+  const skippedDeleted = Math.max(0, parsedBeforeTombstone - uniqueParsedEmployees.length);
 
   if (uniqueParsedEmployees.length === 0) {
     if (incomingUpload && parsedBeforeTombstone === 0) {
@@ -2022,7 +2037,14 @@ export async function refreshEmployees(
         ? `Uploaded people were previously deleted and were not restored; Corp Pool still has ${existingList.length}`
         : "Skipped empty Corp Pool refresh to preserve Employee Portal roster and tests"
     );
-    return { success: true, loaded: existingList.length };
+    return {
+      success: true,
+      loaded: existingList.length,
+      added: 0,
+      updated: 0,
+      skippedDeleted,
+      employees: existingList,
+    };
   }
 
   const byId = new Map<string, EmployeeRecord>();
@@ -2089,17 +2111,18 @@ export async function refreshEmployees(
   const serialized = JSON.stringify(finalEmployees, null, 2);
   await writeFile(jsonPath, serialized, "utf8");
   await writePersistedJson("employees.json", serialized);
+  await saveCorpPoolRoster(finalEmployees);
   cacheStore.invalidate("employees");
   await writeLog(
     "employee",
     "SYNC_EMPLOYEE_POOL",
     "success",
     incomingUpload
-      ? `Corp Pool now has ${loaded} people (added ${added}, updated ${updated})`
+      ? `Corp Pool now has ${loaded} people (added ${added}, updated ${updated}${skippedDeleted ? `, skipped ${skippedDeleted} previously deleted` : ""})`
       : `Successfully loaded ${loaded} employees from /docs/Corp Pool`
   );
 
-  return { success: true, loaded };
+  return { success: true, loaded, added, updated, skippedDeleted, employees: finalEmployees };
 }
 
 /**

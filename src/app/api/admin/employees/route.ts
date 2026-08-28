@@ -13,6 +13,7 @@ import { calculateSkillMatch, employeeMatchText } from '@/lib/skill-match';
 import { cacheStore } from '@/lib/cache-store';
 import { deleteDocFile, listDocFiles } from '@/lib/docs-storage';
 import { isCorpPoolDeleted, loadDeletedCorpPool, markCorpPoolDeleted } from '@/lib/deleted-corp-pool';
+import { loadCorpPoolRoster, saveCorpPoolRoster } from '@/lib/corp-pool-store';
 import { getAdminAccess } from '@/lib/admin-accounts-server';
 import {
   buildResourcePortalEmployees,
@@ -87,8 +88,25 @@ export async function GET(request: NextRequest) {
     };
 
     try {
+      const fromDb = await loadCorpPoolRoster<EmployeeRecord>();
+      if (fromDb.length > 0) return fromDb;
+    } catch (err) {
+      console.warn("[employees] Corp Pool DB roster read failed:", err);
+    }
+
+    try {
       const persisted = await readPersistedJson("employees.json");
-      if (persisted) return parseList(persisted);
+      if (persisted) {
+        const list = parseList(persisted);
+        if (list.length > 0) {
+          try {
+            await saveCorpPoolRoster(list);
+          } catch (saveErr) {
+            console.warn("[employees] Failed to migrate Corp Pool JSON into DB:", saveErr);
+          }
+        }
+        return list;
+      }
     } catch (err) {
       console.warn("[employees] persisted employees.json read failed:", err);
     }
@@ -653,16 +671,19 @@ export async function POST(request: NextRequest) {
       const jsonPath = getEmployeesJsonPath();
       let employees: EmployeeRecord[] = [];
       try {
-        const persisted = await readPersistedJson("employees.json");
-        const raw = persisted || (await readFile(jsonPath, "utf8"));
-        const parsed = JSON.parse(raw) as EmployeeRecord[];
-        const seen = new Set<string>();
-        employees = parsed.filter(emp => {
-          if (!emp.employee_id) return true;
-          if (seen.has(emp.employee_id)) return false;
-          seen.add(emp.employee_id);
-          return true;
-        });
+        employees = await loadCorpPoolRoster<EmployeeRecord>();
+        if (employees.length === 0) {
+          const persisted = await readPersistedJson("employees.json");
+          const raw = persisted || (await readFile(jsonPath, "utf8"));
+          const parsed = JSON.parse(raw) as EmployeeRecord[];
+          const seen = new Set<string>();
+          employees = parsed.filter(emp => {
+            if (!emp.employee_id) return true;
+            if (seen.has(emp.employee_id)) return false;
+            seen.add(emp.employee_id);
+            return true;
+          });
+        }
       } catch (e) {
         return NextResponse.json({ error: "Employees not loaded" }, { status: 404 });
       }
@@ -687,6 +708,7 @@ export async function POST(request: NextRequest) {
       const serialized = JSON.stringify(employees, null, 2);
       await writeFile(jsonPath, serialized, "utf8");
       await writePersistedJson("employees.json", serialized);
+      await saveCorpPoolRoster(employees);
       cacheStore.invalidate("employees");
 
       await writeLog(
@@ -727,9 +749,12 @@ export async function PATCH(request: NextRequest) {
     const jsonPath = getEmployeesJsonPath();
     let employees: EmployeeRecord[] = [];
     try {
-      const persisted = await readPersistedJson("employees.json");
-      const raw = persisted || (await readFile(jsonPath, "utf8"));
-      employees = JSON.parse(raw) as EmployeeRecord[];
+      employees = await loadCorpPoolRoster<EmployeeRecord>();
+      if (employees.length === 0) {
+        const persisted = await readPersistedJson("employees.json");
+        const raw = persisted || (await readFile(jsonPath, "utf8"));
+        employees = JSON.parse(raw) as EmployeeRecord[];
+      }
     } catch {
       return NextResponse.json({ error: "Employees not loaded" }, { status: 404 });
     }
@@ -783,6 +808,7 @@ export async function PATCH(request: NextRequest) {
     const serialized = JSON.stringify(employees, null, 2);
     await writeFile(jsonPath, serialized, "utf8");
     await writePersistedJson("employees.json", serialized);
+    await saveCorpPoolRoster(employees);
     cacheStore.invalidate("employees");
 
     await writeLog(
@@ -824,6 +850,10 @@ export async function DELETE(request: NextRequest) {
     const jsonPath = getEmployeesJsonPath();
     const loadEmployees = async (): Promise<EmployeeRecord[]> => {
       try {
+        const fromDb = await loadCorpPoolRoster<EmployeeRecord>();
+        if (fromDb.length > 0) return fromDb;
+      } catch {}
+      try {
         const persisted = await readPersistedJson("employees.json");
         if (persisted) return JSON.parse(persisted) as EmployeeRecord[];
       } catch {}
@@ -850,6 +880,7 @@ export async function DELETE(request: NextRequest) {
     const serialized = JSON.stringify(remaining, null, 2);
     await writeFile(jsonPath, serialized, "utf8");
     await writePersistedJson("employees.json", serialized);
+    await saveCorpPoolRoster(remaining);
     cacheStore.invalidate("employees");
 
     const personalResume = (file: string) => /\.(pdf|docx|doc|txt)$/i.test(file);
@@ -890,7 +921,7 @@ export async function DELETE(request: NextRequest) {
       `Deleted employee IDs: ${targetIds.join(", ")}${filesToDelete.size ? `; removed files: ${Array.from(filesToDelete).join(", ")}` : ""}`
     );
 
-    return NextResponse.json({ success: true, deleted: removed.length });
+    return NextResponse.json({ success: true, deleted: removed.length, employees: remaining });
   } catch (error: any) {
     await writeLog('employee', 'DELETE_EMPLOYEE_FAILED', 'failed', `Failed to delete employees: ${error.message}`);
     return NextResponse.json({ error: error.message }, { status: 500 });

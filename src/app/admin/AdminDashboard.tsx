@@ -2393,17 +2393,29 @@ export default function AdminDashboard() {
           await loadResumes();
         } else if (usedCategory === "jd" || usedCategory === "br") {
           await loadJobDescriptions();
-        } else if (usedCategory === "employee" || usedCategory === "portal-mapping") {
+        } else if (usedCategory === "employee") {
+          if (Array.isArray(result.refreshResult?.employees)) {
+            setEmployees(result.refreshResult.employees);
+          } else {
+            await loadEmployees({ fresh: true });
+          }
+        } else if (usedCategory === "portal-mapping") {
           await loadEmployees({ fresh: true });
         }
         await loadLogs();
 
         const loaded = Number(result.refreshResult?.loaded);
+        const added = Number(result.refreshResult?.added);
+        const skippedDeleted = Number(result.refreshResult?.skippedDeleted);
         const convertedJDs = Number(result.refreshResult?.convertedJDs);
         const incomingBrRows = Number(result.refreshResult?.incomingBrRows);
         setActionSuccess(
-          usedCategory === "employee" && Number.isFinite(loaded)
-            ? `Corp Pool now has ${loaded} people.`
+          usedCategory === "employee" && skippedDeleted > 0 && !(added > 0)
+            ? `Those people were deleted before and were not restored. Corp Pool still has ${loaded} ${loaded === 1 ? "person" : "people"}.`
+            : usedCategory === "employee" && Number.isFinite(added) && added > 0
+              ? `Added ${added} ${added === 1 ? "person" : "people"} to Corp Pool (${loaded} total).`
+            : usedCategory === "employee" && Number.isFinite(loaded)
+              ? `Corp Pool now has ${loaded} people.`
             : usedCategory === "portal-mapping"
               ? `Stored ${file.name} in shared Portal Mapping. Live questions still use the current snapshot.`
             : usedCategory === "jd" && Number.isFinite(convertedJDs) && convertedJDs > 0
@@ -3617,10 +3629,11 @@ export default function AdminDashboard() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to delete records");
 
+        const removedIds = new Set(selectedResumeIds.map(String));
+        setResumes((prev) => prev.filter((resume) => !removedIds.has(String(resume.id))));
         setActionSuccess(`${selectedResumeIds.length} candidate record(s) deleted successfully.`);
         setSelectedResumeIds([]);
         setTimeout(() => setActionSuccess(null), 3000);
-        await loadResumes(adminEmail);
       } catch (error: any) {
         setActionError(error.message || "Failed to delete records.");
       } finally {
@@ -3641,10 +3654,15 @@ export default function AdminDashboard() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to delete selected employees");
 
+        const removedIds = new Set(selectedEmployeeIds.map(String));
+        if (Array.isArray(data.employees)) {
+          setEmployees(data.employees);
+        } else {
+          setEmployees((prev) => prev.filter((emp) => !removedIds.has(String(emp.employee_id))));
+        }
         setActionSuccess(`${selectedEmployeeIds.length} employee record(s) deleted successfully.`);
         setSelectedEmployeeIds([]);
         setTimeout(() => setActionSuccess(null), 3000);
-        await loadEmployees({ fresh: true });
       } catch (error: any) {
         setActionError(error.message || "Failed to delete employee records.");
       } finally {
@@ -3683,8 +3701,8 @@ export default function AdminDashboard() {
 
         setActionSuccess(`${idsToDelete.length} requirement(s) deleted successfully.`);
         setSelectedJdIds([]);
+        setJds((prev) => prev.filter((jd) => !idsToDelete.includes(jd.id)));
         setTimeout(() => setActionSuccess(null), 3000);
-        await loadJobDescriptions(adminEmail);
       } catch (error: any) {
         setActionError(error.message || "Failed to delete requirements.");
       } finally {
