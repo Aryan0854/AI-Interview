@@ -32,37 +32,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
            })();
          `}
        </Script>
-       <Script id="security-script" strategy="afterInteractive">
-         {`
-           (function() {
-             if (typeof window === 'undefined') return;
-
-             // Disable right-click context menu site-wide
-             document.addEventListener('contextmenu', function(e) {
-               e.preventDefault();
-             });
-
-             // Disable developer tools and view-source shortcuts site-wide
-             window.addEventListener('keydown', function(e) {
-               var isCmdOrCtrl = e.ctrlKey || e.metaKey;
-               var isShift = e.shiftKey;
-               var isAlt = e.altKey;
-
-               var isF12 = e.key === 'F12' || e.keyCode === 123;
-               var isDevToolsShortcut = 
-                 (isCmdOrCtrl && isShift && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j' || e.key === 'C' || e.key === 'c' || e.key === 'K' || e.key === 'k' || e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67 || e.keyCode === 75)) ||
-                 (isCmdOrCtrl && isAlt && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j' || e.key === 'C' || e.key === 'c' || e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) ||
-                 (isCmdOrCtrl && (e.key === 'U' || e.key === 'u' || e.keyCode === 85)) ||
-                 (isCmdOrCtrl && (e.key === 'S' || e.key === 's' || e.keyCode === 83));
-
-               if (isF12 || isDevToolsShortcut) {
-                 e.preventDefault();
-                 e.stopPropagation();
-               }
-             }, true);
-           })();
-         `}
-       </Script>
        <ThemeProvider>
          {children}
        </ThemeProvider>
