@@ -1,0 +1,43 @@
+name: Deploy develop to Azure VM
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: azure-vm-develop
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Rebuild on ICSBETINTAPP01
+    runs-on: [self-hosted, linux, icsbetintapp01]
+    timeout-minutes: 40
+    steps:
+      - name: Pull develop and rebuild container
+        run: |
+          set -euo pipefail
+          cd /opt/ai-interview
+          if [[ ! -f .env.azure ]]; then
+            echo "Missing /opt/ai-interview/.env.azure"
+            exit 1
+          fi
+          git fetch origin develop
+          git checkout develop
+          git reset --hard origin/develop
+          docker compose --env-file .env.azure -f docker-compose.azure.yml up --build -d
+          echo "Waiting for health check..."
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3000/api/health | grep -q '"status":"healthy"'; then
+              curl -fsS http://127.0.0.1:3000/api/health
+              echo
+              docker image prune -f >/dev/null
+              echo "Deploy OK."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container did not become healthy in time."
+          docker compose -f docker-compose.azure.yml logs --tail=80
+          exit 1

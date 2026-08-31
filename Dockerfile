@@ -33,7 +33,7 @@ WORKDIR /app
 
 # --- Install all dependencies (devDeps required for `next build`) ---
 FROM base AS deps
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .npmrc ./
 RUN npm ci
 
 # --- Build Next.js standalone output ---
