@@ -99,6 +99,48 @@ function clean(value: ExcelJS.CellValue): string {
   return String(value).trim();
 }
 
+/** Live Employee Portal roster from Supabase (product_qb_eligible). */
+async function loadPortalEligibleFromSupabase(): Promise<PortalProfileRow[]> {
+  try {
+    const { supabase } = await import("@/lib/db");
+    const pageSize = 1000;
+    let from = 0;
+    const rows: PortalProfileRow[] = [];
+    while (true) {
+      const { data, error } = await supabase
+        .from("employees")
+        .select("employee_id, email, full_name, department, role, product, product_qb_eligible")
+        .eq("product_qb_eligible", true)
+        .order("employee_id", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      if (!data?.length) break;
+      for (const row of data) {
+        if (!row.employee_id) continue;
+        rows.push({
+          employee_id: String(row.employee_id),
+          full_name: row.full_name || String(row.employee_id),
+          role: row.role || "employee",
+          domain: row.department || "",
+          product: row.product || "",
+          email: row.email || "",
+          ddh: "",
+          emp_status: "Confirmed",
+          remarks: "",
+          assigned_questions: [],
+          assigned_question_count: 0,
+        });
+      }
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    return rows;
+  } catch (err) {
+    console.warn("Failed to load portal-eligible employees from Supabase:", err);
+    return [];
+  }
+}
+
 /** Fast roster from employee-accounts.json (preferred over Excel for admin load). */
 export async function loadPortalRosterFromAccounts(): Promise<PortalProfileRow[]> {
   try {
@@ -605,7 +647,16 @@ export async function buildResourcePortalEmployees(
   for (const row of mappingRows) {
     if (!existingIds.has(normalizeEmployeeId(row.employee_id))) {
       profileRows.push(row);
+      existingIds.add(normalizeEmployeeId(row.employee_id));
     }
+  }
+
+  // Live DB eligible accounts (so newly added portal users show before a JSON deploy).
+  for (const row of await loadPortalEligibleFromSupabase()) {
+    const key = normalizeEmployeeId(row.employee_id);
+    if (!key || existingIds.has(key)) continue;
+    profileRows.push(row);
+    existingIds.add(key);
   }
 
   return mergeResourcePortalData(profileRows, allTestResults, manifest).sort((a, b) => {
